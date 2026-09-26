@@ -31,43 +31,46 @@ database were not exported. Demo data is available in `services/seed.jac`.
 
 1. Clone `https://github.com/CosmonautJones/m-local.git`.
 2. Read `README.md` for setup, the demo walkthrough and architecture.
-3. Agree on a shared Jac runtime before upgrading or editing generated code.
+3. Use the shared **Jac 0.37.23** pin and [runtime instructions](docs/RUNTIME.md).
+4. Follow [phone and teammate testing](docs/PHONE-TESTING.md) on Windows/WSL or Mac.
 
-The generated README reports Jac **0.34.20**, Python **3.12.14**, Node **22.23.3**
-and npm **10.9.9**. JacHammer's Settings page showed **Default**, not an explicit
-version pin. Travis's separate WSL lab currently has Jac **0.37.21**. Compatibility
-between those versions has not been established by this export.
-
-With the agreed runtime and dependencies available, the generated setup commands
-are below. Run them from the cloned project directory in **WSL Bash**:
+The export originally reported Jac 0.34.20. Travis subsequently authorized the
+latest-version migration. Both his local CLI and the project target now use
+0.37.23; the separate learning lab remains untouched. JacHammer's hosted version
+is controlled by JacHammer. From this checkout in **WSL Bash or Mac Terminal**:
 
 ```bash
-jac install
-jac start --dev main.jac
+bash scripts/setup.sh  # first machine setup; see platform prerequisites
+bash scripts/dev.sh
 ```
 
-Open the address printed by the server. These are the source README's instructions;
-they were not executed as part of this extraction. No hosted-model credential was
-exported. Matching is implemented with ordinary rules, without a model call.
+Open http://localhost:8000/. On the prepared Windows machine, PowerShell can run
+`.\scripts\dev.ps1`. No hosted-model credential is needed. Matching uses Jac rules.
 
-## Verification status
+## Original extraction verification
 
 - PASS: 11 source files copied twice and matched against local contents (83,434 bytes).
 - PASS: referenced local Jac modules are present.
 - PASS: bounded credential-pattern scan found no keys. Demo merchant keys are intentional.
-- NOT RUN: local installation, compilation, browser flows or runtime test suite.
-- Seven test cases are present in `services/promo.test.jac`. Their presence is not a pass result.
+- Local execution was outside the extraction step; see the subsequent runtime checkpoint below.
 
-`EXPORT-VERIFICATION.json` records the checks actually run. The source README's
-runtime and coverage claims came from the generator and still need team verification.
+`EXPORT-VERIFICATION.json` remains the historical extraction evidence.
+
+## Subsequent runtime checkpoint (September 26)
+
+The [current verification record](docs/status/engineer-1.md) documents Jac checking,
+seven passing core tests in separate stores, a built `.jab`, and local browser
+discovery/claim/redemption. It also records the Windows dependency/watch fixes,
+MCP guide calls, and limits. Mac and physical-phone checks are still pending.
+Do not interpret a local prototype pass as completed authentication or pilot readiness.
 
 ## First team work
 
-1. Reproduce startup and run `jac test services/promo.jac` in a disposable local
-   checkout. The generated tests manipulate demo graph state; do not use them on
-   a shared running demo database. The README's reset command deletes local data.
+1. Have each teammate run the shared setup/check/build/core scripts and record
+   their platform and commit. The core wrapper isolates its workspace/store;
+   do not directly run reset-heavy tests on the shared demo database.
 2. Check student discovery, claim, merchant management and redemption end to end.
-   JacHammer's activity reported missing redemption feedback; reproduce that before fixing it.
+   Local redemption feedback was observed; physical phone/touch behavior still needs a run.
 3. Replace the fixed demo merchant keys and client-supplied student identity before
    accepting real users. Audit ownership, concurrent claims and one-time redemption.
 4. Pin compatible dependencies and record startup/test results on a fresh clone.

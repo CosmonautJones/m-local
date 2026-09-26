@@ -21,22 +21,6 @@ import from services.promo {
     ClaimView
 }
 
-cl {
-sv import from services.promo {
-    list_offers,
-    get_offer,
-    claim_offer,
-    merchant_portal,
-    update_profile,
-    save_offer,
-    set_offer_status,
-    redeem_code,
-    offer_defaults,
-    OfferView,
-    MerchantView,
-    ActionResult,
-    ClaimView
-}
 import from "@jac/mobui" {
     View,
     Text,
@@ -687,5 +671,4 @@ def:pub app -> JsxElement {
             </View>
         </View>
     </View>;
-}
 }

@@ -1,5 +1,6 @@
 .jac/
 node_modules/
+dist/
 
 # Local credentials and environments
 .env

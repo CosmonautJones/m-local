@@ -27,7 +27,7 @@ menu[{name, price, dietary}], offers[{title, description, price, regular_price,
 start_in_h, end_in_h, quantity, eligibility, terms, dietary, menu_item, status}].
 Returns the restaurant, or the existing one if the slug is already present.
 """
-def import_restaurant(record: dict) -> Restaurant {
+def import_restaurant(record: dict[str, any]) -> Restaurant {
     existing = [root-->[?:Restaurant, slug == record["slug"]]];
     if existing {
         return existing[0];
@@ -43,16 +43,16 @@ def import_restaurant(record: dict) -> Restaurant {
         source=record.get("source", "manual")
     );
     root ++> r;
-    loc: dict = record.get("location", {});
+    loc: dict[str, str] = record.get("location", {});
     r +>:HasLocation():+> Location(
         address=loc.get("address", ""),
         neighborhood=loc.get("neighborhood", ""),
         entrance_note=loc.get("entrance_note", ""),
         note_date=loc.get("note_date", "")
     );
-    items: dict = {};
-    menu: list[dict] = record.get("menu", []);
-    offers: list[dict] = record.get("offers", []);
+    items: dict[str, MenuItem] = {};
+    menu: list[dict[str, any]] = record.get("menu", []);
+    offers: list[dict[str, any]] = record.get("offers", []);
     for m in menu {
         item = MenuItem(
             name=m["name"], price=float(m.get("price", 0)), dietary=m.get("dietary", [])

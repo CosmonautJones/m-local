@@ -32,8 +32,8 @@ and claim, rather than leaving the user to reconcile separate pieces of informat
 1. A merchant publishes an $8 meal offer with two units and a defined time window.
 2. A student filters to $8 and offers available now, then reads the actual conditions.
 3. The detail screen shows a current, source-labeled access notice for that location.
-4. The student claims one unit and receives a code, locked-in terms and an expiry.
-5. The merchant redeems it once; another redemption cannot consume more inventory.
+4. The student claims one unit and receives a QR code, locked-in terms and an expiry.
+5. The merchant scans the QR and redeems it once; another redemption cannot consume more inventory.
 6. A notice expires or changes. The explanation changes and no longer presents an
    outdated entrance instruction as current.
 
@@ -41,6 +41,13 @@ Use fictional businesses and clearly labeled simulation where we lack confirmed
 real participation or data. No fictional offer is redeemable at a real restaurant.
 
 ## Four owners, four deliverables
+
+This is a **hybrid specialization split**, not four independent full-stack slices.
+In familiar terms: Engineer 1 is platform/integration; 2 is backend; 3 is data and
+context; 4 is frontend/mobile web. Each owns a testable outcome as well as files.
+All UI remains with Engineer 4, so do not describe the other roles as independent
+UI-to-database feature teams. The [handoff table](TEAM-WORKFLOW.md#first-small-deliverables)
+identifies what each must deliver early to prevent waiting.
 
 | Engineer | Mission | Owns | Definition of done |
 |---|---|---|---|
@@ -60,10 +67,11 @@ features already delivered. The baseline is commit `46ec2d6`.
 ## What already exists
 
 Seven Jac source files cover a MobUI interface, domain graph, demo data, offer rules
-and seven tests. Source extraction was verified. Local application startup and tests
-have not yet been established. The generated README reports Jac 0.34.20; the separate
-0.37.21 lab CLI rejects `jac start` and uses `jac run --serve`. Engineer 1 resolves
-that mismatch before the team makes runtime-dependent changes.
+and seven tests. Source extraction was verified. The runtime checkpoint now targets
+**Jac 0.37.23**: local startup, seven rule tests and a production `.jab` build have
+been executed on Windows/WSL. See [runtime setup](RUNTIME.md),
+[phone and teammate checks](PHONE-TESTING.md), and [current evidence](status/engineer-1.md).
+Mac execution, physical phone testing and authentication integration remain pending.
 
 Known gaps: demo merchant keys in the client, arbitrary student identity, mutable
 terms after claiming, missing failure recovery in write flows, no contextual data

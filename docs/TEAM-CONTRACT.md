@@ -1,4 +1,4 @@
-# Shared implementation contract v1
+# Shared implementation contract v2: QR redemption
 
 This is the target agreed by the task split, not a description of the current code.
 Engineer 1 coordinates changes; Engineer 2 owns core API/schema decisions; Engineer
@@ -27,6 +27,12 @@ Engineer 1 first publishes a verified runtime pin and exact commands in
 do not overwrite another project runtime. If unavailable, select one supported
 version and coordinate a bounded migration with the source owners. Test the actual
 MobUI app and built-in authentication hooks before declaring compatibility.
+
+Runtime checkpoint update (2026-09-26): Travis authorized upgrading to latest.
+The selected pin is **0.37.23**; local startup, core tests and a production build
+are verified in `docs/RUNTIME.md`. Use that pin rather than repeating the original
+0.34.20 experiment. Authentication hooks and Mac/physical-phone execution are
+still separate unverified gates, detailed in `docs/status/engineer-1.md`.
 
 The generated `jac start` instructions are version-specific. Do not give every
 engineer a different runtime or let each model independently upgrade dependencies.
@@ -58,15 +64,44 @@ save_offer(offer_id: str, title: str, description: str, price: str,
            regular_price: str, start_local: str, end_local: str, quantity: str,
            eligibility: str, terms: str, dietary: str, menu_item: str) -> ActionResult
 set_offer_status(offer_id: str, status: str) -> ActionResult
-redeem_code(code: str) -> ActionResult
+redeem_claim(qr_payload: str) -> ActionResult
 offer_defaults() -> list[str]
 ```
 
 `SessionView`: `authenticated: bool`, `actor_id: str`, `role: str` (guest, student,
 merchant), `restaurant_id: str`, `display_name: str`, `is_demo: bool`.
 The server supplies all identity and ownership fields. Guest browsing returns no
-personal claim codes. A student cannot become a merchant by submitting a role or ID.
-`ActionResult` retains `ok: bool`, `message: str`, `code: str`.
+personal claim credentials. A student cannot become a merchant by submitting a role or ID.
+`ActionResult` supplies `ok: bool`, `message: str`, `claim_id: str`, `qr_payload: str`.
+Engineer 2 coordinates the DTO migration with Engineer 4. Current `code` and
+`my_code` fields are legacy implementation details, not the approved user flow.
+
+## Approved QR decision (2026-09-26)
+
+The team explicitly chose **QR codes instead of displaying and typing letters and
+numbers**. This decision is approved; it is not yet implemented in the runtime PR.
+
+- Student claims an offer and sees a scannable QR plus human-readable offer terms
+  and expiry. Engineer 4 owns rendering, camera scanner and success/error states.
+- Engineer 2 supplies a versioned, high-entropy opaque redemption credential bound
+  to a durable claim. It contains no student PII, merchant key or authoritative
+  price. Public browsing and other students must not receive another claim's payload.
+- Merchant scans, sees the server-resolved offer/terms, and confirms redemption.
+  Repeated camera detections must not issue uncontrolled mutation requests.
+- Jac validates the authenticated merchant's ownership, expiry and unredeemed state
+  atomically. Encoding an ID in QR is not authentication or single-use enforcement.
+- An idempotent claim retry returns the same live claim and QR payload. Expired,
+  cancelled, malformed, wrong-merchant and already-redeemed payloads are rejected.
+- Freeze `qr_payload`'s version/format in Engineer 2's small interface PR before
+  frontend rendering/scanning is wired. No external URL in a scanned QR is opened
+  automatically. No manual-code UX should silently be reintroduced.
+- Engineer 1 supplies the phone/secure-origin test path. A student can display QR
+  over the current LAN preview; in-browser camera scanning on a remote phone needs
+  HTTPS. A merchant laptop at localhost is the simplest initial camera test host.
+  Verify real iPhone Safari and Android support; do not assume BarcodeDetector exists.
+
+This supersedes code-entry language in older plans. Preserve historical numeric-code
+test evidence as historical evidence, not as proof the QR implementation is done.
 
 Engineer 2 adds `owner_actor_id: str` to Restaurant for one-owner membership in this
 slice. Only trusted local account provisioning assigns it; record imports and public
@@ -104,7 +139,7 @@ to `ClaimView`. Unclaimed views use empty/default claim fields.
 - Offer claimability is `start_ts <= now < end_ts`, active and with stock remaining.
 - A hold lasts `min(now + 20 minutes, original offer end)`; at the deadline it expires.
 - Retry while an identical actor/offer hold is live returns success with the same
-  code and consumes no additional unit. A redeemed offer cannot be claimed again
+  QR payload and consumes no additional unit. A redeemed offer cannot be claimed again
   by the same actor in this build.
 - Cancellation releases a live hold once. Repeated cancellation is harmless;
   cancellation after redemption is rejected. A cancelled/expired hold can be
@@ -178,8 +213,12 @@ From a cloned repository in WSL Bash (or Bash on a supported teammate machine):
 ./scripts/demo.sh
 ```
 
-These scripts do not exist in the baseline. `dev.sh` binds to 127.0.0.1:8000 by
-default. Test commands create isolated disposable stores and return nonzero on
+Current runtime checkpoint implements dev/check/build and the core test wrapper.
+Run `bash scripts/build.sh` with dev stopped to build the `.jab`. Context/integration
+and all deliberately return nonzero while downstream suites are missing; demo.sh
+is still pending. The API binds to loopback; current Jac's Vite child binds all WSL
+interfaces and is reached through `localhost:8000` on Windows. See RUNTIME.md.
+Test commands create isolated disposable stores and return nonzero on
 failure. `demo.sh` launches a fresh, clearly labeled fixture store without deleting
 existing data. Separate invocations must not collide in store or port. Runtime
 pinning and client build commands live behind these wrappers, not in four sets of

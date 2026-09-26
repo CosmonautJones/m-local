@@ -1,5 +1,11 @@
 # Engineer 4: Phone Experience Implementation Plan
 
+**Approved update:** QR redemption replaces typed letters/numbers. Follow
+TEAM-CONTRACT v2: render the server's QR payload, scan on the merchant screen,
+show the resolved terms, and require confirmation. Handle camera denial and
+duplicate detections. Coordinate the payload/API with Engineer 2 and secure-origin
+phone testing with Engineer 1. Legacy code-entry wording below is superseded.
+
 > **For agentic workers:** Four human engineers run their own models. Implement
 > only this mission. Use `superpowers:executing-plans` if available; otherwise use
 > the inspect, failing-test, implementation, verification loop. Do not spawn agents

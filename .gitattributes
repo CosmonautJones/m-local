@@ -1,0 +1,7 @@
+*.sh text eol=lf
+*.py text eol=lf
+*.mjs text eol=lf
+.jac-version text eol=lf
+# Preserve the recovered source's CRLF while checking real whitespace mistakes.
+*.jac whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+*.toml whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

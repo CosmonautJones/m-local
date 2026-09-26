@@ -66,6 +66,33 @@ merges it, dependent owners sync main into their own branches. Models must not
 independently invent replacement interfaces or edit another owner's files to
 avoid a dependency. Use independent work from the assigned mission while waiting.
 
+### First small deliverables
+
+| Owner / familiar specialization | First useful handoff | Depends on | Must not absorb |
+|---|---|---|---|
+| 1: platform and integration | Jac pin, run/check/build scripts, Windows/Mac instructions, phone connection path | One teammate runs the clean-clone checklist | Rewriting the product or becoming the sole author of auth |
+| 2: backend and offer integrity | Freeze session and offer DTO signatures; prove one student and one merchant using Jac auth; preserve existing public function shapes until callers migrate | Pair briefly with 1 on runtime auth hooks; coordinate UI changes with 4 | Context ingestion, every UI fix, or optional analytics |
+| 3: data and local context | One location, one dated access notice, one source/simulation label; freeze the context DTO | Core location IDs from 2; a small shared type commit | Full Ann Arbor aggregation or multiple new feeds |
+| 4: frontend and phone experience | One complete browse -> claim -> show-code -> redeem path with loading/error states | Frozen DTOs from 2/3, runtime from 1 | Editing backend files to work around missing endpoints |
+
+Engineer 2's mission is the heaviest: identity, atomic inventory and immutable
+terms are distinct problems. Ship a small schema/API checkpoint first, then one
+verified lifecycle change per PR. Engineer 1 should pair on the authentication
+probe and exercise concurrency over HTTP; this is collaboration, not duplicate
+ownership of `services/promo.jac`. Engineer 4 owns UI implementation but all four
+humans can help perform phone tests. Engineer 3 can review source labels and help
+exercise the final demo after the single context relationship works.
+
+Freeze signatures before large model-generated changes. A frontend fixture is
+temporary test data; it is not proof the real endpoint works. Integrate a small
+working route early, then sync main after each shared change. Do not wait until
+all four missions are finished to run the product together.
+
+The runtime migration requested by Travis is a one-time compatibility exception:
+the runtime PR removes retired placement syntax and adds required generic type
+annotations in other owners' files. Owners should start from that shared commit
+or merge it before adding new changes; it does not transfer ongoing file ownership.
+
 ## Small PRs and one integrator
 
 - Engineer 1 owns merges to main. Every other engineer opens PRs and provides evidence.

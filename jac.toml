@@ -2,16 +2,14 @@
 name = "mobile-starter"
 version = "0.0.1"
 description = "Mobile app starter - one Jac source, iOS + Android + web"
-entry-point = "main.jac"
+entry-point = "main"
+jac-version = "0.37.23"
 kind = "web-app"
-client_kind = "mobui"
 
 [client]
 
-[byllm]
-[byllm.model]
-default_model = "${LLM_MODEL:-gpt-4o-mini}"
-api_key = "${OPENAI_API_KEY:-}"
+[serve]
+host = "127.0.0.1"
 
 
 [dependencies]

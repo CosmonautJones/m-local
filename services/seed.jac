@@ -5,7 +5,7 @@ business. Loaded through the importer, the same path real sources will use."""
 import from services.importer { import_restaurant }
 
 
-glob:pub DEMO_RECORDS: list[dict] = [
+glob:pub DEMO_RECORDS: list[dict[str, any]] = [
     {
         "slug": "maize-noodle-lab",
         "name": "Maize Street Noodle Lab (Demo)",

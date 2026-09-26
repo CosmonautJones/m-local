@@ -1,5 +1,12 @@
 # Working in this Jac project
 
+Current decisions and transferable context: `docs/WORK-HANDOFF.md` and
+`docs/TEAM-CONTRACT.md` v2. QR redemption is approved but not yet implemented.
+Travis has authorized an agentic coordinator for his ChatGPT Work task. It may
+delegate bounded work within his lane and independent read-only review. This
+supersedes older blanket no-subagent wording for that task, not the four human
+owners' file boundaries. Do not silently assign their in-flight work to agents.
+
 This is a [Jac](https://www.jaseci.org/) project. Jac's syntax has evolved and
 is easily confused with Python or JSX -- before writing or editing `.jac`
 files, consult the reference guides bundled with the compiler.
@@ -18,12 +25,15 @@ Start with `jac guide jac-core-cheatsheet` and `jac guide jac-types`.
 
 ## Validate your work
 
-- `jac check <file>` -- type-check and lint. Compiler diagnostics link to the
+- Use **Jac 0.37.23**, pinned in `.jac-version` and `jac.toml`. See `docs/RUNTIME.md`.
+- `bash scripts/check.sh` -- type-check and lint the whole project. Compiler diagnostics link to the
   relevant guide; follow the `-> run 'jac guide ...'` hints.
 - `jac run <file>` -- execute a Jac script.
-- `jac start --dev main.jac` -- start a web-app or service in dev mode
-  (hot-reload for client files; restart for server changes). Use this instead
-  of `jac run` for apps.
+- `bash scripts/dev.sh` -- start the local web app, including Windows-save support.
+  This wraps `jac run --dev --host 127.0.0.1 --port 8000`; `jac start` is retired.
+- `bash scripts/test.sh core` -- run the seven existing rule tests in an isolated
+  workspace/store. Never run destructive reset commands on a shared demo database.
+  Context/integration suites are pending and deliberately return nonzero.
 - `jac browse <action>` -- QA a running app in a headless browser:
   `jac browse open localhost:8000`, then `snapshot` (accessibility tree with
   `@e1`-style refs), `click @e5`, `fill '#email' user@example.com`, `screenshot`, `close`.

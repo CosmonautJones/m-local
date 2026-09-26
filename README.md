@@ -4,33 +4,44 @@
 four engineering assignments and copy-ready model prompts are documented there.
 Read the [shared contract](docs/TEAM-CONTRACT.md) and
 [parallel workflow](docs/TEAM-WORKFLOW.md) before implementing. These are planned
-changes; the generated setup notes below still need the runtime verification owned
-by Engineer 1.
+changes; see the [verified local runtime](docs/RUNTIME.md) and
+[current results](docs/status/engineer-1.md) before implementing.
 
 Mobile-friendly Ann Arbor app connecting students with time-limited restaurant offers.
-One Jac source compiles to web (react-native-web) and React Native (MobUI).
+The Jac source runs locally as a web app using MobUI/react-native-web.
+Native iOS/Android packaging has not been verified.
+
+**Team decision:** the next redemption flow uses QR scanning instead of typed
+letters/numbers. That work is specified in [contract v2](docs/TEAM-CONTRACT.md)
+and the [ChatGPT Work handoff](docs/WORK-HANDOFF.md); the current running baseline
+still uses the legacy code-entry flow described in the walkthrough below.
 
 ## Versions (recorded 2026-09-26)
 
 | Component | Version |
 |---|---|
-| Jac (jaclang) | 0.34.20 |
-| Python (server runtime) | 3.12.14 |
-| Node.js / npm | 22.23.3 / 10.9.9 |
-| react / react-dom | ^18.2.0 |
-| react-native-web | ^0.19.13 |
+| Jac | **0.37.23**, pinned in `jac.toml` and `.jac-version` |
+| JavaScript runtime | Bundled Bun 1.3.11 |
+| Vite | 6.4.3 |
+| react / react-dom | 18.3.1 |
+| react-native-web | 0.19.13 |
 
-No other dependencies. Persistence is the built-in Jac graph store (`.jac/data`, SQLite).
+Persistence uses Jac's embedded PostgreSQL graph store. The [runtime guide](docs/RUNTIME.md)
+covers installation, data isolation and the Windows-network fallback.
 
 ## Setup
 
+From this checkout in **WSL Bash**:
+
 ```bash
-jac install                 # installs npm deps from jac.toml
-jac start --dev main.jac    # web preview at http://localhost:8000
-jac start main.jac --client react-native --dev   # native (after `jac setup react-native`)
+bash scripts/setup.sh       # first machine setup; installs the pinned Jac runtime
+bash scripts/dev.sh         # http://localhost:8000
 ```
 
-Demo data seeds itself the first time any endpoint runs. To reset: `jac clean --data --force`.
+On Travis's prepared machine, use `.\scripts\dev.ps1` from **PowerShell**.
+Edit `.jac` files locally and let the development server recompile them.
+Demo data seeds itself when an endpoint first runs. Do not reset shared demo data.
+JacHammer is not required to build or run this checkout.
 
 ## Layout
 
@@ -78,13 +89,15 @@ Graph: `Restaurant -HasLocation-> Location`, `-Serves-> MenuItem`, `-Publishes->
 ## Checks
 
 ```bash
-jac clean --data --force && jac test services/promo.jac
+bash scripts/check.sh
+bash scripts/test.sh core
 ```
 
-Covers: persistence and idempotent seeding, merchant isolation (redeem + edit), expired and
+Seven core rule tests pass in an isolated test workspace. They cover idempotent seeding,
+merchant isolation (redeem + edit), expired and
 not-started offers, exhausted quantity, abandoned-claim release, repeated redemption, paused
-offers, filters and match explanations. For persistence across restarts: claim an offer,
-restart the server, and confirm the code and availability are unchanged.
+offers, filters and match explanations. This does not prove concurrent HTTP safety or
+real authentication. See the verification record for browser/restart evidence.
 
 ## Deferred
 
