@@ -60,12 +60,15 @@ node Offer {
 }
 
 """One student's claim on one offer. student_id holds the claimant's actor id.
-status: claimed, redeemed, expired or cancelled. The snapshot fields freeze the
-terms the student accepted; later offer edits never change them. expires_ts is
-the immutable claim deadline."""
+status: claimed, redeemed, expired or cancelled. qr_token is the opaque,
+high-entropy redemption credential shown to the student as a QR code; code is
+the legacy typed code, no longer issued. The snapshot fields freeze the terms
+the student accepted; later offer edits never change them. expires_ts is the
+immutable claim deadline."""
 node Redemption {
     has student_id: str,
-        code: str,
+        code: str = "",
+        qr_token: str = "",
         status: str = "claimed",
         claimed_ts: float = 0.0,
         expires_ts: float = 0.0,

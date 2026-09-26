@@ -11,20 +11,29 @@ Rules enforced here (never in the client):
   hold is expired, its unit is released and its code can no longer redeem.
 - Stable terms: a claim snapshots title, price, terms and eligibility. Later
   offer edits and pauses only affect future claims.
-- Retry: claiming again while a hold is live returns the same code and uses no
-  extra unit. A redeemed offer cannot be claimed again by the same student.
+- Redemption credential: each claim carries an opaque QR payload
+  ("mlocal:v1:" + 32 random URL-safe characters). It holds no student data,
+  merchant key or price; the server resolves everything from it. Only the
+  claimant and the owning merchant ever see or use it.
+- Retry: claiming again while a hold is live returns the same claim and QR
+  payload and uses no extra unit. A redeemed offer cannot be claimed again by
+  the same student.
 - Cancellation releases a live hold once; repeating it is harmless; it is
   rejected after redemption.
-- Concurrency: every mutation runs under one process-wide lock and commits
-  before releasing it. Safe for a single server process only.
+- Concurrency: every mutation runs under one exclusive OS file lock and
+  commits before releasing it. Serializes threads and worker processes on one
+  machine only; multiple machines would need a shared lock.
 
 Internal f"_" helpers take an explicit actor and f"now" so checks can simulate
 time and identity.
 """
 
+import os;
+import re;
 import time;
-import random;
-import threading;
+import fcntl;
+import secrets;
+import tempfile;
 import from datetime { datetime, timedelta }
 import from zoneinfo { ZoneInfo }
 import from services.models {
@@ -58,7 +67,11 @@ import from services.session {
 import from services.seed { seed_demo }
 
 
-glob MUTATION_LOCK: any = threading.Lock();
+glob LOCK_PATH: str = os.path.join(tempfile.gettempdir(), "m-local-mutations.lock");
+
+glob QR_PREFIX: str = "mlocal:v1:";
+
+glob QR_TOKEN_PATTERN: str = r"^[A-Za-z0-9_-]{32}$";
 
 glob PRICE_NOTE: str = "Prices exclude tax unless the terms say otherwise. No payment is taken in the app.";
 
@@ -92,7 +105,8 @@ obj OfferView {
         is_demo: bool = False,
         fits: bool = True,
         reasons: list[str] = [],
-        my_code: str = "",
+        my_claim_id: str = "",
+        my_qr_payload: str = "",
         my_status: str = "",
         my_expires: str = "",
         my_title: str = "",
@@ -102,7 +116,7 @@ obj OfferView {
 }
 
 obj ClaimView {
-    has code: str = "",
+    has claim_id: str = "",
         student_id: str = "",
         offer_title: str = "",
         status: str = "",
@@ -117,7 +131,23 @@ obj ClaimView {
 obj ActionResult {
     has ok: bool = False,
         message: str = "",
-        code: str = "";
+        claim_id: str = "",
+        qr_payload: str = "";
+}
+
+
+"""What a merchant sees after scanning, before confirming redemption."""
+obj ClaimCheck {
+    has ok: bool = False,
+        message: str = "",
+        claim_id: str = "",
+        status: str = "",
+        restaurant: str = "",
+        title_snapshot: str = "",
+        price_cents: int = 0,
+        terms: str = "",
+        eligibility: str = "",
+        expires_label: str = "";
 }
 
 obj MerchantView {
@@ -186,19 +216,27 @@ def _span(seconds: float) -> str {
 }
 
 
-"""Every mutating endpoint holds MUTATION_LOCK from its first read until
-_finish has persisted the change, so two requests never decide on the same
-stale stock count."""
-def _start -> None {
-    MUTATION_LOCK.acquire();
+"""Every mutating endpoint holds an exclusive OS file lock from before its
+first read until _finish has persisted the change. The commit() right after
+locking ends the request's earlier transaction, so reads inside the lock see
+every change committed by the previous holder. Together this serializes
+threads and worker processes on one machine, so two requests never decide on
+the same stale stock count."""
+def _start -> int {
+    fd = os.open(LOCK_PATH, os.O_CREAT | os.O_RDWR, 384);
+    fcntl.flock(fd, fcntl.LOCK_EX);
+    commit();
+    _ensure_seed();
+    return fd;
 }
 
 
-def _finish -> None {
+def _finish(fd: int) -> None {
     try {
         commit();
     } finally {
-        MUTATION_LOCK.release();
+        fcntl.flock(fd, fcntl.LOCK_UN);
+        os.close(fd);
     }
 }
 
@@ -248,7 +286,7 @@ and updated by the restaurant's merchant), so they are opened at creation.
 Who may see or change what is decided by the checks in this module; the
 API never exposes raw nodes."""
 def _share(target: any) -> None {
-    grant(target, level=WritePerm);
+    grant(target, level=AccessLevel.WRITE);
 }
 
 
@@ -381,7 +419,7 @@ def _end_of_today(now: float) -> float {
 """Plain-language reasons + whether the offer fits all active filters."""
 def _explain(
     o: Offer, state: str, budget: int | None, window: str, wanted: list[str]
-) -> tuple {
+) -> tuple[bool, list[str]] {
     # Short match tags only for the student's own filters; price, time and
     # stock are already shown on screen, so they are not repeated here.
     reasons: list[str] = [];
@@ -491,7 +529,8 @@ def _view(
     );
     c = _my_claim(o, actor_id, now);
     if c is not None {
-        v.my_code = c.code;
+        v.my_claim_id = jid(c);
+        v.my_qr_payload = _qr_payload(c);
         v.my_status = c.status;
         v.my_expires = _clock(c.expires_ts);
         v.my_title = c.offer_title_snapshot;
@@ -503,19 +542,57 @@ def _view(
 }
 
 
-def _new_code -> str {
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    taken: list[str] = [];
-    for r in _restaurants() {
-        for o in [r ->:Publishes:->] {
-            taken.extend([c.code for c in [o ->:ClaimedAs:->]]);
+"""A fresh 32-character URL-safe token (192 random bits)."""
+def _new_qr_token -> str {
+    return secrets.token_urlsafe(24);
+}
+
+
+def _qr_payload(c: Redemption) -> str {
+    return QR_PREFIX + c.qr_token if c.qr_token else "";
+}
+
+
+"""The token inside a well-formed v1 payload, or None for anything else."""
+def _parse_qr(payload: str) -> str | None {
+    text = payload.strip();
+    if not text.startswith(QR_PREFIX) {
+        return None;
+    }
+    token = text[len(QR_PREFIX):];
+    if re.match(QR_TOKEN_PATTERN, token) is None {
+        return None;
+    }
+    return token;
+}
+
+
+"""Find a claim by token among one restaurant's offers."""
+def _claim_at(r: Restaurant, token: str) -> Redemption | None {
+    for o in [r ->:Publishes:->] {
+        for c in [o ->:ClaimedAs:->] {
+            if c.qr_token and secrets.compare_digest(c.qr_token, token) {
+                return c;
+            }
         }
     }
-    code = "".join([random.choice(alphabet) for _ in range(6)]);
-    while code in taken {
-        code = "".join([random.choice(alphabet) for _ in range(6)]);
+    return None;
+}
+
+
+def _claim_anywhere(token: str) -> Redemption | None {
+    for r in _restaurants() {
+        c = _claim_at(r, token);
+        if c is not None {
+            return c;
+        }
     }
-    return code;
+    return None;
+}
+
+
+def _claim_result(ok: bool, message: str, c: Redemption) -> ActionResult {
+    return ActionResult(ok=ok, message=message, claim_id=jid(c), qr_payload=_qr_payload(c));
 }
 
 
@@ -534,15 +611,15 @@ def _claim(offer_id: str, actor_id: str, now: float) -> ActionResult {
     mine = [c for c in [o ->:ClaimedAs:->] if c.student_id == actor_id];
     for c in mine {
         if c.status == "redeemed" {
-            return ActionResult(ok=False, message="You already redeemed this offer.", code=c.code);
+            return ActionResult(ok=False, message="You already redeemed this offer.", claim_id=jid(c));
         }
     }
     for c in mine {
         if _is_live(c, now) {
-            return ActionResult(
-                ok=True,
-                message=f"You already hold this offer. Show code {c.code} before {_clock(c.expires_ts)}.",
-                code=c.code
+            return _claim_result(
+                True,
+                f"You already hold this offer. Show your QR code before {_clock(c.expires_ts)}.",
+                c
             );
         }
     }
@@ -557,10 +634,9 @@ def _claim(offer_id: str, actor_id: str, now: float) -> ActionResult {
         return ActionResult(ok=False, message=msgs[state]);
     }
     expires = min(now + CLAIM_HOLD_MINUTES * 60, o.end_ts);
-    code = _new_code();
     claim = Redemption(
         student_id=actor_id,
-        code=code,
+        qr_token=_new_qr_token(),
         status="claimed",
         claimed_ts=now,
         expires_ts=expires,
@@ -571,10 +647,8 @@ def _claim(offer_id: str, actor_id: str, now: float) -> ActionResult {
     );
     o +>:ClaimedAs():+> claim;
     _share(claim);
-    return ActionResult(
-        ok=True,
-        message=f"Claimed. Show code {code} at the counter before {_clock(expires)}.",
-        code=code
+    return _claim_result(
+        True, f"Claimed. Show your QR code at the counter before {_clock(expires)}.", claim
     );
 }
 
@@ -593,57 +667,98 @@ def _cancel(offer_id: str, actor_id: str, now: float) -> ActionResult {
         if _is_live(c, now) {
             c.status = "cancelled";
             c.cancelled_ts = now;
-            return ActionResult(ok=True, message="Claim cancelled. The unit is available again.", code=c.code);
+            return ActionResult(ok=True, message="Claim cancelled. The unit is available again.", claim_id=jid(c));
         }
     }
     for c in mine {
         if c.status == "redeemed" {
-            return ActionResult(ok=False, message="This claim was already redeemed and cannot be cancelled.", code=c.code);
+            return ActionResult(ok=False, message="This claim was already redeemed and cannot be cancelled.", claim_id=jid(c));
         }
     }
     return ActionResult(ok=True, message="You have no active hold on this offer.");
 }
 
 
-def _redeem(actor_id: str, code: str, now: float) -> ActionResult {
+"""Resolve a scanned payload for the signed-in merchant. Returns the claim, or
+an error message when the payload is malformed, unknown or another
+restaurant's. Expired holds are marked expired here."""
+def _resolve_scan(actor_id: str, qr_payload: str, now: float) -> tuple[Redemption | None, str] {
     r = _restaurant_for_actor(actor_id);
     if r is None {
-        return ActionResult(ok=False, message="Sign in with a merchant account to redeem codes.");
+        return (None, "Sign in with a merchant account to redeem claims.");
     }
-    want = code.strip().upper();
-    if not want {
-        return ActionResult(ok=False, message="Enter a claim code.");
+    token = _parse_qr(qr_payload);
+    if token is None {
+        return (None, "This is not an M-Local claim QR code.");
     }
-    for o in [r ->:Publishes:->] {
-        for c in [o ->:ClaimedAs:->[?code == want]] {
-            if c.status == "redeemed" {
-                return ActionResult(
-                    ok=False,
-                    message=f"Code {want} was already redeemed at {_day_clock(c.redeemed_ts)}.",
-                    code=want
-                );
-            }
-            if c.status == "cancelled" {
-                return ActionResult(ok=False, message=f"Code {want} was cancelled by the student.", code=want);
-            }
-            if c.status == "expired" or now >= c.expires_ts {
-                c.status = "expired";
-                return ActionResult(
-                    ok=False,
-                    message=f"Code {want} expired at {_clock(c.expires_ts)}. The unit was released.",
-                    code=want
-                );
-            }
-            c.status = "redeemed";
-            c.redeemed_ts = now;
-            return ActionResult(
-                ok=True,
-                message=f"Redeemed: {c.offer_title_snapshot}. Charge {money_label(c.price_cents_snapshot)}. Check: {c.eligibility_snapshot}.",
-                code=want
-            );
+    c = _claim_at(r, token);
+    if c is None {
+        if _claim_anywhere(token) is not None {
+            return (None, "This claim belongs to a different restaurant.");
         }
+        return (None, "No claim matches this QR code.");
     }
-    return ActionResult(ok=False, message=f"No claim {want} found for {r.name}.");
+    if c.status == "claimed" and now >= c.expires_ts {
+        c.status = "expired";
+    }
+    return (c, "");
+}
+
+
+def _scan_problem(c: Redemption) -> str {
+    if c.status == "redeemed" {
+        return f"This claim was already redeemed at {_day_clock(c.redeemed_ts)}.";
+    }
+    if c.status == "cancelled" {
+        return "The student cancelled this claim.";
+    }
+    if c.status == "expired" {
+        return f"This claim expired at {_clock(c.expires_ts)}. The unit was released.";
+    }
+    return "";
+}
+
+
+"""Read-only check a merchant sees after scanning, before confirming."""
+def _preview(actor_id: str, qr_payload: str, now: float) -> ClaimCheck {
+    (c, err) = _resolve_scan(actor_id, qr_payload, now);
+    if c is None {
+        return ClaimCheck(ok=False, message=err);
+    }
+    o = [x for x in [c <-:ClaimedAs:<-]];
+    r = _restaurant_of(o[0]) if o else None;
+    problem = _scan_problem(c);
+    return ClaimCheck(
+        ok=problem == "",
+        message=problem or f"Valid until {_clock(c.expires_ts)}. Check: {c.eligibility_snapshot}.",
+        claim_id=jid(c),
+        status=c.status,
+        restaurant=r.name if r else "",
+        title_snapshot=c.offer_title_snapshot,
+        price_cents=c.price_cents_snapshot,
+        terms=c.terms_snapshot,
+        eligibility=c.eligibility_snapshot,
+        expires_label=_clock(c.expires_ts)
+    );
+}
+
+
+def _redeem(actor_id: str, qr_payload: str, now: float) -> ActionResult {
+    (c, err) = _resolve_scan(actor_id, qr_payload, now);
+    if c is None {
+        return ActionResult(ok=False, message=err);
+    }
+    problem = _scan_problem(c);
+    if problem {
+        return ActionResult(ok=False, message=problem, claim_id=jid(c));
+    }
+    c.status = "redeemed";
+    c.redeemed_ts = now;
+    return ActionResult(
+        ok=True,
+        message=f"Redeemed: {c.offer_title_snapshot}. Charge {money_label(c.price_cents_snapshot)}. Check: {c.eligibility_snapshot}.",
+        claim_id=jid(c)
+    );
 }
 
 
@@ -749,7 +864,7 @@ def _save_offer(
         }
         o +>:Features():+> item;
     }
-    return ActionResult(ok=True, message="Offer saved.", code=jid(o));
+    return ActionResult(ok=True, message="Offer saved.", claim_id=jid(o));
 }
 
 
@@ -805,12 +920,12 @@ def _portal(r: Restaurant, now: float, message: str = "") -> MerchantView {
     loc = _location_of(r);
     offers = [o for o in [r ->:Publishes:->]];
     offers.sort(key=lambda (o: Offer) -> float { return o.start_ts; });
-    claims: list[tuple] = [];
+    claims: list[tuple[float, ClaimView]] = [];
     for o in offers {
         _sweep(o, now);
         for c in [o ->:ClaimedAs:->] {
             claims.append((c.claimed_ts, ClaimView(
-                code=c.code,
+                claim_id=jid(c),
                 student_id=_student_label(c.student_id),
                 offer_title=c.offer_title_snapshot,
                 status=c.status,
@@ -823,7 +938,7 @@ def _portal(r: Restaurant, now: float, message: str = "") -> MerchantView {
             )));
         }
     }
-    claims.sort(key=lambda (t: tuple) -> float { return t[0]; }, reverse=True);
+    claims.sort(key=lambda (t: tuple[float, ClaimView]) -> float { return t[0]; }, reverse=True);
     return MerchantView(
         ok=True,
         message=message,
@@ -880,8 +995,9 @@ def _no_merchant -> MerchantView {
 
 
 # --------------------------------------------------------------- endpoints ---
-# :pub endpoints are readable by guests. Every mutation is an authenticated
-# endpoint (401 without a login) and also rechecks identity itself.
+# :pub endpoints are readable by guests. Every mutation is :protect (401
+# without a login) and also rechecks identity itself. Plain defs are private
+# server helpers and are never served.
 
 """Who the server says the caller is: guest, student or merchant."""
 def:pub current_session() -> SessionView {
@@ -918,48 +1034,41 @@ def:pub get_offer(
 }
 
 
-def:priv claim_offer(offer_id: str) -> ActionResult {
-    _ensure_seed();
-    _start();
+def:protect claim_offer(offer_id: str) -> ActionResult {
+    lock = _start();
     try {
         result = _claim(offer_id, _caller_actor(), time.time());
     } finally {
-        _finish();
+        _finish(lock);
     }
     return result;
 }
 
 
-def:priv cancel_claim(offer_id: str) -> ActionResult {
-    _ensure_seed();
-    _start();
+def:protect cancel_claim(offer_id: str) -> ActionResult {
+    lock = _start();
     try {
         result = _cancel(offer_id, _caller_actor(), time.time());
     } finally {
-        _finish();
+        _finish(lock);
     }
     return result;
 }
 
 
-def:priv merchant_portal() -> MerchantView {
-    _ensure_seed();
-    found = _restaurant_for_actor(_caller_actor());
-    if found is None {
-        return _no_merchant();
-    }
-    r = found as Restaurant;
-    _start();
+def:protect merchant_portal() -> MerchantView {
+    lock = _start();
     try {
-        view = _portal(r, time.time());
+        found = _restaurant_for_actor(_caller_actor());
+        view = _portal(found, time.time()) if found is not None else _no_merchant();
     } finally {
-        _finish();
+        _finish(lock);
     }
     return view;
 }
 
 
-def:priv update_profile(
+def:protect update_profile(
     name: str,
     cuisine: str,
     blurb: str,
@@ -968,26 +1077,25 @@ def:priv update_profile(
     entrance_note: str,
     note_date: str
 ) -> MerchantView {
-    _ensure_seed();
-    found = _restaurant_for_actor(_caller_actor());
-    if found is None {
-        return _no_merchant();
-    }
-    r = found as Restaurant;
-    _start();
+    lock = _start();
     try {
-        msg = _update_profile(
-            r, name, cuisine, blurb, address, neighborhood, entrance_note, note_date
-        );
-        view = _portal(r, time.time(), msg);
+        found = _restaurant_for_actor(_caller_actor());
+        if found is None {
+            view = _no_merchant();
+        } else {
+            msg = _update_profile(
+                found, name, cuisine, blurb, address, neighborhood, entrance_note, note_date
+            );
+            view = _portal(found, time.time(), msg);
+        }
     } finally {
-        _finish();
+        _finish(lock);
     }
     return view;
 }
 
 
-def:priv save_offer(
+def:protect save_offer(
     offer_id: str,
     title: str,
     description: str,
@@ -1001,61 +1109,72 @@ def:priv save_offer(
     dietary: str,
     menu_item: str
 ) -> ActionResult {
-    _ensure_seed();
-    found = _restaurant_for_actor(_caller_actor());
-    if found is None {
-        return ActionResult(ok=False, message="Sign in with a merchant account to edit offers.");
-    }
-    r = found as Restaurant;
-    _start();
+    lock = _start();
     try {
-        result = _save_offer(
-            r,
-            offer_id,
-            title,
-            description,
-            price,
-            regular_price,
-            start_local,
-            end_local,
-            quantity,
-            eligibility,
-            terms,
-            dietary,
-            menu_item,
-            time.time()
-        );
+        found = _restaurant_for_actor(_caller_actor());
+        if found is None {
+            result = ActionResult(ok=False, message="Sign in with a merchant account to edit offers.");
+        } else {
+            result = _save_offer(
+                found,
+                offer_id,
+                title,
+                description,
+                price,
+                regular_price,
+                start_local,
+                end_local,
+                quantity,
+                eligibility,
+                terms,
+                dietary,
+                menu_item,
+                time.time()
+            );
+        }
     } finally {
-        _finish();
+        _finish(lock);
     }
     return result;
 }
 
 
-def:priv set_offer_status(offer_id: str, status: str) -> ActionResult {
-    _ensure_seed();
-    found = _restaurant_for_actor(_caller_actor());
-    if found is None {
-        return ActionResult(ok=False, message="Sign in with a merchant account to edit offers.");
-    }
-    r = found as Restaurant;
-    _start();
+def:protect set_offer_status(offer_id: str, status: str) -> ActionResult {
+    lock = _start();
     try {
-        result = _set_status(r, offer_id, status);
+        found = _restaurant_for_actor(_caller_actor());
+        if found is None {
+            result = ActionResult(ok=False, message="Sign in with a merchant account to edit offers.");
+        } else {
+            result = _set_status(found, offer_id, status);
+        }
     } finally {
-        _finish();
+        _finish(lock);
     }
     return result;
 }
 
 
-def:priv redeem_code(code: str) -> ActionResult {
-    _ensure_seed();
-    _start();
+"""Merchant scan step 1: show what the QR code is for. Changes nothing except
+marking an already-expired hold as expired."""
+def:protect preview_claim(qr_payload: str) -> ClaimCheck {
+    lock = _start();
     try {
-        result = _redeem(_caller_actor(), code, time.time());
+        result = _preview(_caller_actor(), qr_payload, time.time());
     } finally {
-        _finish();
+        _finish(lock);
+    }
+    return result;
+}
+
+
+"""Merchant scan step 2: confirm. Single use; a repeat is rejected."""
+def:protect redeem_claim(qr_payload: str) -> ActionResult {
+    lock = _start();
+    try {
+        result = _redeem(_caller_actor(), qr_payload, time.time());
+    } finally {
+        _finish(lock);
     }
     return result;
 }

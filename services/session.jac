@@ -8,8 +8,8 @@ on their own root (actor = jid(root)).
 A merchant is an actor named as a restaurant's owner_actor_id. Only trusted
 server-side provisioning assigns it: the MLOCAL_MERCHANT_OWNERS environment
 variable read at request time, or _provision_owner from tests and local
-setup code. Every helper here is underscore-prefixed so it never becomes a
-public API endpoint.
+setup code. Nothing here is served: these are plain (private) defs, and the
+underscore marks them as internal for readers.
 """
 
 import os;

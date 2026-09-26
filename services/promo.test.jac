@@ -144,10 +144,10 @@ test "claim then merchant redeem, repeated redemption rejected" {
     student = "student-" + str(uuid4())[:8];
     res = _claim(jid(o), student, now);
     assert res.ok, res.message;
-    ok = _redeem("merchant-leaf", res.code, now);
+    ok = _redeem("merchant-leaf", res.qr_payload, now);
     assert ok.ok, ok.message;
     assert "$3.00" in ok.message;
-    twice = _redeem("merchant-leaf", res.code, now);
+    twice = _redeem("merchant-leaf", res.qr_payload, now);
     assert not twice.ok and "already redeemed" in twice.message;
     after = _claim(jid(o), student, now);
     assert not after.ok and "already redeemed" in after.message;
@@ -163,7 +163,7 @@ test "claim retry is idempotent" {
     first = _claim(jid(o), "student-retry", now);
     again = _claim(jid(o), "student-retry", now + 30);
     assert first.ok and again.ok, again.message;
-    assert again.code == first.code;
+    assert again.qr_payload == first.qr_payload and again.claim_id == first.claim_id;
     assert _remaining(o, now + 30) == 1;
     assert len([c for c in [o ->:ClaimedAs:->]]) == 1;
 }
@@ -177,7 +177,7 @@ test "merchant isolation" {
     now = time.time();
     res = _claim(jid(o), "student-" + str(uuid4())[:8], now);
     assert res.ok, res.message;
-    wrong = _redeem("merchant-noodle", res.code, now);
+    wrong = _redeem("merchant-noodle", res.qr_payload, now);
     assert not wrong.ok;
     noodle = _demo("maize-noodle-lab");
     denied = _save_offer(
@@ -213,7 +213,7 @@ test "quantity limit and abandoned claims release availability" {
     for i in range(3) {
         res = _claim(jid(o), f"qty-student-{i}", now);
         assert res.ok, res.message;
-        codes.append(res.code);
+        codes.append(res.qr_payload);
     }
     assert _remaining(o, now) == 0;
     blocked = _claim(jid(o), "qty-student-extra", now);
@@ -251,7 +251,7 @@ test "exact deadline is expired" {
     assert deadline == now + CLAIM_HOLD_MINUTES * 60;
     assert _remaining(o, deadline - 1) == 0;
     assert _remaining(o, deadline) == 1;
-    late = _redeem(owner, res.code, deadline);
+    late = _redeem(owner, res.qr_payload, deadline);
     assert not late.ok and "expired" in late.message;
 }
 
@@ -288,7 +288,7 @@ test "claimed terms survive offer edit" {
     assert v.my_price_cents == 800 and v.my_title == original_title;
     assert v.my_terms == "One per student.";
     assert v.price_cents == 1200;
-    done = _redeem(owner, res.code, now);
+    done = _redeem(owner, res.qr_payload, now);
     assert done.ok and "$8.00" in done.message and original_title in done.message;
     fresh = _claim(jid(o), "student-later", now);
     assert fresh.ok;
@@ -311,10 +311,10 @@ test "cancel releases once" {
     second = _cancel(jid(o), "student-cancel", now);
     assert second.ok and "no active hold" in second.message;
     assert _remaining(o, now) == 1;
-    dead = _redeem(owner, res.code, now);
+    dead = _redeem(owner, res.qr_payload, now);
     assert not dead.ok and "cancelled" in dead.message;
     again = _claim(jid(o), "student-cancel", now);
-    assert again.ok and again.code != res.code;
+    assert again.ok and again.qr_payload != res.qr_payload;
     assert _remaining(o, now) == 0;
 }
 
@@ -326,7 +326,7 @@ test "redeemed claim cannot cancel" {
     owner = fx.owner;
     now = time.time();
     res = _claim(jid(o), "student-redeemed", now);
-    assert _redeem(owner, res.code, now).ok;
+    assert _redeem(owner, res.qr_payload, now).ok;
     no = _cancel(jid(o), "student-redeemed", now);
     assert not no.ok and "already redeemed" in no.message;
     assert _remaining(o, now) == 1;
@@ -344,7 +344,7 @@ test "pause honors existing hold" {
     assert _set_status(r, jid(o), "paused").ok;
     blocked = _claim(jid(o), "student-other", now);
     assert not blocked.ok and "paused" in blocked.message;
-    kept = _redeem(owner, res.code, now);
+    kept = _redeem(owner, res.qr_payload, now);
     assert kept.ok and "$6.00" in kept.message;
 }
 
@@ -428,7 +428,7 @@ test "guest cannot mutate" {
     claim = _claim(jid(o), "", now);
     assert not claim.ok and "Sign in" in claim.message;
     assert not _cancel(jid(o), "", now).ok;
-    assert not _redeem("", "ABCDEF", now).ok;
+    assert not _redeem("", "mlocal:v1:" + "A" * 32, now).ok;
     assert _restaurant_for_actor("") is None;
 }
 
@@ -438,7 +438,7 @@ test "student cannot become merchant" {
     student = "student-" + str(uuid4())[:8];
     s = _session_for(student);
     assert s.authenticated and s.role == "student" and s.restaurant_id == "";
-    assert not _redeem(student, "ABCDEF", time.time()).ok;
+    assert not _redeem(student, "mlocal:v1:" + "A" * 32, time.time()).ok;
     assert _restaurant_for_actor(student) is None;
     slug = "import-" + str(uuid4())[:8];
     r = import_restaurant(
@@ -464,9 +464,11 @@ test "merchant a cannot edit b" {
     );
     assert not edit.ok and "does not belong" in edit.message;
     assert not _set_status(noodle, jid(leaf_offer), "paused").ok;
-    code = _claim(jid(leaf_offer), "student-" + str(uuid4())[:8], now).code;
-    assert not _redeem(a, code, now).ok;
-    assert _redeem(b, code, now).ok;
+    payload = _claim(jid(leaf_offer), "student-" + str(uuid4())[:8], now).qr_payload;
+    wrong = _redeem(a, payload, now);
+    assert not wrong.ok and "different restaurant" in wrong.message;
+    assert not _preview(a, payload, now).ok;
+    assert _redeem(b, payload, now).ok;
     assert leaf_offer.title == "$3 oat latte study break";
 }
 
@@ -479,19 +481,75 @@ test "student cannot read another claim" {
     bob = "student-bob-" + str(uuid4())[:8];
     held = _claim(jid(o), alice, now);
     assert held.ok;
-    assert _view(o, now, alice).my_code == held.code;
+    assert _view(o, now, alice).my_qr_payload == held.qr_payload;
     theirs = _view(o, now, bob);
-    assert theirs.my_code == "" and theirs.my_status == "" and theirs.my_title == "";
+    assert theirs.my_qr_payload == "" and theirs.my_claim_id == "" and theirs.my_status == "" and theirs.my_title == "";
     guest = _view(o, now, "");
-    assert guest.my_code == "";
+    assert guest.my_qr_payload == "" and guest.my_claim_id == "";
     for v in _list_offers(bob, "", "any", "", now) {
-        assert v.my_code != held.code;
+        assert v.my_qr_payload != held.qr_payload;
     }
     other = "merchant-" + str(uuid4())[:8];
     _provision_owner("diag-dough-co", other);
     portal = _portal(_demo("diag-dough-co"), now);
-    assert held.code not in [c.code for c in portal.claims];
+    assert held.claim_id not in [c.claim_id for c in portal.claims];
     home = _portal(_demo("arbor-leaf-kitchen"), now);
-    shown = [c for c in home.claims if c.code == held.code];
+    shown = [c for c in home.claims if c.claim_id == held.claim_id];
     assert shown and shown[0].student_id != alice;
+}
+
+
+test "qr payload is versioned, opaque and unique" {
+    fx = _fixture(qty=3);
+    o = fx.o;
+    now = time.time();
+    a = _claim(jid(o), "student-qr-a", now);
+    b = _claim(jid(o), "student-qr-b", now);
+    assert a.qr_payload.startswith("mlocal:v1:");
+    assert len(a.qr_payload) == len("mlocal:v1:") + 32;
+    assert a.qr_payload != b.qr_payload;
+    assert "student-qr-a" not in a.qr_payload and fx.owner not in a.qr_payload;
+    assert not a.qr_payload.startswith("http");
+    assert a.claim_id and a.claim_id != b.claim_id;
+}
+
+
+test "malformed and forged payloads are rejected" {
+    fx = _fixture(qty=2);
+    now = time.time();
+    real = _claim(jid(fx.o), "student-forge", now);
+    token = real.qr_payload[len("mlocal:v1:"):];
+    for bad in ["", "hello", token, "mlocal:v2:" + token, "mlocal:v1:" + token[:-1],
+                "mlocal:v1:" + token + "x", "mlocal:v1:" + "A" * 32, "https://evil.test/" + token] {
+        res = _redeem(fx.owner, bad, now);
+        assert not res.ok, bad;
+    }
+    assert _redeem(fx.owner, "  " + real.qr_payload + "\n", now).ok;
+}
+
+
+test "preview shows locked terms and does not redeem" {
+    fx = _fixture(qty=2, price="7");
+    now = time.time();
+    res = _claim(jid(fx.o), "student-preview", now);
+    check = _preview(fx.owner, res.qr_payload, now);
+    assert check.ok and check.status == "claimed", check.message;
+    assert check.price_cents == 700 and check.terms == "One per student.";
+    assert check.title_snapshot == fx.o.title and check.claim_id == res.claim_id;
+    again = _preview(fx.owner, res.qr_payload, now);
+    assert again.ok;
+    assert _redeem(fx.owner, res.qr_payload, now).ok;
+    after = _preview(fx.owner, res.qr_payload, now);
+    assert not after.ok and "already redeemed" in after.message;
+    assert not _preview("student-preview", res.qr_payload, now).ok;
+}
+
+
+test "claim retry returns the same qr after reload" {
+    fx = _fixture(qty=2);
+    now = time.time();
+    first = _claim(jid(fx.o), "student-reload", now);
+    v = _view(fx.o, now + 60, "student-reload");
+    assert v.my_qr_payload == first.qr_payload and v.my_claim_id == first.claim_id;
+    assert v.my_status == "claimed";
 }
