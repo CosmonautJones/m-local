@@ -5,7 +5,14 @@ Restaurant -Serves-> MenuItem
 Restaurant -Publishes-> Offer -Features-> MenuItem
 Offer -ClaimedAs-> Redemption
 
-Times are epoch seconds (float); display is converted to Ann Arbor local time.
+The catalog hangs off root.shared so every visitor sees the same offers.
+Identity is the caller's root id (jid(root)); ownership is enforced in
+services/promo.jac, never by the client.
+
+Money is authoritative in integer cents (price_cents, regular_price_cents,
+price_cents_snapshot). The float price fields are display copies kept for
+existing callers. Times are epoch seconds (float); display is converted to
+Ann Arbor local time.
 """
 
 node Restaurant {
@@ -14,6 +21,7 @@ node Restaurant {
         cuisine: str = "",
         blurb: str = "",
         merchant_key: str = "",
+        owner_actor_id: str = "",
         is_demo: bool = False,
         source: str = "manual";
 }
@@ -28,6 +36,7 @@ node Location {
 node MenuItem {
     has name: str,
         price: float = 0.0,
+        price_cents: int = 0,
         dietary: list[str] = [];
 }
 
@@ -36,6 +45,8 @@ node Offer {
         description: str = "",
         price: float = 0.0,
         regular_price: float = 0.0,
+        price_cents: int = 0,
+        regular_price_cents: int = 0,
         start_ts: float = 0.0,
         end_ts: float = 0.0,
         quantity: int = 0,
@@ -48,13 +59,22 @@ node Offer {
         created_ts: float = 0.0;
 }
 
+"""One student's claim on one offer. student_id holds the claimant's actor id.
+status: claimed, redeemed, expired or cancelled. The snapshot fields freeze the
+terms the student accepted; later offer edits never change them. expires_ts is
+the immutable claim deadline."""
 node Redemption {
     has student_id: str,
         code: str,
         status: str = "claimed",
         claimed_ts: float = 0.0,
         expires_ts: float = 0.0,
-        redeemed_ts: float = 0.0;
+        redeemed_ts: float = 0.0,
+        cancelled_ts: float = 0.0,
+        offer_title_snapshot: str = "",
+        price_cents_snapshot: int = 0,
+        terms_snapshot: str = "",
+        eligibility_snapshot: str = "";
 }
 
 edge HasLocation: Restaurant --> Location {}
