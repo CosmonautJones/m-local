@@ -51,7 +51,6 @@ import from "@jac/mobui" {
     useWindowDimensions
 }
 import from .theme { C, buildStyles, statusColors, money }
-import from .services.session { SessionView }
 import from .client.session { signOut, loadSession, acceptEmailToken }
 import from .client.onboarding { EmailOnboarding, BusinessOnboarding, AudienceWelcome, audienceForSession }
 import from .client.account_profile { AccountProfile }
