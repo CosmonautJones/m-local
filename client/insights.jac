@@ -129,14 +129,14 @@ def SalesChart(
     return <section className={"bi-sales-chart" + (" bi-sales-all" if part == "total" else "")} data-part={part} aria-label={title + " sales"}>
         <div className="bi-sales-top">
             <div><h3>{title}</h3><p className="bi-note">{hours}</p></div>
-            <div className="bi-sales-total"><strong>{money(chart.value_cents)}</strong><span className="bi-note">{count(chart.redemptions) + " redeemed"}</span>{(<span className="bi-note">{money(chart.regular_cents) + " at regular prices"}</span>) if chart.discount_known > 0 else None}</div>
+            <div className="bi-sales-total"><strong>{money(chart.value_cents)}</strong><span className="bi-note">{count(chart.redemptions) + " redeemed"}</span>{(<span className="bi-note">{money(chart.regular_cents) + " at regular prices"}</span>) if chart.discount_known == chart.redemptions and chart.redemptions > 0 else None}</div>
         </div>
         <div className="bi-sales-plot" onMouseLeave={lambda { picked = 0; }}>
             {(<div className="bi-sales-tip" role="status" style={{"left": str(min(80.0, max(20.0, chosen[0].center))) + "%"}}>
                 <strong>{displayDate(chosen[0].date, True)}</strong>
                 <span>{money(chosen[0].value) + " in redemptions"}</span>
                 <span>{count(chosen[0].redemptions) + (" redemption" if chosen[0].redemptions == 1 else " redemptions")}</span>
-                {(<span>{money(chosen[0].regular) + " at regular prices, " + money(chosen[0].discount) + " discounted"}</span>) if chosen[0].known > 0 else None}
+                {(<span>{money(chosen[0].regular) + " at regular prices, " + money(chosen[0].discount) + " discounted"}</span>) if chosen[0].known == chosen[0].redemptions and chosen[0].redemptions > 0 else None}
             </div>) if chosen else None}
             <svg className="bi-chart" viewBox="0 0 720 146" role="img" aria-label={spoken}>
                 {[<line key={y} x1="12" x2="708" y1={y} y2={y} stroke="var(--ml-border)" strokeDasharray={None if y == 132 else "3 5"} /> for y in [12, 72, 132]]}
@@ -145,7 +145,7 @@ def SalesChart(
                     for bar in chart.bars if bar.extra > 0
                 ]}
                 {[
-                    <rect className="bi-bar-paid" key={"p" + str(bar.day)} x={bar.x} y={bar.y} width={bar.width} height={bar.height} rx="1" fill="var(--ml-accent)" />
+                    <rect className="bi-bar-paid" key={"p" + str(bar.day)} x={bar.x} y={bar.y} width={bar.width} height={bar.height} rx="1" fill="var(--ml-good)" />
                     for bar in chart.bars if bar.height > 0
                 ]}
                 {[
@@ -173,7 +173,7 @@ def SalesCharts(data: InsightData, cutoff: int) -> JsxElement {
         <div>
             <h3>Sales through your offers</h3>
             <p className="bi-note">The recorded price of every redeemed offer, by day, in Ann Arbor time. The four time-of-day charts share one scale so they can be compared. Extras bought in store are not recorded.</p>
-            <p className="bi-sales-key"><span><i style={{"background": "var(--ml-accent)"}} />Paid with your offers</span><span><i style={{"background": "var(--ml-maize)"}} />Lost potential: what regular prices would have added</span></p>
+            <p className="bi-sales-key"><span><i style={{"background": "var(--ml-good)"}} />Paid with your offers</span><span><i style={{"background": "var(--ml-maize)"}} />Lost potential: what regular prices would have added</span></p>
         </div>
         <SalesChart data={data} sales={sales} part="total" title="All day" hours="Every redemption" cutoff={cutoff} ceiling={0} />
         <div className="bi-sales-grid">
@@ -187,7 +187,7 @@ def SalesCharts(data: InsightData, cutoff: int) -> JsxElement {
             {(<>
                 <strong>{money(whole.discount_cents)}</strong>
                 <p className="bi-note">{money(whole.discount_cents) + " in recorded discounts across " + count(whole.discount_known) + " redemptions with a known regular price."}</p>
-                <p className="bi-note">{"This is what your business gave up through its discounts, its total losses against regular prices. At regular prices these redemptions would have brought in " + money(whole.regular_cents) + "; with your offers they brought in " + money(whole.value_cents) + "."}</p>
+                <p className="bi-note">{("At regular prices these redemptions would have brought in " + money(whole.regular_cents) + "; with your offers they brought in " + money(whole.value_cents) + ".") if whole.discount_known == whole.redemptions else "Some redemptions have no recorded regular price. This discount total includes only redemptions with known prices."}</p>
                 <p className="bi-note">It assumes every one of these customers would have paid full price without the offer.</p>
             </>) if whole.discount_known > 0 else <p className="bi-note">No redemption in this period has a recorded regular price, so the discount cannot be totaled.</p>}
         </div>
