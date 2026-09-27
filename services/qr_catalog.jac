@@ -12,16 +12,16 @@ Only initial bootstrap bridges those app-owned nodes into the public commons.
 Serializable request replay prevents two bootstraps publishing duplicate catalogs.
 """
 def _ensure_seed {
-    if not [root.shared -->[?:Restaurant]] {
-        previous = [jid(r) for r in [root -->[?:Restaurant]]];
-        seed_demo();
-        for r in [root -->[?:Restaurant]] {
-            if jid(r) not in previous {
-                for o in [r ->:Publishes:->] { o.qr_ready = True; }
-            }
-            if jid(root) != jid(root.shared) {
-                root.shared ++> r;
-            }
+    # seed_demo imports only missing fictional slugs, so run it even when a
+    # partial or real shared catalog already exists.
+    previous = [jid(r) for r in [root -->[?:Restaurant]]];
+    seed_demo();
+    for r in [root -->[?:Restaurant]] {
+        if jid(r) not in previous {
+            for o in [r ->:Publishes:->] { o.qr_ready = True; }
+        }
+        if jid(root) != jid(root.shared) and not [root.shared -->[?:Restaurant, slug == r.slug]] {
+            root.shared ++> r;
         }
     }
     # Compatibility backfill for the unchanged importer and old durable catalog.
