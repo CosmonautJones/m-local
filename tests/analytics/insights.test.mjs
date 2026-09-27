@@ -101,10 +101,12 @@ test('out-of-order responses, replay, range switches and unmount invalidate old 
 
 const names = {morning:'Morning', lunch:'Lunch', dinner:'Dinner', late:'Late night'};
 export function sales(source = fixture()) {
+  const none = () => ({redemptions: 0, value_cents: 0, discount_cents: 0, discount_known: 0});
   const days = source.frames.slice(1).map((frame, index) => {
-    const lunch = {redemptions: index % 2 ? 2 : 1, value_cents: index % 2 ? 1000 : 500}, late = {redemptions: index === 3 ? 1 : 0, value_cents: index === 3 ? 300 : 0};
-    return {date: frame.date, morning: {redemptions: 0, value_cents: 0}, lunch, dinner: {redemptions: 0, value_cents: 0}, late,
-      total: {redemptions: lunch.redemptions + late.redemptions, value_cents: lunch.value_cents + late.value_cents}, actor_id: 'SECRET-PERSON'};
+    const lunch = {redemptions: index % 2 ? 2 : 1, value_cents: index % 2 ? 1000 : 500, discount_cents: index % 2 ? 600 : 300, discount_known: index % 2 ? 2 : 1};
+    const late = index === 3 ? {redemptions: 1, value_cents: 300, discount_cents: 0, discount_known: 0} : none();
+    return {date: frame.date, morning: none(), lunch, dinner: none(), late,
+      total: {redemptions: lunch.redemptions + late.redemptions, value_cents: lunch.value_cents + late.value_cents, discount_cents: lunch.discount_cents, discount_known: lunch.discount_known}, actor_id: 'SECRET-PERSON'};
   });
   return {blocks: SALES_KEYS.map(key => ({key, label: names[key], hours: 'Fixture hours'})), days,
     offers: [{id: 'SECRET-OFFER-ID', title: 'Lunch bowl', schedule: 'Sep 27, 11 AM to 2 PM', claims: 12, redemptions: 10, value_cents: 5000, busiest: 'Lunch', customer_email: 'secret@example.test',
@@ -132,6 +134,10 @@ test('sales reject malformed, misdated and non-adding summaries', () => {
     summary => { summary.days[2].total.value_cents += 1; },
     summary => { summary.days[2].total.redemptions += 1; },
     summary => { summary.days[3].late.redemptions = 1.5; },
+    summary => { summary.days[1].lunch.discount_cents = -5; },
+    summary => { summary.days[1].total.discount_cents += 1; },
+    summary => { summary.days[0].lunch.discount_known = 9; summary.days[0].total.discount_known = 9; },
+    summary => { summary.days[3].late.discount_cents = 50; summary.days[3].total.discount_cents += 50; },
     summary => { summary.offers[0].redemptions = '3'; },
     summary => { summary.offers[0].blocks = summary.offers[0].blocks.slice(1); },
     summary => { delete summary.offers; },
@@ -150,16 +156,33 @@ test('sales charts total, scale and hide days beyond the replay date', () => {
   assert.equal(all.value_cents, 5300);
   assert.equal(all.redemptions, 11);
   assert.equal(lunch.value_cents + late.value_cents, all.value_cents);
-  assert.equal(all.maximum, 1300);
-  assert.equal(lunch.maximum, 1000);
-  assert.equal(late.maximum, 1000, 'time-of-day charts share one scale');
+  assert.equal(all.maximum, 1900, 'the scale leaves room for the regular price');
+  assert.equal(lunch.maximum, 1600);
+  assert.equal(late.maximum, 1600, 'time-of-day charts share one scale');
+  assert.equal(all.discount_cents, 3000);
+  assert.equal(all.discount_known, 10);
+  assert.equal(all.regular_cents, 8300);
+  assert.equal(lunch.discount_cents + late.discount_cents, all.discount_cents);
+  const second = all.bars[1];
+  assert.deepEqual([second.value, second.redemptions, second.discount, second.known, second.regular, second.date], [1000, 2, 600, 2, 1600, data.sales.days[1].date]);
+  assert.ok(all.bars.every(bar => bar.top === bar.y - bar.extra && bar.top >= 12 && bar.slot >= 12 && bar.slot + bar.slot_width <= 708.1 && bar.center > 0 && bar.center < 100));
+  assert.equal(late.bars[3].extra, 0, 'no yellow bar without a known regular price');
+  assert.ok(lunch.bars[1].extra > 0 && lunch.bars[1].height > lunch.bars[1].extra);
   assert.equal(all.bars.length, 7);
   assert.equal(all.best_date, data.sales.days[3].date);
   assert.ok(all.bars.every(bar => bar.x >= 12 && bar.x + bar.width <= 708 && bar.y >= 12 && bar.y + bar.height === 132));
+  const older = sales();
+  for (const day of older.days) for (const key of ['total', ...SALES_KEYS]) { delete day[key].discount_cents; delete day[key].discount_known; }
+  const plain = salesChart(normalizeInsights({...fixture(), sales: older}, 7).sales, 'total', 7);
+  assert.equal(plain.discount_cents, 0);
+  assert.equal(plain.maximum, 1300);
+  assert.ok(plain.bars.every(bar => bar.extra === 0));
   assert.equal(late.bars.filter(bar => bar.height > 0).length, 1);
   const early = salesChart(data.sales, 'total', 2);
   assert.equal(early.value_cents, 1500);
   assert.equal(early.bars.filter(bar => bar.height > 0).length, 2);
+  assert.equal(early.bars.filter(bar => bar.live).length, 2);
+  assert.equal(early.discount_cents, 900);
   assert.equal(salesChart(data.sales, 'total', 0).value_cents, 0);
   assert.equal(salesChart(data.sales, 'total', 0).best_date, '');
   assert.equal(salesChart(data.sales, 'total', 999).value_cents, 5300);

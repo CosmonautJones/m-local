@@ -170,7 +170,7 @@ def _sales(rows: list[_Claim], start_date: date, days: int, start_ts: float, now
     to count anything.
     """
     keys = [key for key, *_rest in TIME_BLOCKS]
-    cell = lambda: {"redemptions": 0, "value_cents": 0}
+    cell = lambda: {"redemptions": 0, "value_cents": 0, "discount_cents": 0, "discount_known": 0}
     calendar = [{"date": (start_date + timedelta(days=index)).isoformat(), "total": cell(), **{key: cell() for key in keys}}
                 for index in range(days)]
     offers: dict[str, dict[str, Any]] = {}
@@ -196,9 +196,13 @@ def _sales(rows: list[_Claim], start_date: date, days: int, start_ts: float, now
                 continue
             key = _block_of(row.redeemed, zone)
             worth = row.price if row.price is not None else 0
+            priced = row.price is not None and row.regular is not None and row.regular >= row.price
             for target in (calendar[index]["total"], calendar[index][key]):
                 target["redemptions"] += 1
                 target["value_cents"] += worth
+                if priced:
+                    target["discount_known"] += 1
+                    target["discount_cents"] += row.regular - row.price
             mine = offer_for(row)
             mine["redemptions"] += 1
             mine["value_cents"] += worth
