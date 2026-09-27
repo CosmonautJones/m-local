@@ -70,7 +70,7 @@ test('the newest filter response wins even when an earlier request arrives last'
 test('signout ignores a delayed private detail response',async()=>{
  let release;const slow=new Promise(r=>{release=r;});let first=true;
  const ui=await app({item:held(),intercept:async(name)=>{if(name==='get_offer'&&first){first=false;await slow;return rpc(held());}}});
- try{ui.click('Saved bowl');await until(()=>ui.calls.some(c=>c.name==='get_offer'));ui.click('Sign out');await until(()=>ui.text().includes('Open sign in'));release();await new Promise(r=>setTimeout(r,80));assert.equal(ui.text().includes('Your saved claim'),false);assert.equal(ui.document.querySelector('svg[role="img"]')!==null,false);assert.deepEqual(ui.errors,[]);}finally{release();ui.close();}
+ try{ui.click('Saved bowl');await until(()=>ui.calls.some(c=>c.name==='get_offer'));ui.click('Sign out');await until(()=>ui.find('Find local deals'));assert.ok(ui.find('List my business'));release();await new Promise(r=>setTimeout(r,80));assert.equal(ui.text().includes('Your saved claim'),false);assert.equal(ui.document.querySelector('svg[role="img"]')!==null,false);assert.deepEqual(ui.errors,[]);}finally{release();ui.close();}
 });
 
 test('actual scanner composition recovers from denied camera permission',async()=>{
@@ -81,7 +81,7 @@ test('actual scanner composition recovers from denied camera permission',async()
 
 test('signout removes an already visible claim QR and saved terms',async()=>{
  const ui=await app({item:held()});
- try{ui.click('Saved bowl');await until(()=>ui.document.querySelector('svg')&&ui.text().includes('Saved meal terms'),'visible claim QR');ui.click('Sign out');await until(()=>ui.text().includes('Open sign in'));assert.equal(ui.document.querySelector('svg'),null);assert.equal(ui.text().includes('Saved meal terms'),false);assert.equal(ui.text().includes('Your QR is ready'),false);assert.deepEqual(ui.errors,[]);}finally{ui.close();}
+ try{ui.click('Saved bowl');await until(()=>ui.document.querySelector('svg')&&ui.text().includes('Saved meal terms'),'visible claim QR');ui.click('Sign out');await until(()=>ui.find('Find local deals'));assert.ok(ui.find('List my business'));assert.equal(ui.document.querySelector('svg'),null);assert.equal(ui.text().includes('Saved meal terms'),false);assert.equal(ui.text().includes('Your QR is ready'),false);assert.deepEqual(ui.errors,[]);}finally{ui.close();}
 });
 
 test('a stale displayed hold hides its QR after the saved deadline',async()=>{
