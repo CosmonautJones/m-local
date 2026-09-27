@@ -83,7 +83,8 @@ test('pointing at a day shows its date, money and redemptions, and yellow shows 
   const day=spot(ui,'total',30);
   assert.equal(day.getAttribute('aria-label'),'Sep 27, 2026: $15 in redemptions, 3 redemptions');
   over(ui,day,'mouseover');await until(()=>tip(ui,'total'),'pop-up for the last day');
-  assert.deepEqual([...tip(ui,'total').children].map(node=>node.textContent),['Sep 27, 2026','$15 in redemptions','3 redemptions','$21 at regular prices, $6 discounted']);
+  assert.deepEqual([...tip(ui,'total').children].map(node=>node.textContent),['Sep 27, 2026','$15 in redemptions','3 redemptions']);
+  assert.equal(chart(ui,'total').querySelector('.bi-bar-paid').getAttribute('fill'),'var(--ml-good)');
   assert.equal(tip(ui,'lunch'),null,'only the chart being pointed at shows a pop-up');
   over(ui,spot(ui,'total',1),'mouseover');await until(()=>tip(ui,'total').textContent.includes('Aug 29, 2026'));
   over(ui,chart(ui,'total').querySelector('.bi-sales-plot'),'mouseout');await until(()=>tip(ui,'total')===null,'pop-up goes away');
@@ -93,12 +94,13 @@ test('pointing at a day shows its date, money and redemptions, and yellow shows 
   assert.deepEqual([...tip(ui,'morning').children].map(node=>node.textContent),['Aug 31, 2026','$0 in redemptions','0 redemptions']);
   const key=region(ui).querySelector('.bi-sales-key').textContent;
   assert.ok(key.includes('Paid with your offers'));assert.ok(key.includes('Lost potential: what regular prices would have added'));
-  assert.ok(chart(ui,'total').textContent.includes('$630 at regular prices'));
+  assert.equal(chart(ui,'total').textContent.includes('$630 at regular prices'),false);
+  assert.ok(chart(ui,'lunch').textContent.includes('$480 at regular prices'));
   const cost=region(ui).querySelector('[aria-label="Total subsidized through discounts"]');
   assert.equal(cost.querySelector('strong').textContent,'$180');
   assert.ok(cost.textContent.includes('$180 in recorded discounts across 60 redemptions with a known regular price.'));
-  assert.ok(cost.textContent.includes('its total losses against regular prices'));
-  assert.ok(cost.textContent.includes('would have brought in $630; with your offers they brought in $450.'));
+  assert.ok(cost.textContent.includes('Some redemptions have no recorded regular price.'));
+  assert.equal(cost.textContent.includes('would have brought in $630'),false);
   setRange(ui,10);await until(()=>bars(ui,'total')===10);
   assert.equal(yellow(ui,'total'),10);assert.equal(chart(ui,'total').querySelectorAll('svg rect.bi-bar-hit').length,10,'days beyond the replay date cannot be chosen');
   assert.equal(cost.querySelector('strong').textContent,'$60');
