@@ -65,7 +65,7 @@ def StatusPill(state: str) -> JsxElement {
 
 
 def DemoTag() -> JsxElement {
-    return <View style={styles.demo}><Text style={styles.demoText}>DEMO</Text></View>;
+    return <View style={styles.demo}><Text style={styles.demoText}>SYNTHETIC DEMO</Text></View>;
 }
 
 
@@ -580,14 +580,19 @@ def:pub app -> JsxElement {
                     {"Updating..." if busy else "Sign in to claim" if not studentSession and claimable else "Claim this offer" if claimable else "Already claimed" if o.my_status else "Not claimable right now"}
                 </Text>
             </Pressable>
-            <Text style={styles.small}>Prices exclude tax unless the saved terms say otherwise. The restaurant checks the stated ID requirement.</Text>
+            <Text style={styles.small}>Synthetic demo offers and menus are examples, not merchant-confirmed prices or availability. The restaurant checks the stated ID requirement.</Text>
             {(
                 <View style={styles.note}>
                     <Text style={[styles.noteText, {"fontWeight": "800"}]}>Unverified restaurant note</Text>
                     <Text style={styles.noteText}>{o.entrance_note}</Text>
-                    <Text style={styles.noteText}>{("Date provided: " + o.note_date + ". " if o.note_date else "") + "Not independently checked. Confirm current access with the restaurant."}</Text>
+                    <Text style={styles.noteText}>{("Date provided: " + o.note_date + ". " if o.note_date else "") + ("Demo content only; not a verified real access notice." if o.is_demo else "Not independently checked. Confirm current access with the restaurant.")}</Text>
                 </View>
-            ) if o.entrance_note else <View />}
+            ) if o.entrance_note else (
+                <View style={styles.note}>
+                    <Text style={[styles.noteText, {"fontWeight": "800"}]}>Access information not verified</Text>
+                    <Text style={styles.noteText}>{"Synthetic demo fixture; no source-backed entrance directions are provided." if o.is_demo else "No reviewed access notice is available. This does not confirm access is clear; check with the restaurant before visiting."}</Text>
+                </View>
+            )}
             <View style={styles.section}>
                 <Text style={styles.body}>{o.address + (" · " + o.neighborhood if o.neighborhood else "")}</Text>
                 {(<View style={{"gap": 8}}>
