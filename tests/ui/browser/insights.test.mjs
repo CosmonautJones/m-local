@@ -35,7 +35,7 @@ test('native Insights range, playback, freeze, stale-response isolation and reca
  const ui=await app({role:'merchant',verified:true,configureWindow(w){
   w.URL.createObjectURL=value=>{blob=value;return 'blob:fixture';};w.URL.revokeObjectURL=()=>{};
   w.HTMLAnchorElement.prototype.click=function(){downloadName=this.download;};
-  const original=w.setInterval.bind(w);w.setInterval=(callback,ms)=>{if(ms===30000){background=callback;return 987654;}return original(callback,ms);};
+  const original=w.setInterval.bind(w);w.setInterval=(callback,ms)=>{if(ms===120000){background=callback;return 987654;}return original(callback,ms);};
  },intercept(name,body){if(name==='merchant_insights'){
   if(holdNext){holdNext=false;requestedPeriod=body.days;return new Promise(resolve=>{release=resolve;});}
   return rpc(fixture(body.days));

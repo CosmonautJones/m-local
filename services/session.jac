@@ -36,11 +36,11 @@ def _merchant_for_actor(actor: str) -> Restaurant | None {
 }
 
 def:pub current_session() -> SessionView {
-    _ensure_seed();
     actor = _actor_id();
     if not actor {
         return SessionView();
     }
+    _ensure_seed();
     r = _merchant_for_actor(actor);
     account = verified_account(actor);
     if r is not None {

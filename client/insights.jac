@@ -295,7 +295,7 @@ def:pub BusinessInsights(getInsights: Callable[[int], any], showProvenance: bool
 
         loadRef.current = load;
         load();
-        interval = setInterval(lambda { load(True); }, 30000);
+        interval = setInterval(lambda { load(True); }, 120000);
         def visible() {
             if not browserDocument.hidden { load(True); }
             else { playing = False; }
@@ -411,7 +411,7 @@ def:pub BusinessInsights(getInsights: Callable[[int], any], showProvenance: bool
                 </div>
             </section>
             <SalesCharts data={data} cutoff={cutoff} />
-            <div className="bi-snapshot"><span>{"Updates paused while you explore. Return to latest to refresh." if frozen else "Refreshes every 30 seconds while this tab is visible."}</span><span>{"Collected " + collected + " · Ann Arbor time"}</span></div>
+            <div className="bi-snapshot"><span>{"Updates paused while you explore. Return to latest to refresh." if frozen else "Refreshes every 2 minutes while this tab is visible."}</span><span>{"Collected " + collected + " · Ann Arbor time"}</span></div>
             <div className="bi-columns">
                 <Outcomes metrics={totals} rate={view.rate} />
                 <section aria-label="Most-redeemed offers">

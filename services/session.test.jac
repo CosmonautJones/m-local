@@ -1,4 +1,14 @@
 import from services.qr_auth { configured_owners }
+import from unittest.mock { patch }
+
+test "anonymous session never loads the catalog" {
+    with patch.dict(current_session.__globals__, {
+        "_actor_id": lambda () -> str { return ""; },
+        "_ensure_seed": lambda () { raise RuntimeError("guest loaded catalog"); }
+    }) {
+        assert current_session().role == "guest";
+    }
+}
 
 test "merchant provisioning accepts only trusted UUID mappings" {
     actor = "a1c7350c-5be2-4b78-aef1-905e7e1b6fe4";
