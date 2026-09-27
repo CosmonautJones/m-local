@@ -14,3 +14,5 @@ Final generation prompt (built-in image generation, transparent background):
 
 Figtree is a variable font from the Google Fonts Figtree distribution, licensed under the included SIL Open Font License (OFL.txt).
 The font and images are served locally by Jac; no third-party font request is required.
+
+`m-mark-maize.png` and `local-word-white.png` are cut from `logo-compact.png` (M at 0,36 150x124; Local at 170,36 280x124) and recolored for the navy app opener in `client/app-opener.jsx`, matching the Claude Design "Mmm Local Intro".

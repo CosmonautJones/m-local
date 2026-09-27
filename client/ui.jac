@@ -1,6 +1,7 @@
 """Shared themed presentation primitives for the Jac phone interface."""
 import from "react" { Fragment, useLayoutEffect, useSyncExternalStore }
 import from "./theme.mjs" { createThemeStore }
+import from "./app-opener.jsx" { AppOpener }
 
 obj UiColors {
     has ink: str = "var(--ml-ink)", navy: str = "var(--ml-accent)",
@@ -108,7 +109,7 @@ def:pub UiFoundation() -> JsxElement {
         document.documentElement.dataset["theme"] = current.resolved;
         document.documentElement.style.setProperty("color-scheme", current.resolved);
     }, [current.resolved]);
-    return <style>{foundationStyles}</style>;
+    return <Fragment><style>{foundationStyles}</style><AppOpener /></Fragment>;
 }
 
 def:pub NavIcon(name: str, active: bool = False) -> JsxElement {
