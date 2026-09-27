@@ -17,6 +17,9 @@ export function rememberAudience(value) {
  if(!['student','business'].includes(value))return;
  try {localStorage.setItem(audienceKey,value);}catch{/* Browsing still works when storage is unavailable. */}
 }
+export function clearAudience() {
+ try {localStorage.removeItem(audienceKey);}catch{/* Browsing still works when storage is unavailable. */}
+}
 export function audienceForSession(session) {
  if(!session?.authenticated)return '';
  return session.role==='student'?'student':['business','merchant'].includes(session.role)?'business':'';
@@ -40,7 +43,7 @@ export function AudienceWelcome({onChoose}) {
      <span style={{...stack,gap:8,color:'inherit'}}><span style={{fontSize:21,fontWeight:750}}>List my business</span><span style={{fontSize:14,lineHeight:1.5,fontWeight:400}}>Create your business profile.<br/>Connect with the U-M community.</span></span><span aria-hidden="true" style={{fontSize:26}}>→</span>
     </button>
    </div>
-   <p style={hint}>New here or coming back? Start with your path.<br/>We’ll remember it on this browser.</p>
+   <p style={hint}>New here or coming back? Choose how you’d like to sign in.</p>
   </div>
  </main>;
 }

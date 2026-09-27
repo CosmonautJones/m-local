@@ -37,7 +37,7 @@ import from "@jac/mobui" {
 import from .theme { C, buildStyles, statusColors, money }
 import from .services.session { SessionView }
 import from .client.session { signIn, signOut, loadSession, acceptEmailToken }
-import from "./client/onboarding.jsx" { EmailOnboarding, BusinessOnboarding, AudienceWelcome, readAudience, rememberAudience, audienceForSession }
+import from ".client.onboarding.jsx" { EmailOnboarding, BusinessOnboarding, AudienceWelcome, readAudience, rememberAudience, audienceForSession }
 import from "./client/qr.jsx" { ClaimQr, ClaimScanner }
 import from "./client/scan-controller.mjs" { isClaimPayload }
 
@@ -258,7 +258,8 @@ def:pub app -> JsxElement {
     }
 
     def logout() {
-        signOut(); clearPrivate(); session = None; password = "";
+        signOut(); clearAudience(); audience = "";
+        clearPrivate(); session = None; password = "";
         tab = "discover"; authOpen = False; businessOpen = False; authMsg = ""; refresh();
     }
 

@@ -93,16 +93,30 @@ test('verified student never receives a business creation prompt',async()=>{
  }finally{ui.close();}
 });
 
-test('restored business session replaces a stale student preference and keeps its login on signout',async()=>{
+test('business signout returns to the neutral account-choice screen',async()=>{
  const ui=await app({role:'business',verified:true,audience:'student'});
  try{
   assert.equal(ui.window.localStorage.getItem('mlocal_audience'),'business');
-  ui.click('Sign out');await until(()=>ui.find('Open sign in'));
-  ui.click('Open sign in');await until(()=>ui.document.querySelector('input[placeholder="you@business.com"]'));
+  ui.click('Sign out');await until(()=>ui.find('Find local deals'));
+  assert.equal(ui.window.localStorage.getItem('mlocal_audience'),null);
+  assert.ok(ui.find('List my business'));
+  assert.equal(ui.find('Open sign in'),undefined);
+  ui.click('Find local deals');await until(()=>ui.document.querySelector('input[placeholder="uniqname"]'));
+  assert.equal(ui.document.querySelector('input[placeholder="you@business.com"]'),null);
+  assert.deepEqual(ui.errors,[]);
+ }finally{ui.close();}
+});
+
+test('student signout returns to the neutral account-choice screen',async()=>{
+ const ui=await app({role:'student',verified:true,audience:'business'});
+ try{
+  assert.equal(ui.window.localStorage.getItem('mlocal_audience'),'student');
+  ui.click('Sign out');await until(()=>ui.find('Find local deals'));
+  assert.equal(ui.window.localStorage.getItem('mlocal_audience'),null);
+  assert.ok(ui.find('List my business'));
+  assert.equal(ui.find('Open sign in'),undefined);
+  ui.click('List my business');await until(()=>ui.document.querySelector('input[placeholder="you@business.com"]'));
   assert.equal(ui.document.querySelector('input[placeholder="uniqname"]'),null);
-  assert.equal(ui.find('Find local deals'),undefined);
-  ui.click('Keep browsing');ui.click('Current bowl');await until(()=>ui.find('For U-M customers'));
-  assert.equal(ui.find('Sign in to claim'),undefined);
   assert.deepEqual(ui.errors,[]);
  }finally{ui.close();}
 });
