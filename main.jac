@@ -1,5 +1,4 @@
-"""PromoPusher - time-limited Ann Arbor restaurant offers for students.
-
+"""
 Server rules live in services/promo.jac; the whole mobui UI lives here
 (E1105 no-HTML guard is only enforced on the entry module).
 """
@@ -37,9 +36,9 @@ import from "@jac/mobui" {
 import from .theme { C, buildStyles, statusColors, money }
 import from .services.session { SessionView }
 import from .client.session { signIn, signOut, loadSession, acceptEmailToken }
-import from ".client.onboarding.jsx" { EmailOnboarding, BusinessOnboarding, AudienceWelcome, readAudience, rememberAudience, audienceForSession }
-import from "./client/qr.jsx" { ClaimQr, ClaimScanner }
-import from "./client/scan-controller.mjs" { isClaimPayload }
+import from './client/onboarding.jsx' { EmailOnboarding, BusinessOnboarding, AudienceWelcome, readAudience, rememberAudience, clearAudience, audienceForSession }
+import from './client/qr.jsx' { ClaimQr, ClaimScanner }
+import from './client/scan-controller.mjs' { isClaimPayload }
 
 
 glob styles = buildStyles(C);
