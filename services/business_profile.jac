@@ -33,7 +33,7 @@ def _public_business(slug: str, offer_id: str, now: float) -> BusinessProfileVie
     show_samples = demo_mode(os.environ.get(DEMO_MODE_ENV, "")) or os.environ.get("MLOCAL_HOSTED_DATASET", "") == "1";
     r: Restaurant | None = None;
     if target {
-        matches = [item for item in [root.shared -->[?:Restaurant]] if item.slug == target];
+        matches = [item for item in [root.shared -->[?:Restaurant]] if item.slug == target and not item.archived];
         r = matches[0] if matches else None;
     } elif offer_id.strip() {
         o = _find_offer(offer_id.strip());
@@ -46,7 +46,7 @@ def _public_business(slug: str, offer_id: str, now: float) -> BusinessProfileVie
     # Publication is explicit: malformed or future draft statuses fail closed.
     # Scheduled and sold-out published offers keep their existing view states.
     offers = [_view(o, now) for o in [r ->:Publishes:->]
-        if o.status == "active" and now < o.end_ts and (show_samples or not o.is_demo)];
+        if o.status == "active" and now < o.end_ts and not o.archived and (show_samples or not o.is_demo)];
     return BusinessProfileView(
         ok=True,
         slug=r.slug,

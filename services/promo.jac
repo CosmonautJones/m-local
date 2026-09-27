@@ -249,7 +249,7 @@ def _location_of(r: Restaurant) -> Location | None {
 def _find_offer(offer_id: str) -> Offer | None {
     for r in [root.shared -->[?:Restaurant]] {
         for o in [r ->:Publishes:->] {
-            if jid(o) == offer_id {
+            if jid(o) == offer_id and not o.archived {
                 return o;
             }
         }
@@ -746,7 +746,9 @@ def:pub list_offers(
     eod = _end_of_today(now);
     out: list[OfferView] = [];
     for r in [root.shared -->[?:Restaurant]] {
+        if r.archived { continue; }
         for o in [r ->:Publishes:->] {
+            if o.archived { continue; }
             v = _view(o, now, _actor_id(), budget, window, wanted);
             # A saved live QR remains reachable after reload even when the
             # merchant pauses/edits an offer or student changes discovery filters.

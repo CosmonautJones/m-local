@@ -20,7 +20,8 @@ node Restaurant {
         merchant_key: str = "",  # Legacy import compatibility; never authorization.
         owner_actor_id: str = "",
         is_demo: bool = False,
-        source: str = "manual";
+        source: str = "manual",
+        archived: bool = False;
 }
 
 node Location {
@@ -56,6 +57,7 @@ node Offer {
         dietary: list[str] = [],
         status: str = "active",
         is_demo: bool = False,
+        archived: bool = False,
         menu_item: str = "",
         created_ts: float = 0.0;
 }

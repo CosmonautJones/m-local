@@ -216,7 +216,7 @@ def catalog_cards(origin_slug: str, origin_place_id: str, lat: float, lng: float
     wanted = set([str(row[0]) for row in near]);
     owners: dict[str, Restaurant] = {};
     for r in [root.shared -->[?:Restaurant]] {
-        if r.slug == origin_slug {
+        if r.archived or r.slug == origin_slug {
             continue;
         }
         linked = place_of(r);
@@ -252,10 +252,10 @@ Real businesses never receive invented coordinates for these cards."""
 def listed_cards(origin_slug: str, lat: float, lng: float, now: float, samples: bool) -> list[NearbyCard] {
     out: list[NearbyCard] = [];
     for r in [root.shared -->[?:Restaurant]] {
-        if not samples or not r.is_demo or r.slug == origin_slug {
+        if not samples or not r.is_demo or r.archived or r.slug == origin_slug {
             continue;
         }
-        live = [o for o in [r ->:Publishes:->] if _state(o, now) == "active" and _remaining(o, now) > 0 and o.is_demo];
+        live = [o for o in [r ->:Publishes:->] if not o.archived and _state(o, now) == "active" and _remaining(o, now) > 0 and o.is_demo];
         if not live {
             continue;
         }

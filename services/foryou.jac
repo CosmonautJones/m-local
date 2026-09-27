@@ -323,7 +323,9 @@ def _home(actor: str, price_range: str, window: str, diets: str, now: float) -> 
     places: dict[str, Restaurant] = {};
     total = 0;
     for r in [root.shared -->[?:Restaurant]] {
+        if r.archived { continue; }
         for o in [r ->:Publishes:->] {
+            if o.archived { continue; }
             v = _view(o, now, actor);
             starter_fixture = os.environ.get("MLOCAL_HOSTED_DATASET", "") == "1" and r.source == "demo-seed";
             discoverable = o.status != "paused" and now < o.end_ts and not starter_fixture;
