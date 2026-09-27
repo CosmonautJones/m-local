@@ -22,7 +22,7 @@ import from services.promo {
     ActionResult,
     ClaimView
 }
-import from .services.session { current_session, SessionView }
+import from services.session { current_session, SessionView }
 import from services.foryou {
     home_feed,
     taste_choices,
