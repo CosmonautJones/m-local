@@ -27,7 +27,9 @@ export const SALES_KEYS = ['morning', 'lunch', 'dinner', 'late'];
 const whole = value => Number.isSafeInteger(value) && value >= 0;
 function cell(value) {
   if (!value || !whole(value.redemptions) || !whole(value.value_cents)) throw new Error('The sales summary contains an invalid total.');
-  return {redemptions: value.redemptions, value_cents: value.value_cents};
+  const discount = value.discount_cents === undefined ? 0 : value.discount_cents, known = value.discount_known === undefined ? 0 : value.discount_known;
+  if (!whole(discount) || !whole(known) || known > value.redemptions || (known === 0 && discount !== 0)) throw new Error('The sales summary contains an invalid discount.');
+  return {redemptions: value.redemptions, value_cents: value.value_cents, discount_cents: discount, discount_known: known};
 }
 export function salesSummary(value, frames) {
   if (value === undefined || value === null) return null;
@@ -38,7 +40,8 @@ export function salesSummary(value, frames) {
     if (!day || day.date !== frames[index + 1].date) throw new Error('The sales summary dates do not match the timeline.');
     const parts = Object.fromEntries(SALES_KEYS.map(key => [key, cell(day[key])]));
     const total = cell(day.total);
-    if (SALES_KEYS.reduce((sum, key) => sum + parts[key].redemptions, 0) !== total.redemptions || SALES_KEYS.reduce((sum, key) => sum + parts[key].value_cents, 0) !== total.value_cents) throw new Error('The sales summary does not add up.');
+    if (SALES_KEYS.reduce((sum, key) => sum + parts[key].redemptions, 0) !== total.redemptions || SALES_KEYS.reduce((sum, key) => sum + parts[key].value_cents, 0) !== total.value_cents
+      || SALES_KEYS.reduce((sum, key) => sum + parts[key].discount_cents, 0) !== total.discount_cents || SALES_KEYS.reduce((sum, key) => sum + parts[key].discount_known, 0) !== total.discount_known) throw new Error('The sales summary does not add up.');
     return {date: day.date, total, ...parts};
   });
   const offers = value.offers.slice(0, 50).map(offer => {
@@ -55,22 +58,30 @@ export function salesSummary(value, frames) {
 export function salesChart(sales, key, cutoff, ceiling = 0) {
   const shown = Math.max(0, Math.min(sales.days.length, Math.trunc(Number(cutoff)) || 0));
   const values = sales.days.map(day => day[key].value_cents);
-  const maximum = Math.max(1, ceiling, ...values.slice(0, shown));
+  const full = sales.days.map(day => day[key].value_cents + day[key].discount_cents);
+  const maximum = Math.max(1, ceiling, ...full.slice(0, shown));
   const step = sales.days.length > 1 ? 696 / sales.days.length : 696;
   const bars = values.map((value, index) => {
-    const height = index < shown && value ? Math.max(2, Math.round(value / maximum * 120)) : 0;
-    return {day: index + 1, date: sales.days[index].date, value, x: Math.round((12 + step * index + step * 0.15) * 10) / 10, width: Math.round(step * 0.7 * 10) / 10, y: 132 - height, height};
+    const day = sales.days[index][key], live = index < shown;
+    const height = live && value ? Math.max(2, Math.round(value / maximum * 120)) : 0;
+    const extra = live && day.discount_cents ? Math.max(2, Math.round(day.discount_cents / maximum * 120)) : 0;
+    const slot = Math.round((12 + step * index) * 10) / 10;
+    return {day: index + 1, date: sales.days[index].date, value, redemptions: day.redemptions, discount: day.discount_cents, known: day.discount_known,
+      regular: value + day.discount_cents, live, x: Math.round((12 + step * index + step * 0.15) * 10) / 10, width: Math.round(step * 0.7 * 10) / 10,
+      y: 132 - height, height, extra, top: 132 - height - extra, slot, slot_width: Math.round(step * 10) / 10,
+      center: Math.round((12 + step * (index + 0.5)) / 720 * 1000) / 10};
   });
   const past = sales.days.slice(0, shown);
   const best = past.reduce((top, day) => day[key].value_cents > (top ? top[key].value_cents : 0) ? day : top, null);
+  const sum = field => past.reduce((total, day) => total + day[key][field], 0);
   return {key, maximum, bars, shown,
-    value_cents: past.reduce((sum, day) => sum + day[key].value_cents, 0),
-    redemptions: past.reduce((sum, day) => sum + day[key].redemptions, 0),
+    value_cents: sum('value_cents'), redemptions: sum('redemptions'),
+    discount_cents: sum('discount_cents'), discount_known: sum('discount_known'), regular_cents: sum('value_cents') + sum('discount_cents'),
     best_date: best ? best.date : '', best_value_cents: best ? best[key].value_cents : 0};
 }
 export function salesPeak(sales, cutoff) {
   const shown = Math.max(0, Math.min(sales.days.length, Math.trunc(Number(cutoff)) || 0));
-  return Math.max(1, ...sales.days.slice(0, shown).flatMap(day => SALES_KEYS.map(key => day[key].value_cents)));
+  return Math.max(1, ...sales.days.slice(0, shown).flatMap(day => SALES_KEYS.map(key => day[key].value_cents + day[key].discount_cents)));
 }
 
 export function normalizeInsights(reply, expectedPeriod) {
