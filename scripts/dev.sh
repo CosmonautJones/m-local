@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 source "$(dirname -- "${BASH_SOURCE[0]}")/runtime.sh"
 if [[ -f "$PROJECT_ROOT/.jac/onboarding.env" ]]; then source "$PROJECT_ROOT/.jac/onboarding.env"; fi
+if [[ -f "$PROJECT_ROOT/.jac/merchant-owners.env" ]]; then source "$PROJECT_ROOT/.jac/merchant-owners.env"; fi
 bridge_pid=''
 cleanup() {
     [[ -z "$bridge_pid" ]] || kill "$bridge_pid" 2>/dev/null || true

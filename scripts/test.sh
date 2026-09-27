@@ -12,6 +12,7 @@ case "$suite" in
             exit 2
         fi
         python3 tests/integration/qr_http.py --api "${MLOCAL_API_URL:-http://localhost:8001}" --accounts "$accounts"
+        python3 tests/integration/test_admin_approval.py
         exit 0 ;;
     *) echo 'Usage: scripts/test.sh core|context|integration|onboarding|all' >&2; exit 2 ;;
 esac
