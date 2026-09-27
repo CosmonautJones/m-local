@@ -35,6 +35,25 @@ test "seed is persistent and idempotent" {
     assert all([r.name.endswith("(Demo)") for r in [root.shared -->[?:Restaurant]]]);
 }
 
+test "warm catalog skips ownership and money backfills but checks hosted opt in" {
+    _ensure_seed();
+    with patch.dict(_ensure_seed.__globals__, {
+        "merchant_owner": lambda (slug: str) -> str { raise RuntimeError("repeated owner scan"); },
+        "money_to_cents": lambda (value: str) -> int { raise RuntimeError("repeated money migration"); }
+    }) {
+        with patch.dict(_ensure_seed.__globals__, {
+            "ensure_hosted_dataset": lambda () { raise RuntimeError("hosted opt in checked"); }
+        }) {
+            checked = False;
+            try { _ensure_seed(); } except RuntimeError as e {
+                checked = str(e) == "hosted opt in checked";
+            }
+            assert checked;
+        }
+        _ensure_seed();
+    }
+}
+
 
 test "claim then merchant redeem, repeated redemption rejected" {
     _ensure_seed();
