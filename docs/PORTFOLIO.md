@@ -81,35 +81,47 @@ Checked 2026-09-29:
 - This recovery uses `-NoAutoUpdate`. The app stays on the verified revision
   until a deliberate deployment; this differs from the normal auto-update mode
   described in [HOSTING.md](HOSTING.md).
-- The previously recorded JacHammer sandbox returned HTTP 404. The available
-  browser session was signed out, so its project state could not be inspected
-  or redeployed. Source imports do not transfer accounts or databases.
 
-## What remains before permanent production hosting
+## JacHammer hosting checkpoint
 
-The existing JacHammer **M-Local-Main** project is the first target to inspect
-after account sign-in. Its recorded project ID is
-`prj_c0b45632e1d64a60bb45efbe7397a42d`; the repository's `[jachammer]` ID refers to
-this project on the release branch. The old main binding referred to another
-project and JacHammer rejected importing it into M-Local-Main. This was verified
-in the signed-in source review on September 29 and corrected in `jac.toml`.
-Preserve the
-existing hosted settings and data, compare the current source revision, and use
-the existing project's deployment controls.
+Checked September 29, 2026, at 12:28 Eastern. The signed-in account has an
+existing Pro entitlement. No purchase or upgrade was made.
 
-The signed-in account is Pro. Before refreshing source, the hosted commit
-`5ae317a0847cceb94936386849a3d0b745ea5af5` was saved as a JacHammer checkpoint
-and pushed to `codex/jachammer-preserved-2026-09-29`. It contains unmerged
-catalog/archive changes and remains available for review. No hosted source
-changes were pushed over GitHub main.
+The existing M-Local-Main project is
+`prj_c0b45632e1d64a60bb45efbe7397a42d`. The old main binding referred to a
+separate M-Local project, and JacHammer explicitly rejected that source refresh.
+The release branch corrects the `[jachammer]` project ID. Before source refresh,
+the divergent hosted commit `5ae317a0847cceb94936386849a3d0b745ea5af5` was saved
+as a JacHammer checkpoint and pushed to `codex/jachammer-preserved-2026-09-29`.
+Its unmerged catalog/archive changes remain available for review.
 
-The [JacHammer pricing page](https://jachammer.ai/#pricing), checked 2026-09-29,
-lists 30-minute previews on Free and one permanent deployment on Builder at
-$15/month. Account entitlement and payment approval were not established. No
-subscription was purchased. Confirm current pricing in the signed-in account.
+The refreshed GitHub source ran successfully in the authenticated project
+preview: Jac 0.37.23 compiled the app, initialized embedded PostgreSQL 18.6,
+started its API and frontend, returned HTTP 200 for `current_session`, and rendered
+the welcome screen. This is evidence that GitHub-imported source can run the
+backend and database. Building the code inside JacHammer is not a requirement.
+The preview requires provider authentication and is not a public app link.
 
-Permanent release acceptance still needs authenticated hosted student/merchant
-flows, email delivery, repeated-redemption rejection, persistence across restart,
-backup/restore proof, and real phone/camera verification. A successful homepage
-or CI run alone does not satisfy those checks. Keep the laptop URL labeled as a
-host-dependent demonstration until a permanent host passes these checks.
+GitHub imports transfer source, not existing local or sandbox database contents.
+Secrets also require explicit environment configuration; they do not come from
+Git history. The eight existing project environment keys remained present during
+this refresh. Their values were not changed. Accounts and activity were not
+reset, and migration of old data into a new production database is not proven.
+
+A permanent deployment was submitted from `codex/portfolio-release-checkpoint`
+after full CI passed at `ab5ac57248df9d8ae1b218a062327ba8f020acfd`
+([checks](https://github.com/CosmonautJones/m-local/actions/runs/36595876928)).
+Automatic deployment is disabled. The requested address is `m-local.jachammer.app`,
+but it is **not yet verified live**. The provider remained in Prepare after
+creating and attaching a persistent PostgreSQL volume and starting its PostgreSQL
+18 container at 12:18:16 Eastern. No subsequent app rollout or explicit failure
+was visible by 12:28; the requested address returned HTTP 404. The deployment was
+left running, with no destructive retry or database removal.
+
+The laptop link remains the verified public demonstration and still depends on
+the laptop staying online. Permanent release acceptance needs a ready application,
+authenticated student/merchant flows, email delivery, repeated-redemption
+rejection, persistence across restart, backup/restore proof, and real phone/camera
+verification. A provisioned volume, successful homepage, or CI run alone does not
+satisfy these checks. Production route restrictions must also be checked directly;
+the laptop gateway results cannot establish the hosted ingress behavior.

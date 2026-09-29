@@ -79,6 +79,8 @@ Captured on 2026-09-27 from the current build with fictional test data
 
 ## Live app
 
+JacHammer permanent hosting is being provisioned under the existing Pro account; it is not yet verified live. See the [hosting checkpoint](docs/PORTFOLIO.md#jachammer-hosting-checkpoint).
+
 **Portfolio reviewers:** start with the [project brief](docs/PORTFOLIO.md) for
 the team attribution, architecture, demo walkthrough and current hosting limits.
 
@@ -204,3 +206,4 @@ covers installation, data isolation and the Windows network fallback.
 Payments, notifications, live routing, garage-sale listings, and automatic business
 approval. New community data sources plug in by producing records for
 `import_restaurant`.
+
