@@ -206,4 +206,3 @@ covers installation, data isolation and the Windows network fallback.
 Payments, notifications, live routing, garage-sale listings, and automatic business
 approval. New community data sources plug in by producing records for
 `import_restaurant`.
-
