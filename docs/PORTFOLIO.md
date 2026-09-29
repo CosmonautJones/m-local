@@ -31,6 +31,12 @@ For an asynchronous reviewer without an account, the [README screenshots](../REA
 show the student and business paths. Those images are dated, use fictional test
 data, and are not evidence of physical phone or camera testing.
 
+The public welcome screen below was captured from the restored HTTPS app on
+2026-09-29. The student signup path also rendered in the browser; no email was
+sent during that check.
+
+![Public M-Local welcome screen, September 29, 2026](screenshots/public-welcome-2026-09-29.png)
+
 ## Architecture and engineering decisions
 
 ```mermaid
@@ -67,6 +73,9 @@ Checked 2026-09-29:
 - The laptop service was offline and was restarted from its existing clean
   phone-link checkout and persistent store. The original working checkout and
   its uncommitted team work were left untouched.
+- SHA-256 comparison of all 97 application/configuration/resource files in the
+  live runtime against the clean deployment checkout found no mismatches or
+  extra source files. The runtime revision marker also matched `772b9d3`.
 - [Public health](https://mlocal.tail0d5ef8.ts.net/healthz) returned
   `{"ready":true}` after restart; anonymous feed returned four existing offers.
 - This recovery uses `-NoAutoUpdate`. The app stays on the verified revision
