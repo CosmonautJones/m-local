@@ -90,9 +90,18 @@ Checked 2026-09-29:
 The existing JacHammer **M-Local-Main** project is the first target to inspect
 after account sign-in. Its recorded project ID is
 `prj_c0b45632e1d64a60bb45efbe7397a42d`; the repository's `[jachammer]` ID refers to
-a different project. Never deploy blindly using that checked-in ID. Preserve the
+this project on the release branch. The old main binding referred to another
+project and JacHammer rejected importing it into M-Local-Main. This was verified
+in the signed-in source review on September 29 and corrected in `jac.toml`.
+Preserve the
 existing hosted settings and data, compare the current source revision, and use
 the existing project's deployment controls.
+
+The signed-in account is Pro. Before refreshing source, the hosted commit
+`5ae317a0847cceb94936386849a3d0b745ea5af5` was saved as a JacHammer checkpoint
+and pushed to `codex/jachammer-preserved-2026-09-29`. It contains unmerged
+catalog/archive changes and remains available for review. No hosted source
+changes were pushed over GitHub main.
 
 The [JacHammer pricing page](https://jachammer.ai/#pricing), checked 2026-09-29,
 lists 30-minute previews on Free and one permanent deployment on Builder at
