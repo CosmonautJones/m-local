@@ -164,3 +164,28 @@ connection.
 
 References: [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel),
 [same URL across restarts](https://tailscale.com/docs/use-cases/application-testing/share-local-dev-server-with-internet).
+
+## JacHammer production network binding
+
+Keep the local `[serve] host = "127.0.0.1"` default for laptop operation. For
+JacHammer production, set the project environment variable:
+
+```text
+JAC_SERVE_HOST=0.0.0.0
+```
+
+Jac 0.37.23's generated Kubernetes command uses `jac run --serve main.jac`
+without a host override. Its health probes connect to the pod IP, so a
+loopback-only listener cannot pass those probes. Verified on a disposable
+source snapshot: default binding was `127.0.0.1:18200`; with the override it
+was `0.0.0.0:18200`, and `/healthz/ready` returned HTTP 200 with `ready:true`.
+Environment changes require redeployment. This is a startup prerequisite,
+not proof that a hosted deployment is healthy.
+
+For diagnostics, JacHammer's served CLI 0.2.0 (prod@1d9f65a, September 28)
+compiles with its tested Jac 0.36.1 runtime but not with 0.37.23. Run that CLI
+with a separate compatible runtime; keep this app pinned to 0.37.23. The CLI
+commands `ls --deployments`, `inspect --prod`, and `logs --prod` expose more
+information than the dashboard's generic exit-code message. Pass
+`--name M-Local-Main` explicitly for diagnostic commands. Never print or commit
+the stored CLI token.
