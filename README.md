@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://mlocal.tail0d5ef8.ts.net/"><strong>Open M-Local</strong></a> ·
+  <a href="https://m-local-main-prjc0b.jachammer.app/"><strong>Open M-Local</strong></a> ·
   <a href="docs/START-HERE.md">Team start here</a> ·
   <a href="docs/HOSTING.md">Hosting</a> ·
   <a href="docs/RUNTIME.md">Runtime</a>
@@ -79,9 +79,25 @@ Captured on 2026-09-27 from the current build with fictional test data
 
 ## Live app
 
-**[Open M-Local](https://mlocal.tail0d5ef8.ts.net/)**, hosted on Travis's laptop.
+**[JacHammer app](https://m-local-main-prjc0b.jachammer.app/): public startup verified September 29, 2026.**
+Everyone connects to one hosted backend and shared PostgreSQL database. Offers
+are shared; accounts and claim credentials are intended to remain private.
+The welcome page, backend and database are online, but this is **not ready for
+real account onboarding yet**: email/account ownership storage still needs to
+survive redeployments, and registration access needs the protections used by
+the laptop gateway. Full hosted sign-in, redemption and restart checks remain
+open. See [what works and what remains](docs/HOSTING.md#shared-hosting-status).
 
-- The host checks `main` every minute. It deploys a new commit after CI passes and
+**Portfolio reviewers:** start with the [project brief](docs/PORTFOLIO.md) for
+the team attribution, architecture, demo walkthrough and current hosting limits.
+
+**[Laptop fallback](https://mlocal.tail0d5ef8.ts.net/)**, hosted on Travis's laptop.
+
+This is a shared prototype, not an always-on production service. Availability
+depends on the laptop. See the dated [release checkpoint](docs/PORTFOLIO.md#release-checkpoint)
+before presenting a live demo.
+
+- Normally the laptop host checks `main` every minute. It deploys a new commit after CI passes and
   a rebuild succeeds, and it keeps existing accounts and data.
 - Refresh your phone after a deployment.
 - Commits on other branches and local edits do not deploy.

@@ -1,4 +1,41 @@
-# Stable laptop hosting with updates from main
+# M-Local hosting
+
+## Shared hosting status
+
+Verified September 29, 2026. The JacHammer app is at
+**https://m-local-main-prjc0b.jachammer.app/**. Its application, gateway and
+PostgreSQL passed readiness checks with three healthy pods and zero restarts.
+This host runs independently of Travis's laptop.
+
+**Cleaner address reserved:** `https://mlocal.jachammer.app`. JacHammer confirmed
+the name is claimed but serves only after the next production deployment. Until
+that deployment is verified, keep using the longer working address above.
+
+All visitors connect to the same backend and persistent PostgreSQL graph store.
+Publishing an offer updates the shared catalog. Shared storage does not mean
+shared access: account profiles, business ownership and claim credentials must
+remain protected by server-side authorization. Anonymous claim and merchant
+requests returned 401; the guest feed exposed no private QR credentials.
+Complete hosted account-isolation tests are still pending.
+
+| Area | Verified status / remaining work |
+|---|---|
+| Web app and backend | Public HTTPS welcome, student email form, session and catalog responses work. |
+| Shared graph database | PostgreSQL has persistent storage. Application-level restart and backup/restore acceptance remains open. |
+| Email and ownership records | Separate SQLite database plus signing key currently sit in ephemeral app storage. Move both to durable storage before onboarding real users. A single-instance persistent-disk configuration passed compiler dry-run; it is not deployed. |
+| Email sender | Configured sender is `mlocal@travisjohnjones.com` through Resend. An earlier Gmail sender was not confirmed. Actual email delivery still needs a controlled recipient test. Never commit SMTP credentials. |
+| Registration protection | JacHammer exposes native registration/login handlers. Restore the equivalent of the laptop gateway's restrictions before broad onboarding. |
+| Source and release status | The dashboard reports healthy production while deployment history remains `in_flight`. Reconcile the deployed revision before the next rollout; do not submit duplicate jobs to clear a stale status. |
+| Custom domain | `mlocal.dev` is not connected. Ownership/DNS access and HTTPS verification are pending. No domain purchase is authorized. |
+
+Next engineering steps: preserve existing onboarding data, deploy durable storage
+and registration protection, verify separate student/merchant email flows and
+one-time redemption, prove restart/restore behavior, then attach the domain.
+Merging these findings does **not** deploy those fixes or complete acceptance.
+GitHub imports source; they do not migrate laptop/sandbox databases or secrets.
+Keep the team branches and existing stores intact.
+
+## Stable laptop hosting with updates from main
 
 **Team URL: https://mlocal.tail0d5ef8.ts.net/**
 
@@ -164,3 +201,28 @@ connection.
 
 References: [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel),
 [same URL across restarts](https://tailscale.com/docs/use-cases/application-testing/share-local-dev-server-with-internet).
+
+## JacHammer production network binding
+
+Keep the local `[serve] host = "127.0.0.1"` default for laptop operation. For
+JacHammer production, set the project environment variable:
+
+```text
+JAC_SERVE_HOST=0.0.0.0
+```
+
+Jac 0.37.23's generated Kubernetes command uses `jac run --serve main.jac`
+without a host override. Its health probes connect to the pod IP, so a
+loopback-only listener cannot pass those probes. Verified on a disposable
+source snapshot: default binding was `127.0.0.1:18200`; with the override it
+was `0.0.0.0:18200`, and `/healthz/ready` returned HTTP 200 with `ready:true`.
+Environment changes require redeployment. This is a startup prerequisite,
+not proof that a hosted deployment is healthy.
+
+For diagnostics, JacHammer's served CLI 0.2.0 (prod@1d9f65a, September 28)
+compiles with its tested Jac 0.36.1 runtime but not with 0.37.23. Run that CLI
+with a separate compatible runtime; keep this app pinned to 0.37.23. The CLI
+commands `ls --deployments`, `inspect --prod`, and `logs --prod` expose more
+information than the dashboard's generic exit-code message. Pass
+`--name M-Local-Main` explicitly for diagnostic commands. Never print or commit
+the stored CLI token.
