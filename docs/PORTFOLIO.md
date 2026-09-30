@@ -84,6 +84,30 @@ Checked 2026-09-29:
 
 ## JacHammer hosting checkpoint
 
+**Update, September 29 at 21:33 Eastern:** the public production URL is
+[m-local-main-prjc0b.jachammer.app](https://m-local-main-prjc0b.jachammer.app/).
+The application, gateway and PostgreSQL are healthy (3/3 pods, zero restarts).
+HTTPS welcome, student onboarding, guest session and catalog responses work.
+Anonymous claim and merchant endpoints return 401; guest offers contain no QR
+credentials. All 397 returned offers are marked as demo data.
+
+This is a working production boot, not completed release acceptance. Onboarding
+still stores its SQLite database and signing key under the application's
+ephemeral directory. A dedicated persistent disk with one app replica and a
+non-overlapping rollout was validated with the pinned compiler's manifest
+generator, but has not been deployed or restart-tested. Preserve existing
+onboarding data before any migration. Raw runtime registration/login handlers
+also remain reachable; the laptop gateway's restrictions do not apply here.
+Real email, student/merchant flows, backups, source parity and custom-domain
+acceptance remain open. Do not encourage real account creation yet.
+
+The provider dashboard reports production live, while its deployment-history
+record still says `in_flight`. Do not submit a duplicate deployment merely to
+clear that stale indicator. The previously attempted `m-local.jachammer.app`
+address below is historical and is not this deployment's public URL.
+
+### Earlier preparation evidence
+
 Checked September 29, 2026, at 12:28 Eastern. The signed-in account has an
 existing Pro entitlement. No purchase or upgrade was made.
 
