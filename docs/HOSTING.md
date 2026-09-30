@@ -1,4 +1,37 @@
-# Stable laptop hosting with updates from main
+# M-Local hosting
+
+## Shared hosting status
+
+Verified September 29, 2026. The JacHammer app is at
+**https://m-local-main-prjc0b.jachammer.app/**. Its application, gateway and
+PostgreSQL passed readiness checks with three healthy pods and zero restarts.
+This host runs independently of Travis's laptop.
+
+All visitors connect to the same backend and persistent PostgreSQL graph store.
+Publishing an offer updates the shared catalog. Shared storage does not mean
+shared access: account profiles, business ownership and claim credentials must
+remain protected by server-side authorization. Anonymous claim and merchant
+requests returned 401; the guest feed exposed no private QR credentials.
+Complete hosted account-isolation tests are still pending.
+
+| Area | Verified status / remaining work |
+|---|---|
+| Web app and backend | Public HTTPS welcome, student email form, session and catalog responses work. |
+| Shared graph database | PostgreSQL has persistent storage. Application-level restart and backup/restore acceptance remains open. |
+| Email and ownership records | Separate SQLite database plus signing key currently sit in ephemeral app storage. Move both to durable storage before onboarding real users. A single-instance persistent-disk configuration passed compiler dry-run; it is not deployed. |
+| Email sender | Configured sender is `mlocal@travisjohnjones.com` through Resend. An earlier Gmail sender was not confirmed. Actual email delivery still needs a controlled recipient test. Never commit SMTP credentials. |
+| Registration protection | JacHammer exposes native registration/login handlers. Restore the equivalent of the laptop gateway's restrictions before broad onboarding. |
+| Source and release status | The dashboard reports healthy production while deployment history remains `in_flight`. Reconcile the deployed revision before the next rollout; do not submit duplicate jobs to clear a stale status. |
+| Custom domain | `mlocal.dev` is not connected. Ownership/DNS access and HTTPS verification are pending. No domain purchase is authorized. |
+
+Next engineering steps: preserve existing onboarding data, deploy durable storage
+and registration protection, verify separate student/merchant email flows and
+one-time redemption, prove restart/restore behavior, then attach the domain.
+Merging these findings does **not** deploy those fixes or complete acceptance.
+GitHub imports source; they do not migrate laptop/sandbox databases or secrets.
+Keep the team branches and existing stores intact.
+
+## Stable laptop hosting with updates from main
 
 **Team URL: https://mlocal.tail0d5ef8.ts.net/**
 
