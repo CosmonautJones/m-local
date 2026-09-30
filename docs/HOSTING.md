@@ -7,6 +7,10 @@ Verified September 29, 2026. The JacHammer app is at
 PostgreSQL passed readiness checks with three healthy pods and zero restarts.
 This host runs independently of Travis's laptop.
 
+**Cleaner address reserved:** `https://mlocal.jachammer.app`. JacHammer confirmed
+the name is claimed but serves only after the next production deployment. Until
+that deployment is verified, keep using the longer working address above.
+
 All visitors connect to the same backend and persistent PostgreSQL graph store.
 Publishing an offer updates the shared catalog. Shared storage does not mean
 shared access: account profiles, business ownership and claim credentials must
