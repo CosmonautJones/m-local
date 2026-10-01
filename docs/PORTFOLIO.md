@@ -7,8 +7,8 @@ one-time redemption and business reporting.
 
 ## Team and attribution
 
-Git history records contributions from Travis Jones, Rohan Maxa, Manthan Patil,
-and Adam Jiang (also `adamjiang06`), plus the `stonedegree` contributor identity.
+Git history records contributions from Travis Jones, Rohan Maxa, Manthan Patil (also `stonedegree`),
+and Adam Jiang (also `adamjiang06`).
 This is a collaborative project. The original four-owner contract separates
 runtime/integration, backend transactions, local context/data, and frontend/mobile
 work. See [the team contract](TEAM-CONTRACT.md) and the repository commit history
