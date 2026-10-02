@@ -15,7 +15,7 @@ export function offer(extra={}) {return {
  id:'fixture-offer',title:'Current bowl',description:'Fictional UI test meal',restaurant:'Fixture Kitchen',
  price:9,regular_price:12,address:'Fictional test address',neighborhood:'Test area',state:'active',remaining:4,quantity:5,
  eligibility:'Student ID',terms:'Current offer terms',menu_item:'',dietary:[],reasons:[],is_demo:false,time_label:'Until tonight',
- my_status:'',my_claim_id:'',my_qr_payload:'',my_title:'',my_price_cents:0,my_terms:'',my_eligibility:'',my_expires:'',my_expires_ts:0,entrance_note:'',note_date:'',
+ my_status:'',my_claim_id:'',my_qr_payload:'',my_title:'',my_price_cents:0,my_terms:'',my_eligibility:'',my_expires:'',my_expires_ts:0,entrance_note:'',note_date:'',image_url:'',access_context:{state:'none',notices:[]},
  start_input:'2026-09-26 17:00',end_input:'2026-09-26 23:00', ...extra
 };}
 export function held(extra={}) {return offer({my_claim_id:'fixture-claim',my_status:'claimed',my_qr_payload:qr,
@@ -43,7 +43,7 @@ export async function app({role='student',verified=false,audience='student',item
  if(audience)w.localStorage.setItem('mlocal_audience',audience);
  if(role!=='guest')w.localStorage.setItem('jac_token','synthetic-ui-token');
  const session=()=>({authenticated:activeRole!=='guest',role:activeRole,actor_id:`fixture-${activeRole}`,restaurant_id:activeRole==='merchant'?'fixture-restaurant':'',display_name:`Fixture ${activeRole}`,is_demo:!verified,email_verified:verified});
- const portal=()=>({ok:true,name:'Fixture Kitchen',cuisine:'Test cuisine',blurb:'Fixture profile',address:'Test address',neighborhood:'Test area',entrance_note:'',note_date:'',offers:[item],claims:[],is_demo:true,message:''});
+ const portal=()=>({ok:true,name:'Fixture Kitchen',cuisine:'Test cuisine',blurb:'Fixture profile',address:'Test address',neighborhood:'Test area',entrance_note:'',note_date:'',image_url:item.image_url||'',offers:[item],claims:[],is_demo:true,message:''});
  w.fetch=async (url,options={})=>{
   const name=String(url).split('/').at(-1),body=options.body?JSON.parse(options.body):{};
   calls.push({name,body});
@@ -56,6 +56,7 @@ export async function app({role='student',verified=false,audience='student',item
    claim_offer:{ok:true,message:'Fixture claim accepted',claim_id:'fixture-claim',qr_payload:qr},
    cancel_claim:{ok:true,message:'Fixture cancellation accepted'},
    update_profile:portal(),save_offer:{ok:true,message:'Fixture offer saved',code:'fixture-offer'},
+   get_business_draft:{ok:true,status:'draft',message:''},
    offer_defaults:['2026-09-26 17:00','2026-09-26 23:00'],set_offer_status:{ok:true,message:'Fixture status saved'}};
   if(!(name in results))throw new Error(`Unexpected fixture endpoint ${name}`);
   return rpc(results[name]);

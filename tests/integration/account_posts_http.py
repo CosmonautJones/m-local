@@ -200,7 +200,9 @@ def main():
     listed = [offer for offer in merchant.call('merchant_portal')['offers'] if run in offer['title']]
     require(len(listed) == 1 and listed[0]['id'] == post['offer_id'], 'editing retains the single original post')
     require(merchant.call('set_offer_status', offer_id=post['offer_id'], status='paused')['ok'], 'merchant can pause post')
-    require(Api(api).call('get_offer', offer_id=post['offer_id'])['state'] == 'paused', 'pause reaches public view')
+    require(Api(api).call('get_offer', offer_id=post['offer_id']) is None, 'paused public get returns nothing')
+    require(any(offer['id'] == post['offer_id'] for offer in merchant.call('merchant_portal')['offers']),
+            'merchant still sees a paused offer')
     require(merchant.call('set_offer_status', offer_id=post['offer_id'], status='active')['ok'], 'merchant can resume post')
     browser_business = verify('browser' + run + '@example.test', 'business', 'Browser fixture owner')
     require(browser_business['ok'], 'fresh business session prepared for real browser activation')

@@ -67,6 +67,7 @@ import from .client.offer_filters { OfferFilters }
 import from .client.ui { BrandLogo, UiFoundation, ThemeControl, NavIcon, StockBar }
 import from "./client/theme.mjs" { createThemeStore }
 import from .client.business_profile { BusinessProfile }
+import from "./client/offer-image.jsx" { OfferImage }
 
 
 glob styles = buildStyles(C);
@@ -115,6 +116,30 @@ def Field(
 }
 
 
+def AccessContext(o: OfferView) -> JsxElement {
+    if o.access_context is not None and o.access_context.state == "current" {
+        return <View style={styles.note}>
+            <Text style={[styles.noteText, {"fontWeight": "800"}]}>Current access</Text>
+            <View>
+                {[
+                    <Text key={n.id} style={styles.noteText}>{n.entrance_instruction if n.entrance_instruction else n.summary}</Text>
+                    for n in o.access_context.notices if n.state == "current"
+                ]}
+            </View>
+        </View>;
+    }
+    if o.access_context is not None and o.access_context.state == "needs_recheck" {
+        return <View style={styles.note}>
+            <Text style={[styles.noteText, {"fontWeight": "800"}]}>Access needs a recheck</Text>
+            <Text style={styles.noteText}>The last access note for this place is stale. Confirm the entrance with the restaurant.</Text>
+        </View>;
+    }
+    return <View>
+        <Text style={styles.small}>No reviewed access information for this place.</Text>
+    </View>;
+}
+
+
 def DealCard(item: FeedItem, onOpen: any, onBusiness: any, onHeart: any, canHeart: bool) -> JsxElement {
     o = item.offer;
     hasSavedClaim = o.my_claim_id != "" and o.my_status in ["claimed", "redeemed"];
@@ -128,6 +153,7 @@ def DealCard(item: FeedItem, onOpen: any, onBusiness: any, onHeart: any, canHear
         else o.time_label if o.state == "scheduled" else o.state.capitalize()
     );
     return <View style={[styles.card, {} if live or hasSavedClaim else styles.cardMuted]}>
+        {(<OfferImage url={o.image_url} width={"100%"} height={96} alt={o.restaurant} />) if o.image_url else <View style={styles.hidden} />}
         <View style={styles.rowBetween}>
             <Pressable accessibilityRole="button" accessibilityLabel={"View " + o.restaurant + " business profile"} style={styles.flex1} onPress={onBusiness}>
                 <Text style={styles.restaurant}>{o.restaurant}</Text>
@@ -409,6 +435,9 @@ def:pub app -> JsxElement {
         }
         if epoch == sessionEpoch.current and restored is not None and restored.authenticated and restored.role == "merchant" {
             tab = "insights";
+        }
+        if epoch == sessionEpoch.current and restored is not None and restored.authenticated and restored.role == "business" {
+            businessOpen = True;
         }
     }
 
@@ -719,8 +748,7 @@ def:pub app -> JsxElement {
             </View>
             <Message text={authMsg} good={False} />
             {(<View style={styles.section}>
-                <Pressable accessibilityRole="button" style={styles.btnGhost} onPress={lambda { businessOpen = not businessOpen; }}><Text style={styles.btnGhostText}>{"Close business profile" if businessOpen else "Business profile"}</Text></Pressable>
-                {(<BusinessOnboarding key={session.actor_id} getDraft={get_business_draft} importWebsite={import_business_website} saveDraft={save_business_draft} onActivated={openActivatedBusiness} />) if businessOpen else <View style={styles.hidden} />}
+                <BusinessOnboarding key={session.actor_id} getDraft={get_business_draft} importWebsite={import_business_website} saveDraft={save_business_draft} onActivated={openActivatedBusiness} />
             </View>) if session.email_verified and session.role == "business" else <View style={styles.hidden} />}
             <View style={styles.section}><ThemeControl /></View>
             <View style={styles.section}>
@@ -852,6 +880,7 @@ def:pub app -> JsxElement {
                     <Text style={styles.restaurant}>{o.restaurant}</Text>
                 </View>
                 <Pressable accessibilityRole="button" style={[styles.btnGhost, {"alignSelf": "flex-start"}]} onPress={lambda { openBusiness("", o.id); }}><Text style={styles.btnGhostText}>View business profile</Text></Pressable>
+                {(<OfferImage url={o.image_url} width={"100%"} height={160} alt={o.restaurant} />) if o.image_url else <View style={styles.hidden} />}
                 <Text style={styles.title}>{o.my_title if hasSavedClaim else o.title}</Text>
                 {(<Text style={styles.subtitle}>{o.description}</Text>) if not hasSavedClaim else <View style={styles.hidden} />}
             </View>
@@ -905,6 +934,7 @@ def:pub app -> JsxElement {
                 </Text>
             </Pressable>
             <Text style={styles.small}>Prices exclude tax unless the saved terms say otherwise. The restaurant checks the stated ID requirement.</Text>
+            {AccessContext(o)}
             {(
                 <View style={styles.note}>
                     <Text style={[styles.noteText, {"fontWeight": "800"}]}>Unverified restaurant note</Text>
@@ -981,6 +1011,10 @@ def:pub app -> JsxElement {
                 </View>
                 <View style={styles.section}>
                     <Text style={styles.h2}>Restaurant profile</Text>
+                    <View style={styles.row}>
+                        {(<OfferImage url={portal.image_url} width={64} height={64} alt={portal.name} />) if portal.image_url else <View style={styles.hidden} />}
+                        <Text style={[styles.restaurant, styles.flex1]}>{portal.name}</Text>
+                    </View>
                     <Field label="Name" value={pName} onChange={lambda (t: str) { pName = t; }} placeholder="Restaurant name" multiline={False} disabled={busy} />
                     <Field label="Cuisine" value={pCuisine} onChange={lambda (t: str) { pCuisine = t; }} placeholder="Noodles" multiline={False} disabled={busy} />
                     <Field label="About" value={pBlurb} onChange={lambda (t: str) { pBlurb = t; }} placeholder="Short description" multiline={True} disabled={busy} />

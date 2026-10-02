@@ -125,6 +125,45 @@ test "quantity limit and abandoned claims release availability" {
 }
 
 
+test "production catalog omits demo offers and refuses demo claims" {
+    _ensure_seed();
+    o = _offer_by_title("$3 oat latte study break");
+    now = time.time();
+    r = Restaurant(slug="catalog-hidden-cafe", name="Catalog Hidden Cafe", cuisine="Cafe", is_demo=True);
+    root.shared ++> r;
+    hidden = Offer(title="Catalog hidden lunch", price=4.0, price_cents=400, regular_price_cents=600,
+        start_ts=now - 60, end_ts=now + 7200, quantity=2, qr_ready=True, is_demo=True,
+        terms="One each", eligibility="Students");
+    r +>:Publishes():+> hidden;
+    hid = jid(hidden);
+    actor = "catalog-hidden-student";
+    with patch.dict(os.environ, {"MLOCAL_DEMO_MODE": "1"}) {
+        claimed = _claim(hid, actor, now);
+        assert claimed.ok, claimed.message;
+    }
+    with patch.dict(os.environ, {"MLOCAL_DEMO_MODE": ""}) {
+        listed = list_offers();
+        assert "$3 oat latte study break" not in [v.title for v in listed];
+        assert hid not in [v.id for v in listed];
+        assert all([not v.is_demo and "(Demo)" not in v.restaurant for v in listed]);
+        assert get_offer(jid(o)) is None;
+        with patch.dict(get_offer.__globals__, {"_actor_id": lambda () -> str { return actor; }}) {
+            assert get_offer(hid) is None;
+        }
+        blocked = _claim(jid(o), "production-student", now);
+        assert not blocked.ok and "not available" in blocked.message;
+        redeemed = _redeem(r, claimed.qr_payload, now);
+        assert redeemed.ok, redeemed.message;
+        with patch.dict(get_offer.__globals__, {"_actor_id": lambda () -> str { return actor; }}) {
+            assert get_offer(hid) is None;
+        }
+        assert hid not in [v.id for v in list_offers()];
+    }
+    hidden.status = "paused";
+    hidden.end_ts = now - 30;
+}
+
+
 test "paused offers are hidden and unclaimable" {
     _ensure_seed();
     o = _offer_by_title("Weekend cheese slice deal");
@@ -133,6 +172,47 @@ test "paused offers are hidden and unclaimable" {
     assert not res.ok;
     titles = [v.title for v in list_offers()];
     assert "Weekend cheese slice deal" not in titles;
+}
+
+
+test "public get hides paused and ended offers unless the caller holds a live claim" {
+    _ensure_seed();
+    r = _restaurant_by_slug("arbor-leaf-kitchen");
+    now = time.time();
+    created = _save_offer(
+        r, "", "Visibility lunch", "Bowl", "5", "7",
+        "2020-01-01 08:00", "2027-06-01 18:00", "3", "Students", "One each", "", "", now
+    );
+    assert created.ok, created.message;
+    offer_id = created.code;
+    assert get_offer(offer_id) is not None;
+    held = _claim(offer_id, "visibility-student", now);
+    assert held.ok, held.message;
+    o = _owned_offer(r, offer_id) as Offer;
+    o.status = "paused";
+    assert get_offer(offer_id) is None;
+    assert offer_id not in [v.id for v in list_offers()];
+    with patch.dict(get_offer.__globals__, {"_actor_id": lambda () -> str { return "visibility-student"; }}) {
+        visible = get_offer(offer_id) as OfferView;
+        assert visible.my_status == "claimed" and visible.title == "Visibility lunch";
+    }
+    redeemed = _redeem(r, held.qr_payload, now);
+    assert redeemed.ok, redeemed.message;
+    with patch.dict(get_offer.__globals__, {"_actor_id": lambda () -> str { return "visibility-student"; }}) {
+        assert get_offer(offer_id) is None;
+    }
+    o.status = "active";
+    o.end_ts = now - 30;
+    assert get_offer(offer_id) is None;
+    o.end_ts = now + 7200;
+    o.status = "paused";
+    portal = _portal(r, now);
+    assert offer_id in [v.id for v in portal.offers];
+    o.status = "active";
+    resumed = get_offer(offer_id) as OfferView;
+    assert resumed.title == "Visibility lunch";
+    o.status = "paused";
+    o.end_ts = now - 30;
 }
 
 
@@ -376,10 +456,10 @@ test "merchant profile rejects invalid input with a failure and no partial write
     with patch.dict(update_profile.__globals__, {"_merchant": lambda () -> Restaurant { return r; }}) {
         result = update_profile("", "Changed cuisine", "Changed blurb", "Changed address", "", "", "");
         assert not result.ok, "Invalid profile must not report success";
-        assert result.name == original and result.address == original_address;
+        assert result.name == public_name(original) and result.address == original_address;
         long_result = update_profile("R" * 121, "Changed cuisine", "Changed blurb", "Changed address", "", "", "");
         assert not long_result.ok;
-        assert long_result.name == original and long_result.address == original_address;
+        assert long_result.name == public_name(original) and long_result.address == original_address;
     }
 }
 
@@ -406,7 +486,7 @@ test "merchant profile saves normalized fields and is readable after commit" {
         result = update_profile("  Updated Profile (Demo)  ", "  Cafe  ", "  Lunch and coffee  ",
             "  123 Main St  ", "  Downtown  ", "  Use Main St door  ", "  2026-09-26  ");
         assert result.ok, result.message;
-        assert result.name == "Updated Profile (Demo)" and result.address == "123 Main St";
+        assert result.name == "Updated Profile" and result.address == "123 Main St";
         assert result.cuisine == "Cafe" and result.blurb == "Lunch and coffee";
     }
     persisted = _restaurant_by_slug("profile-test");

@@ -324,6 +324,7 @@ def _home(actor: str, price_range: str, window: str, diets: str, now: float) -> 
     total = 0;
     for r in [root.shared -->[?:Restaurant]] {
         for o in [r ->:Publishes:->] {
+            if o.is_demo and not demo_mode(os.environ.get(DEMO_MODE_ENV, "")) { continue; }
             v = _view(o, now, actor);
             starter_fixture = os.environ.get("MLOCAL_HOSTED_DATASET", "") == "1" and r.source == "demo-seed";
             discoverable = o.status != "paused" and now < o.end_ts and not starter_fixture;

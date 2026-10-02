@@ -250,7 +250,8 @@ def parse_page(html: str, url: str) -> dict[str, any] {
         "menu_text": "",
         "text": " ".join(page.text)[:20000]
     };
-    images: list[any] = [page.meta.get("og:image", "")] + page.images;
+    logos: list[any] = [];
+    images_ld: list[any] = [];
     menus: list[any] = [link[0] for link in page.links if "menu" in (link[0] + " " + link[1]).lower()];
     queue: list[any] = page.ld[:];
     for _ in range(100) {
@@ -289,13 +290,15 @@ def parse_page(html: str, url: str) -> dict[str, any] {
         if isinstance(address, str) {
             result["address"] = address[:500];
         }
-        for (field, out) in (("image", images), ("hasMenu", menus), ("menu", menus)) {
+        for (field, out) in (("logo", logos), ("image", images_ld), ("hasMenu", menus), ("menu", menus)) {
             value = item.get(field, []);
             out.extend(value if isinstance(value, list) else [value]);
         }
         break;
     }
+    images = logos + [page.meta.get("og:image", "")] + images_ld + page.images;
     result["image_urls"] = candidates(images, url);
+    result["image_url"] = result["image_urls"][0] if result["image_urls"] else "";
     result["menu_urls"] = candidates(menus, url);
     return result;
 }
@@ -339,7 +342,11 @@ def collect_website(url: str, fetch: any = fetch_public) -> dict[str, any] {
                 parsed = parse_page(body.decode("utf-8", errors="replace"), menu_final);
                 result["text"] = (result["text"] + "\nMENU PAGE:\n" + parsed["text"])[:24000];
                 result["menu_text"] = parsed["text"][:4000];
+                chosen = result.get("image_url", "");
                 result["image_urls"] = candidates(result["image_urls"] + parsed["image_urls"], final);
+                if not chosen {
+                    result["image_url"] = result["image_urls"][0] if result["image_urls"] else "";
+                }
                 result["sources"].append(menu_final);
             }
         } except (ValueError, OSError, http.client.HTTPException) {}

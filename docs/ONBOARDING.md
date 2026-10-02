@@ -110,12 +110,15 @@ user's filesystem permissions and never expose it through the web server.
 
 ## Business creation and optional AI
 
-After business email verification, choose **Business profile**. Business signup
-opens this form immediately. Paste a public `https://` homepage or type details
-manually. Import reads at most the homepage and one same-site menu HTML page;
-PDF menus remain links. JavaScript-only sites may require manual entry. It reads
-structured business data, metadata, text, menu URLs and image URLs. Images are
-linked for selection/review; they are not copied into an owned media library.
+After business email verification, the review card is open. A reload of a
+verified business account that does not yet have a restaurant opens that same
+card, without a separate Business profile toggle. Paste a public `https://`
+homepage or type details manually. Import reads at most the homepage and one
+same-site menu HTML page; PDF menus remain links. JavaScript-only sites may
+require manual entry. It reads structured business data, metadata, text, menu
+URLs and image URLs. The card shows one https logo for review. Images are
+linked, not copied into an owned media library. The browser loads the saved
+https address. The server does not download, store, or proxy the image bytes.
 
 To additionally organize site text with Jac's real `by llm()` implementation,
 set `MLOCAL_IMPORT_MODEL` and its provider credential in the same private env
@@ -125,9 +128,9 @@ No model call occurs when `MLOCAL_IMPORT_MODEL` is empty. Metadata import and
 manual editing continue if AI is unavailable. No model has authority to publish,
 assign roles, fetch arbitrary URLs, or perform actions from website instructions.
 
-Review facts/prices, select permitted image/menu URLs, confirm representation and
+Review facts and prices, correct the https logo and menu link, confirm representation and
 content rights, and choose **Save business profile**. The verified business
-account immediately receives its own restaurant and the app opens **Manage**.
+account immediately receives its own restaurant and the app opens **Insights**.
 There is no approval step or business-approval admin page. Travis enabled this
 self-service flow on September 27 for team testing. Email verification and the
 representation confirmation remain required.
@@ -144,8 +147,9 @@ the private onboarding store. Repeated saves update the same restaurant and
 preserve its offers. Two businesses with identical names still have separate
 owners. Existing `MLOCAL_MERCHANT_OWNERS` provisioning takes precedence and
 continues to support demo merchants. Clients cannot submit an owner or restaurant
-ID to the activation endpoint. Website/menu/image metadata stays in the private
-profile; selected images are not yet public profile media.
+ID to the activation endpoint. The saved image URL is public profile media:
+students see it on the deal and the offer detail, and the merchant sees it
+beside the restaurant name. An empty image is valid and draws nothing.
 
 Business owners use **Manage** to edit their restaurant profile and
 create offers. **New offer** opens a form with explicit **Publish offer** action;

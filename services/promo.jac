@@ -29,6 +29,8 @@ import from services.models {
     Publishes,
     Features,
     ClaimedAs,
+    public_name,
+    samples_visible,
     Reservation,
     Reserves,
     UsesReservation,
@@ -100,6 +102,7 @@ obj OfferView {
         dietary: list[str] = [],
         menu_item: str = "",
         is_demo: bool = False,
+        image_url: str = "",
         fits: bool = True,
         reasons: list[str] = [],
         my_qr_payload: str = "",
@@ -159,6 +162,7 @@ obj MerchantView {
         entrance_note: str = "",
         note_date: str = "",
         is_demo: bool = False,
+        image_url: str = "",
         offers: list[OfferView] = [],
         claims: list[ClaimView] = [];
 }
@@ -429,7 +433,8 @@ def _view(
         id=jid(o),
         title=o.title,
         description=o.description,
-        restaurant=r.name if r else "",
+        restaurant=public_name(r.name) if r else "",
+        image_url=r.image_url if r else "",
         cuisine=r.cuisine if r else "",
         location_id=jid(loc) if loc else "",
         address=loc.address if loc else "",
@@ -485,6 +490,9 @@ def _claim(offer_id: str, actor_id: str, now: float) -> ActionResult {
     }
     o = _find_offer(offer_id);
     if o is None { return ActionResult(message="That offer no longer exists."); }
+    if o.is_demo and not samples_visible() {
+        return ActionResult(message="That offer is not available.");
+    }
     for c in [o ->:ClaimedAs:->] {
         if c.actor_id != actor_id or not c.qr_payload { continue; }
         state = _claim_status(c, now);
@@ -718,7 +726,8 @@ def _portal(r: Restaurant, now: float, message: str = "") -> MerchantView {
     return MerchantView(
         ok=True,
         message=message,
-        name=r.name,
+        name=public_name(r.name),
+        image_url=r.image_url,
         cuisine=r.cuisine,
         blurb=r.blurb,
         address=loc.address if loc else "",
@@ -747,6 +756,7 @@ def:pub list_offers(
     out: list[OfferView] = [];
     for r in [root.shared -->[?:Restaurant]] {
         for o in [r ->:Publishes:->] {
+            if o.is_demo and not samples_visible() { continue; }
             v = _view(o, now, _actor_id(), budget, window, wanted);
             # A saved live QR remains reachable after reload even when the
             # merchant pauses/edits an offer or student changes discovery filters.
@@ -776,12 +786,19 @@ def:pub get_offer(
 ) -> OfferView | None {
     _ensure_seed();
     o = _find_offer(offer_id);
-    if o is None {
+    if o is None or (o.is_demo and not samples_visible()) {
         return None;
     }
-    return _view(
-        o, time.time(), _actor_id(), _parse_budget(max_price), window, _parse_diets(diets)
-    );
+    now = time.time();
+    v = _view(o, now, _actor_id(), _parse_budget(max_price), window, _parse_diets(diets));
+    # A live hold stays readable. A redeemed claim does not keep a paused or ended offer public.
+    if v.my_status == "claimed" {
+        return v;
+    }
+    if o.status == "paused" or now >= o.end_ts {
+        return None;
+    }
+    return v;
 }
 
 

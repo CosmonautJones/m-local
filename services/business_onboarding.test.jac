@@ -116,3 +116,118 @@ test "activation retry recovers one committed restaurant without premature autho
         }
     }
 }
+
+
+def _logo_page() -> str {
+    return "<title>Page Cafe</title>"
+        + "<meta property=\"og:image\" content=\"https://example.com/og.jpg\">"
+        + "<script type=\"application/ld+json\">"
+        + "{\"@type\":\"Restaurant\",\"name\":\"Page Cafe\",\"address\":\"123 Page St\","
+        + "\"logo\":{\"@type\":\"ImageObject\",\"url\":\"https://example.com/logo.png\"},"
+        + "\"image\":\"https://example.com/jsonld.jpg\"}"
+        + "</script>"
+        + "<img src=\"https://example.com/inline.jpg\">"
+        + "<img src=\"http://localhost/secret.jpg\">"
+        + "<a href=\"/menu\">Menu</a><p>Soup $4</p>";
+}
+
+
+def _logo_fetch(url: str) -> tuple[str, str, bytes] {
+    if url.endswith("/robots.txt") {
+        return (url, "text/plain", "User-agent: *\nAllow: /\n".encode());
+    }
+    if url.endswith("/menu") {
+        return (url, "text/html", "<img src=\"https://example.com/menu-photo.jpg\">".encode());
+    }
+    return (url, "text/html", _logo_page().encode());
+}
+
+
+def _collect_logo_site(url: str) -> any {
+    import from services.website_import { collect_website as read_public_site }
+    return read_public_site(url, fetch=_logo_fetch);
+}
+
+
+test "confirmed save publishes the logo and a blank save clears it" {
+    import from services.models { Publishes }
+    import from services.promo { save_offer, merchant_portal, get_offer, OfferView }
+    actor = "ff00112233445566778899aabbccddee";
+    logo = "https://example.com/logo.png";
+    with tempfile.TemporaryDirectory() as directory {
+        with patch.dict(os.environ, {"MLOCAL_ONBOARDING_DIR": directory, "MLOCAL_MERCHANT_OWNERS": "{}"}) {
+            store().remember_account(actor, "logo@fixture.test", "business", "Owner");
+            with patch.dict(save_business_draft.__globals__, {"_actor_id": lambda () -> str { return actor; }}) {
+                with patch.dict(save_offer.__globals__, {"_actor_id": lambda () -> str { return actor; }}) {
+                    saved = save_business_draft(
+                        "Fixture Cafe", "Cafe", "Lunch", "123 Test St", "", "Soup $5", "", logo, True
+                    );
+                    assert saved.ok and saved.image_url == logo, saved.message;
+                    owned = _merchant_for_actor(actor) as Restaurant;
+                    restaurant_id = jid(owned);
+                    slug = owned.slug;
+                    assert owned.image_url == logo;
+                    created = save_offer(
+                        "", "Logo lunch", "Bowl", "5", "7",
+                        "2027-01-15 11:00", "2027-01-15 15:00",
+                        "4", "Students", "One each", "", ""
+                    );
+                    assert created.ok, created.message;
+                    offer_id = created.code;
+                    public = get_offer(offer_id) as OfferView;
+                    portal = merchant_portal();
+                    assert public.image_url == logo;
+                    assert portal.image_url == logo;
+                    assert len(portal.offers) == 1 and portal.offers[0].image_url == logo;
+                    cleared = save_business_draft(
+                        "Fixture Cafe", "Cafe", "Lunch", "123 Test St", "", "Soup $5", "", "", True
+                    );
+                    assert cleared.ok and cleared.image_url == "";
+                    again = _merchant_for_actor(actor) as Restaurant;
+                    assert jid(again) == restaurant_id and again.slug == slug;
+                    assert again.image_url == "";
+                    assert len([again ->:Publishes:->]) == 1;
+                    public_after = get_offer(offer_id) as OfferView;
+                    portal_after = merchant_portal();
+                    assert public_after.title == "Logo lunch" and public_after.image_url == "";
+                    assert portal_after.image_url == "" and len(portal_after.offers) == 1;
+                    assert portal_after.offers[0].id == offer_id and portal_after.offers[0].image_url == "";
+                }
+            }
+        }
+    }
+}
+
+
+test "model facts have no image field and cannot overwrite the imported logo" {
+    import from services.business_ai { extract_business, BusinessFacts }
+    def _model_facts(source_text: str) -> BusinessFacts {
+        return BusinessFacts(
+            name="Model Cafe", cuisine="Model food", description="Model wrote this",
+            address="9 Model Ave", menu_text="Model soup $99"
+        );
+    }
+    actor = "ffaabbccddeeff001122334455667788";
+    logo = "https://example.com/logo.png";
+    facts = BusinessFacts(name="Fixture Cafe");
+    assert not hasattr(facts, "image_url") and not hasattr(facts, "image");
+    with tempfile.TemporaryDirectory() as directory {
+        with patch.dict(os.environ, {"MLOCAL_ONBOARDING_DIR": directory, "MLOCAL_IMPORT_MODEL": "fixture-model"}) {
+            store().remember_account(actor, "import@fixture.test", "business", "Owner");
+            with patch.dict(import_business_website.__globals__, {
+                "_actor_id": lambda () -> str { return actor; },
+                "collect_website": _collect_logo_site
+            }) {
+                with patch.dict(extract_business.__globals__, {"extract_business": _model_facts}) {
+                    view = import_business_website("https://example.com/");
+                    assert view.ok and view.ai_used, view.message;
+                    assert view.name == "Model Cafe";
+                    assert view.image_url == logo;
+                    assert view.image_urls[0] == logo;
+                    assert "https://example.com/menu-photo.jpg" in view.image_urls;
+                    assert all(["localhost" not in url for url in view.image_urls]);
+                }
+            }
+        }
+    }
+}

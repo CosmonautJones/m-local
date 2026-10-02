@@ -27,6 +27,8 @@ while IFS= read -r -d '' source_file; do
     cp -- "$source_file" "$test_root/$source_file"
 done < <(find . -type d \( -name .jac -o -name .git -o -name node_modules -o -name .venv \) -prune -o -type f \( -name '*.jac' -o -name '*.py' -o -name '*.pyi' -o -name jac.toml \) -print0)
 echo "Isolated test workspace (retained for diagnosis): $test_root"
+# Seeded catalog tests read fixture rows. Production leaves this unset.
+export MLOCAL_DEMO_MODE=1
 cd -- "$test_root"
 if [[ "$suite" == context ]]; then
     "$JAC_BIN" test services/context.test.jac

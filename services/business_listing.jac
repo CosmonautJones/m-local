@@ -34,6 +34,7 @@ def activate_business_listing(actor: str, fields: dict[str, str]) -> dict[str, s
         r.name = prepared["name"];
         r.cuisine = prepared["cuisine"];
         r.blurb = prepared["description"];
+        r.image_url = prepared["image_url"];
         r.owner_actor_id = actor;
         locations = [r ->:HasLocation:->];
         location = locations[0] if locations else None;

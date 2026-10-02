@@ -18,7 +18,7 @@ test('student navigation hides merchant management and redemption controls',asyn
 
 test('legacy entrance wording is visibly unverified',async()=>{
  const ui=await app({item:offer({entrance_note:'Fictional merchant note',note_date:'2026-01-01'})});
- try{ui.click('Current bowl');await until(()=>ui.text().includes('Fictional merchant note'));assert.ok(ui.text().includes('Unverified restaurant note'));assert.equal(ui.text().includes('Getting in'),false);}finally{ui.close();}
+ try{ui.click('Current bowl');await until(()=>ui.text().includes('Fictional merchant note'));assert.ok(ui.text().includes('Unverified restaurant note'));assert.ok(ui.text().includes('No reviewed access information for this place.'));assert.equal(ui.text().includes('Getting in'),false);}finally{ui.close();}
 });
 
 test('claim failure clears busy state and allows one explicit retry',async()=>{

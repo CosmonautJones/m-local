@@ -122,7 +122,7 @@ test('business import fills an editable draft and requires confirmation before s
  let activated=false;
  const ui=await app({role:'business',verified:true,intercept(name,body){
   if(name==='get_business_draft')return rpc({ok:true});
-  if(name==='import_business_website')return rpc({ok:true,name:'Imported Cafe',address:'123 Fixture St',website:body.website,menu_text:'Soup $8',sources:[body.website],menu_urls:[body.website+'/menu'],image_urls:[body.website+'/photo.jpg'],message:'Review the imported details.'});
+  if(name==='import_business_website')return rpc({ok:true,name:'Imported Cafe',address:'123 Fixture St',website:body.website,menu_text:'Soup $8',sources:[body.website],menu_urls:[body.website+'/menu'],image_url:body.website+'/photo.jpg',image_urls:[body.website+'/photo.jpg'],message:'Review the imported details.'});
   if(name==='save_business_draft'){activated=true;return rpc({...body,ok:true,status:'active',message:'Business profile saved.'});}
   if(name==='current_session'&&activated)return rpc({authenticated:true,actor_id:'fixture-business',role:'merchant',restaurant_id:'owned-business',display_name:'Fixture owner',is_demo:false,email_verified:true});
  }});
@@ -131,6 +131,13 @@ test('business import fills an editable draft and requires confirmation before s
   await until(()=>!ui.document.querySelector('input[placeholder="Business name"]').disabled);
   ui.fill('https://your-business.com','https://example.com');ui.click('Import website details');
   await until(()=>ui.document.querySelector('input[placeholder="Business name"]').value==='Imported Cafe');
+  const preview=ui.document.querySelector('img[alt="Imported Cafe"]');
+  assert.equal(preview?.getAttribute('src'),'https://example.com/photo.jpg');
+  assert.equal(preview.style.height,'160px');
+  assert.equal(preview.style.objectFit,'cover');
+  assert.equal((preview.getAttribute('referrerpolicy')||preview.referrerPolicy),'no-referrer');
+  assert.equal(ui.find('Review selected image'),undefined);
+  assert.equal(ui.find('Found images'),undefined);
   assert.equal(ui.find('Save business profile').disabled,true);
   ui.fill('Business name','Reviewed Cafe');
   ui.document.querySelector('input[type="checkbox"]').click();ui.click('Save business profile');

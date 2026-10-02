@@ -71,19 +71,20 @@ test('previously pending business profile reopens with its saved details and a s
  const draft={ok:true,name:'Saved fixture cafe',address:'123 Fixture Street',status:'pending_review',message:''};
  const ui=await app({role:'business',verified:true,intercept(name){if(name==='get_business_draft')return rpc(draft);}});
  try{
-  ui.click('Business profile');await until(()=>ui.document.querySelector('[placeholder="Business name"]')?.value==='Saved fixture cafe');
+  await until(()=>ui.document.querySelector('[placeholder="Business name"]')?.value==='Saved fixture cafe');
   assert.ok(ui.text().includes('Save your business profile to start posting'));
   assert.equal(ui.text().includes('Pending review'),false);
   assert.equal(ui.find('New offer'),undefined);assert.equal(ui.find('Manage'),undefined);
-  ui.click('Close business profile');await until(()=>!ui.document.querySelector('[placeholder="Business name"]'));
-  ui.click('Business profile');await until(()=>ui.document.querySelector('[placeholder="Business name"]')?.value==='Saved fixture cafe');
+  assert.equal(ui.find('Business profile'),undefined);
+  assert.equal(ui.find('Close business profile'),undefined);
+  assert.ok(ui.document.querySelector('[placeholder="Business name"]'));
   assert.deepEqual(ui.errors,[]);
  }finally{ui.close();}
 });
 
 const businessSession=role=>({authenticated:true,actor_id:'fixture-business',role,restaurant_id:role==='merchant'?'owned-business':'',display_name:'Fixture owner',email_verified:true,is_demo:false});
 async function completeBusiness(ui){
- ui.click('Business profile');await until(()=>ui.document.querySelector('[placeholder="Business name"]')&&!ui.document.querySelector('[placeholder="Business name"]').disabled);
+ await until(()=>ui.document.querySelector('[placeholder="Business name"]')&&!ui.document.querySelector('[placeholder="Business name"]').disabled);
  ui.fill('Business name','Self-service cafe');ui.fill('Street address','123 Fixture Street');ui.document.querySelector('input[type="checkbox"]').click();
  const submit=[...ui.document.querySelectorAll('button')].find(button=>button.textContent.startsWith('Save business'));
  submit.click();
@@ -196,7 +197,7 @@ test('business load failure blocks overwriting a saved application until retry s
  let reads=0;
  const ui=await app({role:'business',verified:true,intercept(name){if(name==='get_business_draft')return rpc(++reads===1?{ok:false,message:'Fixture load failed.'}:{ok:true,name:'Retained cafe',address:'123 Fixture Street',status:'pending_review'});}});
  try{
-  ui.click('Business profile');await until(()=>ui.text().includes('Fixture load failed.'));
+  await until(()=>ui.text().includes('Fixture load failed.'));
   assert.equal(ui.document.querySelector('[placeholder="Business name"]').disabled,true);
   ui.click('Retry business profile');await until(()=>ui.document.querySelector('[placeholder="Business name"]')?.value==='Retained cafe');
   assert.equal(ui.document.querySelector('[placeholder="Business name"]').disabled,false);

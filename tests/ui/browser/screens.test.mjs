@@ -84,7 +84,7 @@ test('restaurant lands on Insights with business navigation and can log out',asy
 test('business without a restaurant sees only its own account and can log out',async()=>{
  const ui=await app({role:'business',verified:true,audience:'business'});
  try{
-  assert.ok(ui.text().includes('YOUR BUSINESS'));assert.ok(has(ui,'Business profile'));assert.ok(has(ui,'Log out'));
+  assert.ok(ui.text().includes('YOUR BUSINESS'));assert.ok(ui.document.querySelector('[placeholder="Business name"]'));assert.equal(has(ui,'Business profile'),false);assert.ok(has(ui,'Log out'));
   assert.equal(has(ui,'Current bowl'),false);assert.equal(has(ui,'Nearby'),false);assert.equal(has(ui,'Manage'),false);
   ui.click('Log out');await until(()=>ui.find('Find local deals'));
   assert.equal(has(ui,'Business profile'),false);

@@ -8,7 +8,21 @@ Offer -ClaimedAs-> Redemption
 Times are epoch seconds (float); display is converted to Ann Arbor local time.
 """
 
+import os;
 import from services.qr_auth { merchant_owner }
+
+
+"""Name shown to students and merchants. Stored rows may keep a fixture suffix."""
+def public_name(name: str) -> str {
+    return name.replace(" (Demo)", "");
+}
+
+
+"""Test harness only. Production leaves MLOCAL_DEMO_MODE unset."""
+def samples_visible() -> bool {
+    raw = os.environ.get("MLOCAL_DEMO_MODE", "");
+    return raw.strip().lower() in ["1", "true", "yes", "on"];
+}
 
 # Public catalog nodes are app-owned. HTTP mutations enforce ownership in promo.
 node Restaurant {
@@ -20,7 +34,8 @@ node Restaurant {
         merchant_key: str = "",  # Legacy import compatibility; never authorization.
         owner_actor_id: str = "",
         is_demo: bool = False,
-        source: str = "manual";
+        source: str = "manual",
+        image_url: str = "";
 }
 
 node Location {

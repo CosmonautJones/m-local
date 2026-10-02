@@ -191,6 +191,40 @@ test "sample listings show only when the server turns demo mode on" {
     }
     _ensure_seed();
     assert _home("", "", "any", "", time.time()).show_samples == demo_mode(os.environ.get(DEMO_MODE_ENV, ""));
+    with patch.dict(os.environ, {"MLOCAL_DEMO_MODE": ""}) {
+        quiet = _home("", "", "any", "", time.time());
+        assert not quiet.show_samples;
+        assert not [i for i in quiet.items if i.offer.is_demo or "(Demo)" in i.offer.restaurant or i.offer.title == "$3 oat latte study break"];
+        assert not [p for p in quiet.favorites if p.is_demo or "(Demo)" in p.name];
+    }
+}
+
+
+test "production home omits a demo offer the caller has claimed or redeemed" {
+    _ensure_seed();
+    now = time.time();
+    r = Restaurant(slug="hidden-demo-cafe", name="Hidden Demo Cafe", cuisine="Cafe", is_demo=True);
+    root.shared ++> r;
+    o = Offer(title="Hidden demo lunch", price=4.0, price_cents=400, regular_price_cents=600,
+        start_ts=now - 60, end_ts=now + 3600, quantity=3, qr_ready=True, is_demo=True,
+        terms="Demo terms", eligibility="Student ID");
+    r +>:Publishes():+> o;
+    oid = jid(o);
+    actor = "hidden-demo-student";
+    with patch.dict(os.environ, {"MLOCAL_DEMO_MODE": "1"}) {
+        held = _claim(oid, actor, now);
+        assert held.ok, held.message;
+    }
+    with patch.dict(os.environ, {"MLOCAL_DEMO_MODE": ""}) {
+        quiet = _home(actor, "", "any", "", now);
+        assert not [i for i in quiet.items if i.offer.id == oid or i.offer.is_demo or "(Demo)" in i.offer.restaurant];
+        redeemed = _redeem(r, held.qr_payload, now);
+        assert redeemed.ok, redeemed.message;
+        after = _home(actor, "", "any", "", now);
+        assert not [i for i in after.items if i.offer.id == oid or i.offer.is_demo];
+    }
+    o.status = "paused";
+    o.end_ts = now - 30;
 }
 
 test "hosted dataset replaces starter fixture discovery without deleting starter records" {

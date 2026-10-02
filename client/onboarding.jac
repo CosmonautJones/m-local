@@ -191,6 +191,15 @@ glob emptyDraft: dict[str, any] = {
     "image_urls": [], "menu_urls": [], "sources": []
 };
 
+def ImageChoice(url: str, selected: bool, disabled: bool, choose: Callable[[str], None]) -> JsxElement {
+    return <button type="button" aria-label={"Use image " + url} disabled={disabled}
+        onClick={lambda { choose(url); }}
+        style={{"padding": 0, "border": "2px solid var(--ml-accent)" if selected else "1px solid var(--ml-border)", "borderRadius": 8, "background": "transparent", "width": 64, "height": 64, "overflow": "hidden"}}>
+        <img src={url} alt="" width={64} height={64} referrerPolicy="no-referrer" style={{"width": 64, "height": 64, "objectFit": "cover", "display": "block"}} />
+    </button>;
+}
+
+
 def:pub BusinessOnboarding(
     getDraft: Callable[[], BusinessDraftView],
     importWebsite: Callable[[str], BusinessDraftView],
@@ -309,6 +318,9 @@ def:pub BusinessOnboarding(
         <Notice>{message}</Notice>
         {(<div style={hint}>{"Sources: "}{[<Fragment key={url}>{" · " if i > 0 else ""}<a href={url} target="_blank" rel="noopener noreferrer">{"Website" if i == 0 else "Menu page"}</a></Fragment> for (i, url) in enumerate(draft.sources)]}</div>) if len(draft.sources) > 0 else None}
         <form style={stack} onSubmit={saveSubmit}>
+            {(<img src={draft.image_url} alt={draft.name or "Business logo"} referrerPolicy="no-referrer" style={{"width": "100%", "height": 160, "objectFit": "cover", "display": "block", "background": "var(--ml-sunken)"}} />) if draft.image_url else None}
+            {(<div style={{"display": "flex", "flexWrap": "wrap", "gap": 8}}>{[<ImageChoice key={url} url={url} selected={url == draft.image_url} disabled={busy} choose={lambda (picked: str) { field("image_url", picked); }} /> for url in draft.image_urls]}</div>) if len(draft.image_urls) > 0 else None}
+            <InputField title="Image link" placeholder="https://your-business.com/photo.jpg" inputType="url" maxLength={2048} value={draft.image_url} onChange={lambda (e: ChangeEvent) { field("image_url", e.target.value); }} disabled={busy or not ready}/>
             <InputField title="Business name" placeholder="Business name" maxLength={120} value={draft.name} onChange={lambda (e: ChangeEvent) { field("name", e.target.value); }} required={True} disabled={busy or not ready}/>
             <InputField title="Cuisine" placeholder="Cuisine" maxLength={80} value={draft.cuisine} onChange={lambda (e: ChangeEvent) { field("cuisine", e.target.value); }} disabled={busy or not ready}/>
             <InputField title="Street address" placeholder="Street address" maxLength={240} value={draft.address} onChange={lambda (e: ChangeEvent) { field("address", e.target.value); }} required={True} disabled={busy or not ready}/>
@@ -317,9 +329,6 @@ def:pub BusinessOnboarding(
             <p style={hint}>Check item names and prices against your current menu. These notes do not create offers.</p>
             {(<label style={label}>Found menu links<select style={inputStyle} value={draft.menu_url} onChange={lambda (e: ChangeEvent) { field("menu_url", e.target.value); }} disabled={busy}><option value="">Choose a menu link</option>{[<option key={url} value={url}>{url}</option> for url in draft.menu_urls]}</select></label>) if len(draft.menu_urls) > 0 else None}
             <InputField title="Menu link" placeholder="https://your-business.com/menu" inputType="url" maxLength={2048} value={draft.menu_url} onChange={lambda (e: ChangeEvent) { field("menu_url", e.target.value); }} disabled={busy or not ready}/>
-            {(<label style={label}>Found images<select style={inputStyle} value={draft.image_url} onChange={lambda (e: ChangeEvent) { field("image_url", e.target.value); }} disabled={busy}><option value="">Choose an image</option>{[<option key={url} value={url}>{url}</option> for url in draft.image_urls]}</select></label>) if len(draft.image_urls) > 0 else None}
-            <InputField title="Image link" placeholder="https://your-business.com/photo.jpg" inputType="url" maxLength={2048} value={draft.image_url} onChange={lambda (e: ChangeEvent) { field("image_url", e.target.value); }} disabled={busy or not ready}/>
-            {(<a href={draft.image_url} target="_blank" rel="noopener noreferrer" style={hint}>Review selected image</a>) if draft.image_url and draft.image_url.startswith("https://") else None}
             <label style={{**hint, "display": "flex", "gap": 10, "alignItems": "flex-start", "minHeight": 44}}><input type="checkbox" checked={confirmed} onChange={lambda (e: ChangeEvent) { confirmed = e.target.checked; }} disabled={busy or not ready} style={{"width": 20, "height": 20, "flexShrink": 0}}/>I can represent this business and have permission to use the details and selected image.</label>
             <button style={button} disabled={busy or not ready or not confirmed}>{"Saving..." if busy else "Save business profile"}</button>
             <p style={hint}>Save your business profile to start posting. You can then create offers and edit your business details from Manage.</p>
