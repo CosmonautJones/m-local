@@ -268,6 +268,7 @@ def:pub app -> JsxElement {
         authBusy: bool = False,
         authMsg: str = "",
         businessOpen: bool = False,
+        profileEditing: bool = False,
         localActivity: bool = False,
         profileOpen: bool = False,
         profileSlug: str = "",
@@ -470,7 +471,8 @@ def:pub app -> JsxElement {
         if epoch != sessionEpoch.current { return False; }
         if fresh is None { return False; }
         if not fresh.authenticated or fresh.role != "merchant" or not fresh.restaurant_id { return False; }
-        session = fresh; businessOpen = False; tab = "insights";
+        session = fresh; businessOpen = False; tab = "merchant";
+        await openMerchant();
         return True;
     }
 
@@ -480,7 +482,7 @@ def:pub app -> JsxElement {
         detailRequest.current = (detailRequest.current or 0) + 1;
         offers = []; detail = None; selected = ""; portal = None;
         profileOpen = False; profileSlug = ""; profileOfferId = "";
-        claimMsg = ""; mMsg = ""; editing = False; busy = False; accountOpen = False;
+        claimMsg = ""; mMsg = ""; editing = False; profileEditing = False; busy = False; accountOpen = False;
         busyRef.current = False; detailLoading = False; mLoading = False;
         pName = ""; pCuisine = ""; pBlurb = ""; pAddress = "";
         pHood = ""; pNote = ""; pNoteDate = "";
@@ -599,7 +601,7 @@ def:pub app -> JsxElement {
             p = await update_profile(pName, pCuisine, pBlurb, pAddress, pHood, pNote, pNoteDate);
             if epoch != sessionEpoch.current { return; }
             mOk = p.ok; mMsg = p.message;
-            if p.ok { portal = p; fillProfile(p); await refresh(); }
+            if p.ok { portal = p; fillProfile(p); profileEditing = False; await refresh(); }
         } except Exception {
             if epoch == sessionEpoch.current { mOk = False; mMsg = "Profile could not be saved. Your entries are kept; check the connection and retry."; }
         } finally { if epoch == sessionEpoch.current { busy = False; busyRef.current = False; } }
@@ -724,8 +726,6 @@ def:pub app -> JsxElement {
         return <View style={styles.content}>
             <View style={styles.header}>
                 <View style={[styles.rowBetween, {"flexWrap": "wrap", "gap": 12}]}><BrandLogo /><ThemeControl /></View>
-                <Text style={styles.title}>{"List your business" if audience == "business" else "Sign in to M-Local"}</Text>
-                <Text style={styles.subtitle}>{"Verify your business email to create your profile and post offers." if audience == "business" else "Verify your U-M email to claim deals and save your favorites."}</Text>
             </View>
             <Message text={authMsg} good={False} />
             <View style={styles.section}>
@@ -750,7 +750,6 @@ def:pub app -> JsxElement {
             {(<View style={styles.section}>
                 <BusinessOnboarding key={session.actor_id} getDraft={get_business_draft} importWebsite={import_business_website} saveDraft={save_business_draft} onActivated={openActivatedBusiness} />
             </View>) if session.email_verified and session.role == "business" else <View style={styles.hidden} />}
-            <View style={styles.section}><ThemeControl /></View>
             <View style={styles.section}>
                 <Pressable accessibilityRole="button" style={styles.btnGhost} onPress={lambda { accountOpen = not accountOpen; }}><Text style={styles.btnGhostText}>{"Hide account details" if accountOpen else "Account"}</Text></Pressable>
                 {(<AccountProfile key={session.actor_id} getProfile={get_account_profile} saveProfile={save_account_profile} onSaved={refreshAccount} />) if accountOpen else <View style={styles.hidden} />}
@@ -973,9 +972,10 @@ def:pub app -> JsxElement {
                     <Text style={styles.brand}>MERCHANT</Text>
                 </View>
                 <Text style={styles.title}>Profile and offers</Text>
+                <Text style={styles.subtitle}>Post an offer, then scan a student's QR when they arrive.</Text>
             </View>
             <Pressable accessibilityRole="button" style={styles.btnGhost} disabled={busy or editing} onPress={lambda { openBusiness(""); }}><Text style={styles.btnGhostText}>View business page</Text></Pressable>
-            <Pressable accessibilityRole="button" style={styles.btnGhost} disabled={mLoading or busy or editing} onPress={lambda { openMerchant(); }}><Text style={styles.btnGhostText}>Refresh restaurant</Text></Pressable>
+            <Pressable accessibilityRole="button" style={styles.btnGhost} disabled={mLoading or busy or editing or profileEditing} onPress={lambda { openMerchant(); }}><Text style={styles.btnGhostText}>Refresh restaurant</Text></Pressable>
             <Message text={mMsg} good={mOk} />
             {(
                 <View style={styles.empty}><Text style={styles.subtitle}>Loading restaurant...</Text></View>
@@ -984,8 +984,8 @@ def:pub app -> JsxElement {
                 <View style={styles.section}>
                     <View style={styles.rowBetween}>
                         <Text style={styles.h2}>Your offers</Text>
-                        <Pressable accessibilityRole="button" style={styles.btnGhost} disabled={editing or busy} onPress={lambda { newOffer(); }}>
-                            <Text style={styles.btnGhostText}>New offer</Text>
+                        <Pressable accessibilityRole="button" style={styles.btn} disabled={editing or busy or profileEditing} onPress={lambda { newOffer(); }}>
+                            <Text style={styles.btnText}>New offer</Text>
                         </Pressable>
                     </View>
                     {(<Text style={styles.small}>No offers yet. Create your first one.</Text>) if not portal.offers else <View style={styles.hidden} />}
@@ -998,10 +998,10 @@ def:pub app -> JsxElement {
                             <Text style={styles.body}>{money(o.price) + "  ·  " + o.time_label}</Text>
                             <Text style={styles.small}>{str(o.remaining) + " of " + str(o.quantity) + " available"}</Text>
                             <View style={styles.row}>
-                                <Pressable accessibilityRole="button" style={styles.btnGhost} disabled={editing or busy} onPress={lambda { editOffer(o); }}>
+                                <Pressable accessibilityRole="button" style={styles.btnGhost} disabled={editing or busy or profileEditing} onPress={lambda { editOffer(o); }}>
                                     <Text style={styles.btnGhostText}>Edit</Text>
                                 </Pressable>
-                                <Pressable accessibilityRole="button" style={styles.btnGhost} disabled={editing or busy} onPress={lambda { toggleStatus(o); }}>
+                                <Pressable accessibilityRole="button" style={styles.btnGhost} disabled={editing or busy or profileEditing} onPress={lambda { toggleStatus(o); }}>
                                     <Text style={styles.btnGhostText}>{"Resume" if o.state == "paused" else "Pause"}</Text>
                                 </Pressable>
                             </View>
@@ -1015,6 +1015,8 @@ def:pub app -> JsxElement {
                         {(<OfferImage url={portal.image_url} width={64} height={64} alt={portal.name} />) if portal.image_url else <View style={styles.hidden} />}
                         <Text style={[styles.restaurant, styles.flex1]}>{portal.name}</Text>
                     </View>
+                    <Text style={styles.body}>{portal.address}</Text>
+                    {(<View style={{"gap": 12}}>
                     <Field label="Name" value={pName} onChange={lambda (t: str) { pName = t; }} placeholder="Restaurant name" multiline={False} disabled={busy} />
                     <Field label="Cuisine" value={pCuisine} onChange={lambda (t: str) { pCuisine = t; }} placeholder="Noodles" multiline={False} disabled={busy} />
                     <Field label="About" value={pBlurb} onChange={lambda (t: str) { pBlurb = t; }} placeholder="Short description" multiline={True} disabled={busy} />
@@ -1025,9 +1027,10 @@ def:pub app -> JsxElement {
                     <Pressable accessibilityRole="button" style={styles.btn} disabled={busy} onPress={lambda { saveProfile(); }}>
                         <Text style={styles.btnText}>{"Saving..." if busy else "Save profile"}</Text>
                     </Pressable>
-                    <Pressable accessibilityRole="button" style={styles.btnGhost} disabled={busy} onPress={lambda { if portal is not None { fillProfile(portal); mMsg = ""; } }}>
+                    <Pressable accessibilityRole="button" style={styles.btnGhost} disabled={busy} onPress={lambda { if portal is not None { fillProfile(portal); mMsg = ""; profileEditing = False; } }}>
                         <Text style={styles.btnGhostText}>Cancel profile changes</Text>
                     </Pressable>
+                    </View>) if profileEditing else <Pressable accessibilityRole="button" style={styles.btnGhost} disabled={busy or editing} onPress={lambda { profileEditing = True; }}><Text style={styles.btnGhostText}>Edit business details</Text></Pressable>}
                 </View>
             </View>}
         </View>;

@@ -11,7 +11,7 @@ test('guest gets the sign-in screen and never sees or loads deals',async()=>{
  try{
   await openSignIn(ui);
   await until(()=>ui.document.querySelector('input[placeholder="uniqname"]'));
-  assert.ok(ui.text().includes('Sign in to M-Local'));
+  assert.ok(ui.document.querySelector('form[aria-label="Sign in"]'));
   assert.equal(has(ui,'Current bowl'),false);assert.equal(has(ui,'Your favorites'),false);
   assert.equal(has(ui,'Nearby'),false);assert.equal(has(ui,'Account'),false);assert.equal(has(ui,'Log out'),false);
   assert.equal(heart(ui,'Add'),null);

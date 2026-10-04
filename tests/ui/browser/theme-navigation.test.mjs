@@ -15,7 +15,7 @@ test('business signup labels the organization and preserves the student name fie
  } finally {ui.close();}
 });
 
-test('icon-only theme control sits beside logout and stays synchronized on Account', async () => {
+test('one icon-only theme control stays beside logout through Account navigation', async () => {
  const ui = await app({role:'merchant'});
  try {
   const logout = ui.document.querySelector('[aria-label="Log out"]');
@@ -27,10 +27,11 @@ test('icon-only theme control sits beside logout and stays synchronized on Accou
   await until(() => ui.document.documentElement.dataset.theme === 'dark');
   assert.equal(ui.window.localStorage.getItem('mlocal_theme'), 'dark');
   ui.click('Account');
-  await until(() => ui.document.querySelectorAll('[data-testid="theme-toggle"]').length === 2);
-  ui.document.querySelectorAll('[data-testid="theme-toggle"]')[1].click();
+  await until(() => ui.find('Hide account details'));
+  assert.equal(ui.document.querySelectorAll('[data-testid="theme-toggle"]').length, 1);
+  ui.document.querySelector('[data-testid="theme-toggle"]').click();
   await until(() => ui.document.documentElement.dataset.theme === 'light');
-  assert.equal(ui.document.querySelectorAll('[aria-label="Switch to dark mode"]').length, 2);
+  assert.equal(ui.document.querySelectorAll('[aria-label="Switch to dark mode"]').length, 1);
   assert.deepEqual(ui.errors, []);
  } finally {ui.close();}
 });

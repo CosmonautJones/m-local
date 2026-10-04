@@ -303,6 +303,11 @@ def:pub BusinessOnboarding(
     }
     def importSubmit(event: FormEvent) { event.preventDefault(); run(importCurrentWebsite); }
     def saveSubmit(event: FormEvent) { event.preventDefault(); run(saveCurrentDraft, True); }
+    def revealInvalid(event: FormEvent) {
+        target = event.target as HTMLElement;
+        panel = target.closest("details");
+        if panel { panel.setAttribute("open", ""); }
+    }
 
     return <section aria-label="Create your business profile" style={{**stack, "paddingTop": 16, "borderTop": "1px solid var(--ml-border)"}}>
         <h3 style={{"margin": 0, "fontSize": 20}}>{"Your business profile" if draft.name else "Bring your business to M-Local"}</h3>
@@ -310,25 +315,30 @@ def:pub BusinessOnboarding(
         {(<Fragment><p role="status" style={hint}>Your business profile is saved.</p><button style={secondary} type="button" disabled={busy} onClick={retryManagement}>{"Opening offer management..." if busy else "Open offer management"}</button></Fragment>) if draft.status == "active" else None}
         {(<p role="status" style={hint}>Loading your business profile...</p>) if not ready and not loadFailed else None}
         {(<button style={secondary} type="button" onClick={load}>Retry business profile</button>) if loadFailed else None}
-        <p style={hint}>Start with your website. We’ll find details, menu links and image options for you to review. You can also fill this in yourself.</p>
+        <p style={hint}>Have a website? Import your details, or enter your business name and address below.</p>
         <form style={stack} onSubmit={importSubmit}>
             <InputField title="Business website" placeholder="https://your-business.com" inputType="url" value={draft.website} onChange={lambda (e: ChangeEvent) { field("website", e.target.value); }} disabled={busy or not ready} required={True}/>
             <button style={secondary} disabled={busy or not ready}>{"Working..." if busy else "Import website details"}</button>
         </form>
         <Notice>{message}</Notice>
         {(<div style={hint}>{"Sources: "}{[<Fragment key={url}>{" · " if i > 0 else ""}<a href={url} target="_blank" rel="noopener noreferrer">{"Website" if i == 0 else "Menu page"}</a></Fragment> for (i, url) in enumerate(draft.sources)]}</div>) if len(draft.sources) > 0 else None}
-        <form style={stack} onSubmit={saveSubmit}>
+        <form style={stack} onSubmit={saveSubmit} onInvalidCapture={revealInvalid}>
             {(<img src={draft.image_url} alt={draft.name or "Business logo"} referrerPolicy="no-referrer" style={{"width": "100%", "height": 160, "objectFit": "cover", "display": "block", "background": "var(--ml-sunken)"}} />) if draft.image_url else None}
-            {(<div style={{"display": "flex", "flexWrap": "wrap", "gap": 8}}>{[<ImageChoice key={url} url={url} selected={url == draft.image_url} disabled={busy} choose={lambda (picked: str) { field("image_url", picked); }} /> for url in draft.image_urls]}</div>) if len(draft.image_urls) > 0 else None}
-            <InputField title="Image link" placeholder="https://your-business.com/photo.jpg" inputType="url" maxLength={2048} value={draft.image_url} onChange={lambda (e: ChangeEvent) { field("image_url", e.target.value); }} disabled={busy or not ready}/>
             <InputField title="Business name" placeholder="Business name" maxLength={120} value={draft.name} onChange={lambda (e: ChangeEvent) { field("name", e.target.value); }} required={True} disabled={busy or not ready}/>
             <InputField title="Cuisine" placeholder="Cuisine" maxLength={80} value={draft.cuisine} onChange={lambda (e: ChangeEvent) { field("cuisine", e.target.value); }} disabled={busy or not ready}/>
             <InputField title="Street address" placeholder="Street address" maxLength={240} value={draft.address} onChange={lambda (e: ChangeEvent) { field("address", e.target.value); }} required={True} disabled={busy or not ready}/>
             <label style={label}>About your business<textarea style={{**inputStyle, "minHeight": 90, "resize": "vertical"}} placeholder="About your business" maxLength={1000} value={draft.description} onChange={lambda (e: ChangeEvent) { field("description", e.target.value); }} disabled={busy or not ready}/></label>
-            <label style={label}>Menu notes to review<textarea style={{**inputStyle, "minHeight": 120, "resize": "vertical"}} placeholder="Menu items and prices" maxLength={4000} value={draft.menu_text} onChange={lambda (e: ChangeEvent) { field("menu_text", e.target.value); }} disabled={busy or not ready}/></label>
-            <p style={hint}>Check item names and prices against your current menu. These notes do not create offers.</p>
-            {(<label style={label}>Found menu links<select style={inputStyle} value={draft.menu_url} onChange={lambda (e: ChangeEvent) { field("menu_url", e.target.value); }} disabled={busy}><option value="">Choose a menu link</option>{[<option key={url} value={url}>{url}</option> for url in draft.menu_urls]}</select></label>) if len(draft.menu_urls) > 0 else None}
-            <InputField title="Menu link" placeholder="https://your-business.com/menu" inputType="url" maxLength={2048} value={draft.menu_url} onChange={lambda (e: ChangeEvent) { field("menu_url", e.target.value); }} disabled={busy or not ready}/>
+            <details>
+                <summary>Photo and menu (optional)</summary>
+                <div style={stack}>
+                    {(<div style={{"display": "flex", "flexWrap": "wrap", "gap": 8}}>{[<ImageChoice key={url} url={url} selected={url == draft.image_url} disabled={busy} choose={lambda (picked: str) { field("image_url", picked); }} /> for url in draft.image_urls]}</div>) if len(draft.image_urls) > 0 else None}
+                    <InputField title="Image link" placeholder="https://your-business.com/photo.jpg" inputType="url" maxLength={2048} value={draft.image_url} onChange={lambda (e: ChangeEvent) { field("image_url", e.target.value); }} disabled={busy or not ready}/>
+                    <label style={label}>Menu notes to review<textarea style={{**inputStyle, "minHeight": 120, "resize": "vertical"}} placeholder="Menu items and prices" maxLength={4000} value={draft.menu_text} onChange={lambda (e: ChangeEvent) { field("menu_text", e.target.value); }} disabled={busy or not ready}/></label>
+                    <p style={hint}>Check item names and prices against your current menu. These notes do not create offers.</p>
+                    {(<label style={label}>Found menu links<select style={inputStyle} value={draft.menu_url} onChange={lambda (e: ChangeEvent) { field("menu_url", e.target.value); }} disabled={busy}><option value="">Choose a menu link</option>{[<option key={url} value={url}>{url}</option> for url in draft.menu_urls]}</select></label>) if len(draft.menu_urls) > 0 else None}
+                    <InputField title="Menu link" placeholder="https://your-business.com/menu" inputType="url" maxLength={2048} value={draft.menu_url} onChange={lambda (e: ChangeEvent) { field("menu_url", e.target.value); }} disabled={busy or not ready}/>
+                </div>
+            </details>
             <label style={{**hint, "display": "flex", "gap": 10, "alignItems": "flex-start", "minHeight": 44}}><input type="checkbox" checked={confirmed} onChange={lambda (e: ChangeEvent) { confirmed = e.target.checked; }} disabled={busy or not ready} style={{"width": 20, "height": 20, "flexShrink": 0}}/>I can represent this business and have permission to use the details and selected image.</label>
             <button style={button} disabled={busy or not ready or not confirmed}>{"Saving..." if busy else "Save business profile"}</button>
             <p style={hint}>Save your business profile to start posting. You can then create offers and edit your business details from Manage.</p>
