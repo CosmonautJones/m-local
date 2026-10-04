@@ -86,7 +86,9 @@ html,body,#root,#root *,#root *:before,#root *:after{transition:background-color
 #root input,#root textarea,#root select,#root button{font-family:Figtree,system-ui,sans-serif}
 #root button,#root [role=button],#root input,#root select,#root textarea{transition:background-color var(--ml-theme-time) var(--ml-theme-ease),color var(--ml-theme-time) var(--ml-theme-ease),border-color var(--ml-theme-time) var(--ml-theme-ease),box-shadow 150ms ease,transform 150ms ease}
 #root button:not(:disabled):hover,#root [role=button]:not([aria-disabled=true]):hover{box-shadow:inset 0 0 0 1px var(--ml-hover)}
-#root button:focus-visible,#root [role=button]:focus-visible,#root input:focus-visible,#root select:focus-visible,#root textarea:focus-visible{outline:3px solid var(--ml-focus);outline-offset:3px}
+#root button:focus-visible,#root [role=button]:focus-visible,#root input:focus-visible,#root select:focus-visible,#root textarea:focus-visible,#root summary:focus-visible{outline:3px solid var(--ml-focus);outline-offset:3px}
+#root summary{padding:12px 0;min-height:44px;box-sizing:border-box;cursor:pointer;font-weight:700;color:var(--ml-accent)}
+#root details[open]>summary{margin-bottom:12px}
 #root button:disabled,#root [aria-disabled=true]{opacity:.55;cursor:default}
 #root input[type=checkbox]{accent-color:var(--ml-accent)}
 #root a{color:var(--ml-accent);text-underline-offset:3px}

@@ -87,7 +87,7 @@ test('merchants can preview their public business page without exposing manageme
   ui.click('View business page');await until(()=>ui.find('A neighborhood kitchen with a changing seasonal menu.'));
   assert.deepEqual(ui.calls.find(c=>c.name==='get_business_profile').body,{slug:'',offer_id:''});
   assert.equal(ui.find('Save profile'),undefined);assert.equal(ui.find('Claim this offer'),undefined);
-  ui.click('Back to Manage');await until(()=>ui.find('Save profile'));
+  ui.click('Back to Manage');await until(()=>ui.find('Edit business details'));
   assert.deepEqual(ui.errors,[]);
  }finally{ui.close();}
 });

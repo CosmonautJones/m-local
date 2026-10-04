@@ -72,11 +72,9 @@ def:pub buildStyles(T: dict[str, str]) -> any {
             "body": {"fontFamily": "Figtree, system-ui, sans-serif", "fontSize": F["md"], "color": T["text"], "lineHeight": 22},
             "small": {"fontFamily": "Figtree, system-ui, sans-serif", "fontSize": F["sm"], "color": T["muted"], "lineHeight": 19},
             "label": {
-                "fontFamily": "Figtree, system-ui, sans-serif", "fontSize": F["xs"],
+                "fontFamily": "Figtree, system-ui, sans-serif", "fontSize": F["sm"],
                 "fontWeight": "700",
                 "color": T["muted"],
-                "textTransform": "uppercase",
-                "letterSpacing": 0.8
             },
             "row": {"flexDirection": "row", "alignItems": "center", "gap": S["sm"]},
             "rowBetween": {
@@ -152,6 +150,7 @@ def:pub buildStyles(T: dict[str, str]) -> any {
             },
             "noteText": {"fontFamily": "Figtree, system-ui, sans-serif", "fontSize": F["sm"], "color": T["warn"], "lineHeight": 19},
             "input": {
+                "minHeight": 52,
                 "paddingVertical": S["md"],
                 "paddingHorizontal": S["md"],
                 "borderRadius": R["md"],

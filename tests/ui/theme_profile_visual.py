@@ -79,7 +79,7 @@ def run(url, output):
             page.goto(url)
             page.evaluate('([role,theme])=>{localStorage.clear();localStorage.setItem("mlocal_theme",theme);if(role!=="guest")localStorage.setItem("jac_token","synthetic-token")}', [role,theme])
             page.reload()
-            page.wait_for_load_state('networkidle')
+            page.get_by_test_id('theme-toggle').wait_for()
             page.evaluate('document.fonts.ready')
             assert page.locator('html').get_attribute('data-theme') == theme
 
@@ -88,6 +88,7 @@ def run(url, output):
             assert not page.evaluate('''()=>[...document.querySelectorAll('input,select,textarea,button')].filter(el=>{const r=el.getBoundingClientRect();return r.width>0&&(r.left< -1||r.right>innerWidth+1)}).map(el=>el.textContent)'''), 'Control overflow: '+name
             logo = page.get_by_role('img',name='M Local',exact=True).first
             assert logo.is_visible(), 'Logo missing: '+name
+            assert page.get_by_test_id('theme-toggle').count()==1, 'Duplicate appearance control: '+name
             assert page.evaluate('''async()=>{const image=new Image();image.src='/static/assets/brand/logo-master.png';await image.decode();return image.naturalWidth>0;}'''), 'Logo mask failed: '+name
             assert page.evaluate('''()=>[...document.querySelectorAll('button,input,select,textarea')].filter(el=>el.getBoundingClientRect().width>0).every(el=>getComputedStyle(el).fontFamily.includes('Figtree'))'''), 'Inconsistent control typography: '+name
             page.screenshot(path=str(output/f'{name}.png'), full_page=True)
@@ -168,20 +169,28 @@ def run(url, output):
                 load('merchant',theme)
                 page.get_by_text('Business insights',exact=True).wait_for()
                 capture(prefix+'-insights')
-                page.get_by_role('button',name='Manage Offers',exact=True).click()
+                page.get_by_role('button',name='Manage',exact=True).click()
                 page.get_by_role('button',name='View business page',exact=True).wait_for()
+                assert page.get_by_placeholder('Restaurant name').count()==0
                 capture(prefix+'-manage')
+                page.get_by_role('button',name='Edit business details',exact=True).click()
+                page.get_by_placeholder('Restaurant name').wait_for()
+                capture(prefix+'-business-edit')
+                page.get_by_role('button',name='Cancel profile changes',exact=True).click()
                 page.get_by_role('button',name='New offer',exact=True).click()
                 page.get_by_placeholder('Lunch bowl for $7').wait_for()
                 capture(prefix+'-offer-editor')
+                page.locator('summary').filter(has_text='More details (optional)').click()
+                page.get_by_label('Vegan',exact=True).check()
+                capture(prefix+'-offer-options')
                 page.get_by_role('button',name='Cancel',exact=True).click()
                 page.get_by_role('button',name='View business page',exact=True).click()
                 page.get_by_role('heading',name='Arbor Leaf Kitchen',exact=True).wait_for()
                 capture(prefix+'-owner-preview')
-                page.get_by_role('button',name='Account You',exact=True).click()
+                page.get_by_role('button',name='Account',exact=True).click()
                 page.get_by_test_id('theme-toggle').wait_for()
                 capture(prefix+'-account')
-                page.get_by_role('button',name='Redeem Scan',exact=True).click()
+                page.get_by_role('button',name='Redeem',exact=True).click()
                 page.get_by_role('button',name='Start camera scan',exact=True).wait_for()
                 capture(prefix+'-scanner')
                 load('business',theme)
@@ -189,6 +198,11 @@ def run(url, output):
                 if business_trigger.count(): business_trigger.click()
                 page.get_by_placeholder('Business name').wait_for()
                 capture(prefix+'-business-onboarding')
+                assert not page.locator('details').evaluate('(el)=>el.open')
+                page.locator('summary').filter(has_text='Photo and menu (optional)').focus()
+                page.keyboard.press('Enter')
+                assert page.get_by_placeholder('https://your-business.com/photo.jpg').is_visible()
+                capture(prefix+'-business-options')
                 load('student',theme,'empty-feed')
                 page.get_by_text('Offers are on their way',exact=True).wait_for()
                 capture(prefix+'-empty-feed')
@@ -201,7 +215,7 @@ def run(url, output):
                 page.get_by_text('Your next redemption starts the story.',exact=True).wait_for()
                 capture(prefix+'-insights-empty')
                 load('student',theme,'account-error')
-                page.get_by_role('button',name='Account You',exact=True).click()
+                page.get_by_role('button',name='Account',exact=True).click()
                 page.get_by_role('button',name='Retry account',exact=True).wait_for()
                 capture(prefix+'-account-error')
         assert not errors, errors

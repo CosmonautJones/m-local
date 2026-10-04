@@ -49,6 +49,10 @@ def:pub OfferEditor(initial: dict[str, str], onDraftChange: Callable[[dict[str, 
         updated[key] = value;
         onDraftChange(updated);
     }
+    def toggleDiet(key: str) {
+        picked = [x.strip() for x in draft["dietary"].split(",") if x.strip()];
+        field("dietary", ", ".join([x for x in picked if x != key] if key in picked else picked + [key]));
+    }
     def showError(text: str) {
         message = text;
         requestAnimationFrame(lambda { if errorRef.current { errorRef.current.focus(); } });
@@ -89,10 +93,22 @@ def:pub OfferEditor(initial: dict[str, str], onDraftChange: Callable[[dict[str, 
         <p style={formHint}>Prices exclude tax unless your terms say otherwise. No payment is collected here.</p>
         <div style={editorRow}>{textField("start_local", "Starts *", "2026-09-26 11:00", 30, {"type": "datetime-local", "required": True})}{textField("end_local", "Ends *", "2026-09-26 14:00", 30, {"type": "datetime-local", "required": True})}</div>
         <p style={formHint}>Times are Ann Arbor local time (Eastern), even when you are traveling.</p>
-        <div style={editorRow}>{textField("quantity", "Quantity *", "10", 5, {"inputMode": "numeric", "required": True})}{textField("menu_item", "Menu item, optional", "Veggie Dan Dan Noodles", 120)}</div>
+        {textField("quantity", "Quantity *", "10", 5, {"inputMode": "numeric", "required": True})}
         {textField("eligibility", "Eligibility *", "Students with a valid ID", 300, {"required": True})}
         {multiField("terms", "Terms *", "One per student. Dine-in only.")}
-        {textField("dietary", "Dietary tags, separated by commas", "vegetarian, vegan, gluten-free, halal", 200)}
+        <details>
+            <summary>More details (optional)</summary>
+            <div style={formStack}>
+                {textField("menu_item", "Menu item", "Veggie Dan Dan Noodles", 120)}
+                <fieldset style={{"border": 0, "padding": 0, "margin": 0, "minWidth": 0}}>
+                    <legend style={{"fontSize": 14, "fontWeight": 600, "marginBottom": 8}}>Dietary options</legend>
+                    <div style={{"display": "flex", "flexWrap": "wrap", "gap": 12}}>
+                        {[<label key={diet} style={{"display": "flex", "alignItems": "center", "gap": 8, "minHeight": 44}}><input type="checkbox" aria-label={diet.capitalize()} checked={diet in [x.strip() for x in draft["dietary"].split(",")]} disabled={busy} onChange={lambda { toggleDiet(diet); }} style={{"width": 20, "height": 20}}/>{diet.capitalize()}</label> for diet in ["vegetarian", "vegan", "gluten-free", "halal"]]}
+                    </div>
+                    <p style={formHint}>Select only the options this offer meets.</p>
+                </fieldset>
+            </div>
+        </details>
         {if message { <p ref={errorRef} tabIndex={-1} role="alert" style={{**formHint, "color": ui.bad}}>{message}</p> }}
         <div style={{"display": "flex", "gap": 8, "flexWrap": "wrap"}}>
             <button style={{**formSecondary, "flex": "1 1 180px", "background": ui.navy, "borderColor": ui.navy, "color": ui.accentText}} disabled={busy}>{"Saving..." if busy else "Save changes" if draft["offer_id"] else "Publish offer"}</button>

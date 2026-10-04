@@ -98,8 +98,8 @@ test('saving an active business profile refreshes server authority and opens off
   if(name==='current_session')return rpc(businessSession(activated?'merchant':'business'));
  }});
  try{
-  await completeBusiness(ui);await until(()=>ui.find('Insights'),'activated business opens its dashboard');
-  ui.click('Manage');await until(()=>ui.find('New offer'),'activated business can create an offer immediately');
+  await completeBusiness(ui);await until(()=>ui.find('Manage'),'activated business gets its navigation');
+  assert.ok(ui.find('New offer'),'business setup opens offer management immediately');
   assert.ok(ui.find('Manage'));assert.ok(ui.find('Restaurant profile'));
   assert.equal(ui.document.querySelector('[placeholder="Business name"]'),null);
   const request=ui.calls.find(c=>c.name==='save_business_draft');
@@ -209,8 +209,12 @@ test('business load failure blocks overwriting a saved application until retry s
 test('merchant profile cancellation restores saved details without sending a write',async()=>{
  const ui=await app({role:'merchant'});
  try{ui.click("Manage");await until(()=>ui.text().includes("New offer"));
-  ui.click('Manage');await until(()=>ui.document.querySelector('[placeholder="Restaurant name"]')?.value==='Fixture Kitchen');
+  ui.click('Manage');await until(()=>ui.find('Edit business details'));
+  assert.equal(ui.document.querySelector('[placeholder="Restaurant name"]'),null,'the default Manage screen focuses on offers');
+  ui.click('Edit business details');await until(()=>ui.document.querySelector('[placeholder="Restaurant name"]')?.value==='Fixture Kitchen');
   ui.fill('Restaurant name','Unsaved name');ui.click('Cancel profile changes');
+  await until(()=>ui.find('Edit business details'));
+  ui.click('Edit business details');
   await until(()=>ui.document.querySelector('[placeholder="Restaurant name"]')?.value==='Fixture Kitchen');
   assert.equal(ui.calls.some(c=>c.name==='update_profile'),false);
   assert.deepEqual(ui.errors,[]);
@@ -266,11 +270,12 @@ test('merchant profile fields prevent newer edits being overwritten by a pending
  let release;const pending=new Promise(resolve=>{release=resolve;});
  const ui=await app({role:'merchant',intercept:async(name)=>{if(name==='update_profile')await pending;}});
  try{ui.click("Manage");await until(()=>ui.text().includes("New offer"));
-  ui.click('Manage');await until(()=>ui.document.querySelector('[placeholder="Restaurant name"]'));
+  ui.click('Manage');await until(()=>ui.find('Edit business details'));
+  ui.click('Edit business details');await until(()=>ui.document.querySelector('[placeholder="Restaurant name"]'));
   ui.fill('Restaurant name','Submitted name');ui.click('Save profile');await until(()=>ui.calls.some(c=>c.name==='update_profile'));
   const inputs=[...ui.document.querySelectorAll('[placeholder="Restaurant name"],[placeholder="Noodles"],[placeholder="Short description"],[placeholder="Street address"],[placeholder="Kerrytown"],[placeholder="Use the side door while sidewalk work continues"],[placeholder="2026-09-26"]')];
   assert.equal(inputs.length,7);assert.ok(inputs.every(input=>input.readOnly),'the submitted profile must stay unchanged until its response arrives');
-  release();await until(()=>!ui.document.querySelector('[placeholder="Restaurant name"]').readOnly);
+  release();await until(()=>ui.find('Edit business details'));
   assert.deepEqual(ui.errors,[]);
  }finally{release();ui.close();}
 });
