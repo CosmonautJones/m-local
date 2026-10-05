@@ -505,6 +505,9 @@ def:pub app -> JsxElement {
     }
 
     def logout() {
+        if session and session.actor_id {
+            try { localStorage.removeItem("mlocal_offer_draft_" + session.actor_id); } except Exception {}
+        }
         signOut(); clearPrivate(); session = None; audience = "";
         tab = "discover"; authOpen = False; businessOpen = False; authMsg = ""; home = None;
     }
@@ -749,7 +752,7 @@ def:pub app -> JsxElement {
             <Message text={authMsg} good={False} />
             {(<View style={styles.section}>
                 <BusinessOnboarding key={session.actor_id} getDraft={get_business_draft} importWebsite={import_business_website} saveDraft={save_business_draft} onActivated={openActivatedBusiness} />
-            </View>) if session.email_verified and session.role == "business" else <View style={styles.hidden} />}
+            </View>) if session.email_verified and (session.role == "business" or session.business_account) else <View style={styles.hidden} />}
             <View style={styles.section}>
                 <Pressable accessibilityRole="button" style={styles.btnGhost} onPress={lambda { accountOpen = not accountOpen; }}><Text style={styles.btnGhostText}>{"Hide account details" if accountOpen else "Account"}</Text></Pressable>
                 {(<AccountProfile key={session.actor_id} getProfile={get_account_profile} saveProfile={save_account_profile} onSaved={refreshAccount} />) if accountOpen else <View style={styles.hidden} />}
@@ -814,10 +817,20 @@ def:pub app -> JsxElement {
         if tastesOpen { return Tastes(); }
         signedIn: bool = session is not None and session.authenticated;
         studentSession: bool = session is not None and session.authenticated and session.role == "student";
+        claims = [o for o in offers if o.my_status == "claimed" and o.my_claim_id and o.my_qr_payload];
         return <View style={styles.content}>
             <View style={styles.header}>
                 <Text style={styles.title}>{"Picked for you, plus everything else." if home and home.personalized else "Hungry? Here is what is good nearby."}</Text>
             </View>
+            {(<View testID="saved-claims" style={{"gap": 8}}>
+                <Text style={styles.h2}>My claims</Text>
+                {[<View key={o.id} style={styles.card}>
+                    <Text style={styles.small}>{o.restaurant + (" · Until " + o.my_expires if o.my_expires else "")}</Text>
+                    <Pressable accessibilityRole="button" style={styles.btn} onPress={lambda { openOffer(o.id); }}>
+                        <Text style={styles.btnText}>{"Show QR for " + (o.my_title or o.title)}</Text>
+                    </Pressable>
+                </View> for o in claims]}
+            </View>) if studentSession and len(claims) > 0 else <View style={styles.hidden} />}
             {(
                 <View style={{"gap": 8}}>
                     <View style={styles.rowBetween}>
@@ -960,7 +973,7 @@ def:pub app -> JsxElement {
                 "price": ePrice, "regular_price": eRegular, "start_local": eStart,
                 "end_local": eEnd, "quantity": eQty, "eligibility": eElig,
                 "terms": eTerms, "dietary": eDiets, "menu_item": eItem
-            }} onDraftChange={updateOfferDraft} onBusyChange={setEditorBusy} saveOffer={save_offer} onSaved={afterOfferSaved} onCancel={lambda { editing = False; }} />
+            }} draftOwner={session.actor_id if session else ""} onDraftChange={updateOfferDraft} onBusyChange={setEditorBusy} saveOffer={save_offer} onSaved={afterOfferSaved} onCancel={lambda { editing = False; }} />
         </View>;
     }
 
@@ -1017,10 +1030,11 @@ def:pub app -> JsxElement {
                     </View>
                     <Text style={styles.body}>{portal.address}</Text>
                     {(<View style={{"gap": 12}}>
-                    <Field label="Name" value={pName} onChange={lambda (t: str) { pName = t; }} placeholder="Restaurant name" multiline={False} disabled={busy} />
+                    <Text style={styles.muted}>Name and address changes need host review.</Text>
+                    <Field label="Name" value={pName} onChange={lambda (t: str) { pName = t; }} placeholder="Restaurant name" multiline={False} disabled={True} />
                     <Field label="Cuisine" value={pCuisine} onChange={lambda (t: str) { pCuisine = t; }} placeholder="Noodles" multiline={False} disabled={busy} />
                     <Field label="About" value={pBlurb} onChange={lambda (t: str) { pBlurb = t; }} placeholder="Short description" multiline={True} disabled={busy} />
-                    <Field label="Address" value={pAddress} onChange={lambda (t: str) { pAddress = t; }} placeholder="Street address" multiline={False} disabled={busy} />
+                    <Field label="Address" value={pAddress} onChange={lambda (t: str) { pAddress = t; }} placeholder="Street address" multiline={False} disabled={True} />
                     <Field label="Neighborhood" value={pHood} onChange={lambda (t: str) { pHood = t; }} placeholder="Kerrytown" multiline={False} disabled={busy} />
                     <Field label="Entrance or construction note" value={pNote} onChange={lambda (t: str) { pNote = t; }} placeholder="Use the side door while sidewalk work continues" multiline={True} disabled={busy} />
                     <Field label="Note date" value={pNoteDate} onChange={lambda (t: str) { pNoteDate = t; }} placeholder="2026-09-26" multiline={False} disabled={busy} />
@@ -1030,7 +1044,7 @@ def:pub app -> JsxElement {
                     <Pressable accessibilityRole="button" style={styles.btnGhost} disabled={busy} onPress={lambda { if portal is not None { fillProfile(portal); mMsg = ""; profileEditing = False; } }}>
                         <Text style={styles.btnGhostText}>Cancel profile changes</Text>
                     </Pressable>
-                    </View>) if profileEditing else <Pressable accessibilityRole="button" style={styles.btnGhost} disabled={busy or editing} onPress={lambda { profileEditing = True; }}><Text style={styles.btnGhostText}>Edit business details</Text></Pressable>}
+                    </View>) if profileEditing else <Pressable accessibilityRole="button" style={styles.btnGhost} disabled={busy or editing} onPress={lambda { if session and session.business_account { goTab("account"); } else { profileEditing = True; } }}><Text style={styles.btnGhostText}>Edit business details</Text></Pressable>}
                 </View>
             </View>}
         </View>;

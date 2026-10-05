@@ -36,6 +36,7 @@ def:pub BusinessProfile(
 ) -> JsxElement {
     has profile: BusinessProfileView | None = None,
         phase: str = "loading",
+        imageFailed: bool = False,
         attempt: int = 0,
         heading: Ref[HTMLElement] = Ref();
 
@@ -45,6 +46,7 @@ def:pub BusinessProfile(
         current = True;
         profile = None;
         phase = "loading";
+        imageFailed = False;
         async def load {
             try {
                 result = await getProfile(slug, offerId);
@@ -75,6 +77,7 @@ def:pub BusinessProfile(
             .ml-business-back{align-self:flex-start;border:0;background:none;color:var(--ml-accent);padding:8px 0;font:inherit;font-weight:750;cursor:pointer;text-align:left}
             .ml-business-hero{background:var(--ml-ticket);color:var(--ml-ticket-text);padding:28px;border-radius:22px;display:flex;flex-direction:column;align-items:flex-start;gap:18px}
             .ml-business-monogram{display:grid;place-items:center;min-width:60px;height:60px;padding:0 10px;border-radius:16px;background:var(--ml-maize);color:var(--ml-on-maize);font-size:25px;font-weight:850;box-sizing:border-box}
+            .ml-business-photo{width:160px;max-width:100%;height:160px;object-fit:cover;border-radius:16px}
             .ml-business-kicker{font-size:11px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase}
             .ml-business-description{font-size:17px;line-height:1.65;max-width:60ch;overflow-wrap:anywhere;white-space:pre-wrap}
             .ml-business-grid{display:grid;gap:26px}.ml-business-section{display:flex;flex-direction:column;gap:14px;min-width:0}
@@ -102,7 +105,8 @@ def:pub BusinessProfile(
         }}
         {if phase == "ready" and profile {
             <header className="ml-business-hero">
-                <div className="ml-business-monogram" aria-hidden="true">{initials}</div>
+                {if profile.image_url and not imageFailed { <img className="ml-business-photo" src={profile.image_url} alt={profile.name + " business photo"} referrerPolicy="no-referrer" onError={lambda { imageFailed = True; }} /> }
+                else { <div className="ml-business-monogram" aria-hidden="true">{initials}</div> }}
                 <div style={{"display": "flex", "flexDirection": "column", "gap": 10}}><p className="ml-business-kicker">Meet the business</p><h1 tabIndex={-1} ref={heading}>{profile.name}</h1></div>
                 {if profile.cuisine or profile.neighborhood { <p style={{"fontSize": 15, "lineHeight": 1.5}}>{" · ".join([label for label in [profile.cuisine, profile.neighborhood] if label])}</p> }}
             </header>

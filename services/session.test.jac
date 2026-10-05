@@ -26,4 +26,22 @@ test "default session contains no identity or merchant authority" {
     s = SessionView();
     assert not s.authenticated;
     assert s.role == "guest" and s.actor_id == "" and s.restaurant_id == "";
+    assert not s.business_account;
+}
+
+test "merchant session distinguishes verified business setup from a configured student owner" {
+    r = Restaurant(slug="session-account-kind", name="Configured Cafe");
+    for kind in ["student", "business"] {
+        with patch.dict(current_session.__globals__, {
+            "_actor_id": lambda () -> str { return "0123456789abcdef0123456789abcdef"; },
+            "_ensure_seed": lambda () {},
+            "_merchant_for_actor": lambda (_actor: str) -> Restaurant { return r; },
+            "verified_account": lambda (_actor: str) -> dict[str, any] { return {"kind": kind}; },
+            "account_name": lambda (_actor: str, _fallback: str) -> str { return "Owner"; }
+        }) {
+            view = current_session();
+            assert view.role == "merchant" and view.email_verified;
+            assert view.business_account == (kind == "business");
+        }
+    }
 }

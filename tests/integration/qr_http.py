@@ -91,7 +91,7 @@ def main():
     require(student_a.call('current_session')['role'] == 'student', 'student role loaded')
     now = datetime.now(ZoneInfo('America/Detroit'))
     run = secrets.token_hex(6)
-    offer = dict(offer_id='', title='QR acceptance ' + run, description='Fictional test offer',
+    offer = dict(offer_id='', create_key=secrets.token_hex(16), title='QR acceptance ' + run, description='Fictional test offer',
                  price='3.00', regular_price='5.00', start_local=(now-timedelta(minutes=5)).strftime('%Y-%m-%d %H:%M'),
                  end_local=(now+timedelta(hours=1)).strftime('%Y-%m-%d %H:%M'), quantity='1',
                  eligibility='Show student ID', terms='One fictional test meal', dietary='', menu_item='')

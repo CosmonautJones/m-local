@@ -7,6 +7,22 @@ const profile = (extra={}) => ({ok:true,message:'',slug:'fixture-kitchen',name:'
  address:'123 Example Street, Ann Arbor',neighborhood:'Downtown',entrance_note:'Use the side entrance.',
  note_date:'2026-09-27',is_demo:false,offers:[offer()],...extra});
 
+test('the business profile shows its saved photo and falls back when it cannot load',async()=>{
+ const image_url='https://images.example.test/kitchen.png';
+ const ui=await app({verified:true,intercept(name){if(name==='get_business_profile')return rpc(profile({image_url}));}});
+ try{
+  ui.click('Fixture Kitchen');await until(()=>ui.find('A neighborhood kitchen with a changing seasonal menu.'));
+  const image=ui.document.querySelector('.ml-business-hero img');
+  assert.ok(image,'saved business photo is visible on its profile');
+  assert.equal(image.src,image_url);assert.equal(image.alt,'Fixture Kitchen business photo');
+  assert.equal(image.getAttribute('referrerpolicy'),'no-referrer');
+  image.dispatchEvent(new ui.window.Event('error'));
+  await until(()=>!ui.document.querySelector('.ml-business-hero img'));
+  assert.equal(ui.document.querySelector('.ml-business-monogram').textContent,'FK');
+  assert.deepEqual(ui.errors,[]);
+ }finally{ui.close();}
+});
+
 test('business names open profiles while offer titles retain their existing detail flow',async()=>{
  const ui=await app({verified:true,intercept(name){if(name==='get_business_profile')return rpc(profile());}});
  try{

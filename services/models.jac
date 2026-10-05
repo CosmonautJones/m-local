@@ -72,6 +72,8 @@ node Offer {
         status: str = "active",
         is_demo: bool = False,
         menu_item: str = "",
+        create_key: str = "",
+        create_digest: str = "",
         created_ts: float = 0.0;
 }
 

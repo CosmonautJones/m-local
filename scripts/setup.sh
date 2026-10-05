@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
+if ! command -v python3 >/dev/null 2>&1; then
+    echo 'Python 3 is required for project tooling and runtime path checks. Install it before setup.' >&2
+    exit 2
+fi
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 version="$(tr -d '\r\n' < .jac-version)"
 case "$(uname -s)/$(uname -m)" in

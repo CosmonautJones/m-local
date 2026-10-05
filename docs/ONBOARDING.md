@@ -129,11 +129,13 @@ manual editing continue if AI is unavailable. No model has authority to publish,
 assign roles, fetch arbitrary URLs, or perform actions from website instructions.
 
 Review facts and prices, correct the https logo and menu link, confirm representation and
-content rights, and choose **Save business profile**. The verified business
-account immediately receives its own restaurant and the app opens **Insights**.
-There is no approval step or business-approval admin page. Travis enabled this
-self-service flow on September 27 for team testing. Email verification and the
-representation confirmation remain required.
+content rights, and choose **Submit for review**. The profile stays private until
+the host approves business authority, name and address. **Check approval** refreshes
+the status; **Continue to offers** then publishes through the owner's authenticated
+request and opens offer management. See [Business approval](BUSINESS-APPROVAL.md)
+for the local review command and migration inventory. Email verification and the
+representation confirmation remain required. This public policy replaces the
+instant activation enabled for team testing on September 27.
 
 Previously pending applications retain their saved fields. Explicitly save the
 profile to activate it; simply opening it does not publish anything. If the
@@ -151,8 +153,12 @@ ID to the activation endpoint. The saved image URL is public profile media:
 students see it on the deal and the offer detail, and the merchant sees it
 beside the restaurant name. An empty image is valid and draws nothing.
 
-Business owners use **Manage** to edit their restaurant profile and
-create offers. **New offer** opens a form with explicit **Publish offer** action;
+Business owners use **Manage** to create offers and **Edit business details** to
+open the account's business form. Name and address changes return to review;
+routine edits remain self-service. The existing public identity and offer
+management stay available while a proposed identity change waits. Host-configured
+legacy merchants cannot change name/address through the older profile RPC.
+**New offer** opens a form with explicit **Publish offer** action;
 a future Ann Arbor start time schedules the offer. **Save changes** edits that
 same offer. Paused offers remain paused, and existing claims retain their
 promised price, terms and deadline. There is no server-side draft for the offer

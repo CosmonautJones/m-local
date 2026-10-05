@@ -9,6 +9,7 @@ import time;
 import from services.models { Restaurant, Publishes }
 import from services.promo { OfferView, _find_offer, _restaurant_of, _location_of, _view }
 import from services.qr_catalog { _ensure_seed }
+import from services.qr_auth { listing_visible }
 import from services.session { _actor_id, _merchant_for_actor }
 import from services.foryou { DEMO_MODE_ENV, demo_mode }
 
@@ -23,6 +24,7 @@ obj BusinessProfileView {
         neighborhood: str = "",
         entrance_note: str = "",
         note_date: str = "",
+        image_url: str = "",
         is_demo: bool = False,
         offers: list[OfferView] = [];
 }
@@ -39,7 +41,7 @@ def _public_business(slug: str, offer_id: str, now: float) -> BusinessProfileVie
         o = _find_offer(offer_id.strip());
         r = _restaurant_of(o) if o is not None and (show_samples or not o.is_demo) else None;
     }
-    if r is None or (r.is_demo and not show_samples) {
+    if r is None or (r.is_demo and not show_samples) or not listing_visible(r.slug, r.source) {
         return BusinessProfileView(message="This business could not be found.");
     }
     loc = _location_of(r);
@@ -57,6 +59,7 @@ def _public_business(slug: str, offer_id: str, now: float) -> BusinessProfileVie
         neighborhood=loc.neighborhood if loc else "",
         entrance_note=loc.entrance_note if loc else "",
         note_date=loc.note_date if loc else "",
+        image_url=r.image_url,
         is_demo=r.is_demo,
         offers=offers
     );

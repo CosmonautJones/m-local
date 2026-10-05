@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from services.email_codes import CodeStore
+from services.email_codes import CodeStore, business_revision
 from qr_http import Api, require
 
 
@@ -90,13 +90,18 @@ def main():
         return client, session
 
     member, member_session = verified('student')
-    owner, _ = verified('business')
+    owner, owner_session = verified('business')
     require(not owner.call('get_business_profile')['ok'], 'unactivated business has no implicit public profile')
     private_menu = 'Private setup note ' + run
     draft = dict(name='HTTP Profile Cafe ' + run, cuisine='Cafe', description='Fictional profile acceptance data',
                  address='123 Fixture Street', website='', menu_text=private_menu, menu_url='', image_url='', confirmed=True)
     activated = owner.call('save_business_draft', **draft)
-    require(activated['ok'] and activated['status'] == 'active', 'verified business activates its own profile over HTTP')
+    require(activated['ok'] and activated['status'] == 'pending_review', 'verified business submits a private profile over HTTP')
+    require(not member.call('get_business_profile', slug='business-' + owner_session['actor_id'])['ok'],
+            'unapproved profile is hidden from other members')
+    state.approve_business(owner_session['actor_id'], 'HTTP fixture reviewer', 'Verified fictional business authority', business_revision(state.draft(owner_session['actor_id'])))
+    activated = owner.call('save_business_draft', **draft)
+    require(activated['ok'] and activated['status'] == 'active', 'approved business activates its own profile over HTTP')
     owner_session = owner.call('current_session')
     require(owner_session['role'] == 'merchant', 'activation gives the business its own merchant membership')
     profile = owner.call('get_business_profile')
@@ -114,7 +119,7 @@ def main():
     assert_public_profile(public, (private_menu, member.token, owner.token, member_session['actor_id']))
 
     now = datetime.now(ZoneInfo('America/Detroit'))
-    offer = dict(offer_id='', title='HTTP profile lunch ' + run, description='Synthetic local offer',
+    offer = dict(offer_id='', create_key=secrets.token_hex(16), title='HTTP profile lunch ' + run, description='Synthetic local offer',
                  price='3.50', regular_price='5.00', start_local=(now - timedelta(minutes=2)).strftime('%Y-%m-%d %H:%M'),
                  end_local=(now + timedelta(hours=1)).strftime('%Y-%m-%d %H:%M'), quantity='3',
                  eligibility='Valid U-M ID', terms='Fixture terms', dietary='vegetarian', menu_item='')

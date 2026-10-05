@@ -42,7 +42,7 @@ export async function app({role='student',verified=false,audience='student',item
  if(configureWindow)configureWindow(w);
  if(audience)w.localStorage.setItem('mlocal_audience',audience);
  if(role!=='guest')w.localStorage.setItem('jac_token','synthetic-ui-token');
- const session=()=>({authenticated:activeRole!=='guest',role:activeRole,actor_id:`fixture-${activeRole}`,restaurant_id:activeRole==='merchant'?'fixture-restaurant':'',display_name:`Fixture ${activeRole}`,is_demo:!verified,email_verified:verified});
+ const session=()=>({authenticated:activeRole!=='guest',role:activeRole,actor_id:`fixture-${activeRole}`,restaurant_id:activeRole==='merchant'?'fixture-restaurant':'',display_name:`Fixture ${activeRole}`,is_demo:!verified,email_verified:verified,business_account:verified&&['business','merchant'].includes(activeRole)});
  const portal=()=>({ok:true,name:'Fixture Kitchen',cuisine:'Test cuisine',blurb:'Fixture profile',address:'Test address',neighborhood:'Test area',entrance_note:'',note_date:'',image_url:item.image_url||'',offers:[item],claims:[],is_demo:true,message:''});
  w.fetch=async (url,options={})=>{
   const name=String(url).split('/').at(-1),body=options.body?JSON.parse(options.body):{};

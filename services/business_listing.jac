@@ -4,14 +4,19 @@ import from services.promo { _lock, _unlock }
 import from services.qr_catalog { _ensure_seed }
 import from services.qr_auth { merchant_owner }
 import from services.session { _merchant_for_actor }
-import from services.onboarding_support { prepare_business_activation, finish_business_activation }
+import from services.onboarding_support { prepare_business_activation, finish_business_activation, persist_draft }
 
 
 def activate_business_listing(actor: str, fields: dict[str, str]) -> dict[str, str] {
-    prepared = prepare_business_activation(actor, fields);
-    slug = prepared["slug"];
     fd = _lock();
     try {
+        # Validate after queued mutations/reviews finish, while further reviews
+        # are excluded by the same host lock through graph/private finalization.
+        prepared = prepare_business_activation(actor, fields);
+        slug = prepared["slug"];
+        # Retain the confirmed intent before a graph write. If finalization
+        # fails, the owner can reload and continue with these same fields.
+        persist_draft(actor, prepared);
         _ensure_seed();
         # Existing server-provisioned merchants retain their current restaurant.
         r = _merchant_for_actor(actor);

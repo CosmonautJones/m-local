@@ -88,6 +88,7 @@ export function createShareProxy({ upstreamHost = 'localhost', upstreamPort = 82
       : (trustCloudflare&&typeof cloudflareIp==='string'&&isIP(cloudflareIp)?cloudflareIp:req.socket.remoteAddress);
     const retry=limit(client,path);
     if(retry){res.writeHead(429,{'content-type':'application/json','retry-after':String(retry)});res.end(JSON.stringify({ok:false,error:{code:'RATE_LIMITED',message:'Too many sign-in attempts. Please wait before retrying.'}}));return;}
+    const forward = body => {
     const upstream = http.request({ hostname: upstreamHost, port: upstreamPort,
       path: req.url, method: req.method,
       headers: { ...req.headers, host: `${upstreamHost}:${upstreamPort}` },
@@ -103,7 +104,35 @@ export function createShareProxy({ upstreamHost = 'localhost', upstreamPort = 82
     });
     req.on('aborted', () => upstream.destroy());
     res.on('close', () => { if (!res.writableEnded) upstream.destroy(); });
-    req.pipe(upstream);
+    if(body)upstream.end(body);else req.pipe(upstream);
+    };
+    if(req.method!=='POST'){forward();return;}
+    // The largest profile form is well below 64 KiB. Buffer bounded RPC bodies
+    // so a chunked oversized request cannot partly execute at the upstream.
+    const maxBody=64*1024;
+    let bytes=0, rejected=false;
+    const chunks=[];
+    const rejectBody=status=>{
+      clearTimeout(deadline);
+      rejected=true;chunks.length=0;
+      if(!res.headersSent){res.writeHead(status,{'content-type':'text/plain'});res.end(status===413?'Request is too large.':'Request took too long.');}
+      req.resume();
+    };
+    const deadline=setTimeout(()=>rejectBody(408),15000);
+    if(Number(req.headers['content-length'])>maxBody){rejectBody(413);return;}
+    req.on('data',chunk=>{
+      if(rejected)return;
+      bytes+=chunk.length;
+      if(bytes>maxBody){rejected=true;chunks.length=0;rejectBody(413);return;}
+      chunks.push(chunk);
+    });
+    req.on('end',()=>{
+      clearTimeout(deadline);
+      if(!rejected&&!res.writableEnded)forward(Buffer.concat(chunks));
+    });
+    req.on('aborted',()=>clearTimeout(deadline));
+    req.on('error',()=>{clearTimeout(deadline);res.destroy();});
+    res.on('close',()=>clearTimeout(deadline));
   });
 }
 

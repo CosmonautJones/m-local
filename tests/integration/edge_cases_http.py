@@ -66,7 +66,7 @@ def fmt(ts):
 
 
 def offer(token, title, qty, start_ts, end_ts, price="6"):
-    return call("save_offer", {"offer_id": "", "title": f"{title} {RUN} (Demo)", "description": "", "price": price,
+    return call("save_offer", {"offer_id": "", "create_key": os.urandom(16).hex(), "title": f"{title} {RUN} (Demo)", "description": "", "price": price,
                                "regular_price": "10", "start_local": fmt(start_ts), "end_local": fmt(end_ts),
                                "quantity": str(qty), "eligibility": "Students with a valid university ID",
                                "terms": "One per student.", "dietary": "", "menu_item": ""}, token)

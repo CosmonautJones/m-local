@@ -256,6 +256,25 @@ def build_insights(records: list[dict[str, Any]], business_name: str,
         "daily": _blank(), "totals": _blank(), "offers": [],
     }]
     cohort = [row for row in rows if start_ts <= row.claimed <= now]
+    cohort_changes = [_blank() for _ in range(days)]
+    cohort_daily = [_blank() for _ in range(days)]
+    for row in cohort:
+        claimed_day = (_local_date(row.claimed, zone) - start_date).days
+        initial = "unknown_outcomes" if row.outcome == "unknown_outcomes" else "pending"
+        cohort_changes[claimed_day]["claims"] += 1
+        cohort_changes[claimed_day][initial] += 1
+        cohort_daily[claimed_day]["claims"] += 1
+        if initial == "unknown_outcomes":
+            cohort_daily[claimed_day][initial] += 1
+        elif 0 < row.resolved <= now:
+            resolved_day = (_local_date(row.resolved, zone) - start_date).days
+            cohort_changes[resolved_day]["pending"] -= 1
+            cohort_changes[resolved_day][row.outcome] += 1
+            cohort_daily[resolved_day][row.outcome] += 1
+            if resolved_day != claimed_day:
+                cohort_daily[claimed_day]["pending"] += 1
+        else:
+            cohort_daily[claimed_day]["pending"] += 1
     redemptions = sorted((row for row in rows if start_ts <= row.redeemed <= now),
                          key=lambda row: (row.redeemed, row.identity))
     cumulative = _blank()
@@ -265,26 +284,13 @@ def build_insights(records: list[dict[str, Any]], business_name: str,
     redemption_index = 0
     for index in range(days):
         calendar_date = start_date + timedelta(days=index)
-        day_start = datetime.combine(calendar_date, time.min, zone).timestamp()
         cutoff = datetime.combine(calendar_date + timedelta(days=1), time.min, zone).timestamp()
         daily = _blank()
         day_customers: set[str] = set()
         day_returners: set[str] = set()
         for key in ("claims", "cohort_redeemed", "cancelled", "expired", "pending", "unknown_outcomes"):
-            cumulative[key] = 0
-        for row in cohort:
-            if not _occurred(row.claimed, cutoff, now):
-                continue
-            today_claim = row.claimed >= day_start
-            cumulative["claims"] += 1
-            daily["claims"] += int(today_claim)
-            outcome = row.outcome if row.outcome == "unknown_outcomes" or _occurred(row.resolved, cutoff, now) else "pending"
-            cumulative[outcome] += 1
-            # Resolutions are daily events; unresolved counts describe today's cohort.
-            if outcome in ("pending", "unknown_outcomes"):
-                daily[outcome] += int(today_claim)
-            elif row.resolved >= day_start:
-                daily[outcome] += 1
+            cumulative[key] += cohort_changes[index][key]
+            daily[key] = cohort_daily[index][key]
         while redemption_index < len(redemptions):
             row = redemptions[redemption_index]
             if not _occurred(row.redeemed, cutoff, now):

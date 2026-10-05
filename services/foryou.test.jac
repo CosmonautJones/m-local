@@ -6,6 +6,7 @@ to the internal helpers. Privacy between real accounts is checked over HTTP."""
 import from services.promo { _claim, _redeem, list_offers }
 import from services.session { _merchant_for_actor }
 import from unittest.mock { patch }
+import from jaclang.data.serializer { Serializer }
 
 def _reset -> TasteProfile {
     for p in [root -->[?:TasteProfile]] {
@@ -73,6 +74,22 @@ test "a guest sees every live deal and no favorites" {
     assert "Weekend cheese slice deal" not in _titles(h);
     assert h.total_deals == len(h.items);
     assert all([i.slot == "more" for i in h.items]);
+}
+
+
+test "home place reuse matches every offer detail field" {
+    _ensure_seed();
+    _reset();
+    now = time.time();
+    for actor in ["", "feed-place-observer"] {
+        home = _home(actor, "", "any", "", now);
+        assert home.items;
+        for item in home.items {
+            offer = _find_offer(item.offer.id);
+            assert offer is not None;
+            assert Serializer.serialize(item.offer) == Serializer.serialize(_view(offer, now, actor));
+        }
+    }
 }
 
 
@@ -240,7 +257,7 @@ test "hosted dataset replaces starter fixture discovery without deleting starter
 
 
 def _claim_fixture(slug: str, now: float) -> Offer {
-    r = Restaurant(slug=slug, name="Claim visibility cafe", cuisine="Cafe", source="business_signup");
+    r = Restaurant(slug=slug, name="Claim visibility cafe", cuisine="Cafe", source="test-fixture");
     root.shared ++> r;
     o = Offer(title="Saved lunch", price=7.0, price_cents=700, regular_price_cents=900,
         start_ts=now - 60, end_ts=now + 3600, quantity=3, qr_ready=True,

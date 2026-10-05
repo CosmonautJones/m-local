@@ -5,12 +5,14 @@ import tempfile;
 import from unittest.mock { patch }
 import from services.models { Location, HasLocation, Offer, Redemption, ClaimedAs }
 import from services.session { current_session }
+import from services.promo { _claim, list_offers, get_offer }
+import from services.foryou { _home }
 
 
 def _profile_fixture(name: str = "Same public name") -> Restaurant {
     r = Restaurant(slug="profile-" + uuid.uuid4().hex, name=name, cuisine="Cafe",
         blurb="Lunch around the corner", merchant_key="never-public-merchant-secret",
-        owner_actor_id="never-public-owner-root", source="business_signup");
+        owner_actor_id="never-public-owner-root", source="test-fixture");
     root.shared ++> r;
     r +>:HasLocation():+> Location(address="123 Example Street", neighborhood="Kerrytown",
         entrance_note="Use the north entrance", note_date="2026-09-27");
@@ -46,6 +48,28 @@ test "profile lookup uses exact slug or graph offer association never display na
     assert not _public_business("no-such-business", jid(second_offer), now).ok;
 }
 
+test "legacy self-service profile stays hidden until private approval and activation" {
+    r = _profile_fixture();
+    r.source = "business_signup";
+    now = time.time();
+    o = _profile_offer(r, "Unapproved legacy lunch", now);
+    assert not _public_business(r.slug, "", now).ok;
+    assert not _claim(jid(o), jid(root), now).ok;
+    assert not [v for v in list_offers() if v.id == jid(o)];
+    assert not [item for item in _home("", "", "any", "", now).items if item.offer.id == jid(o)];
+    o +>:ClaimedAs():+> Redemption(actor_id=jid(root), restaurant_slug=r.slug,
+        qr_payload="legacy-held-qr", status="claimed", claimed_ts=now, expires_ts=now + 1200);
+    assert [item for item in _home(jid(root), "", "any", "", now).items if item.offer.id == jid(o)];
+    with patch.dict(list_offers.__globals__, {"_actor_id": lambda () -> str { return jid(root); }}) {
+        held = [v for v in list_offers() if v.id == jid(o)];
+        assert len(held) == 1 and held[0].my_qr_payload == "legacy-held-qr";
+    }
+    with patch.dict(get_offer.__globals__, {"_actor_id": lambda () -> str { return jid(root); }}) {
+        assert (get_offer(jid(o)) as OfferView).my_qr_payload == "legacy-held-qr";
+    }
+    assert not [item for item in _home("", "", "any", "", now).items if item.offer.id == jid(o)];
+}
+
 
 test "business offers exclude drafts paused expired and unknown statuses" {
     now = time.time();
@@ -65,10 +89,42 @@ test "business offers exclude drafts paused expired and unknown statuses" {
     assert [o.state for o in v.offers if o.title == "Sold out"] == ["sold out"];
 }
 
+test "saved QR survives offer pause or early end only until the claim expires" {
+    now = time.time();
+    for state in ["paused", "ended"] {
+        r = _profile_fixture();
+        o = _profile_offer(r, "Held lunch " + state, now);
+        held = _claim(jid(o), jid(root), now);
+        assert held.ok, held.message;
+        c = [o ->:ClaimedAs:->][0];
+        if state == "paused" { o.status = "paused"; }
+        else { o.end_ts = now - 1; }
+        mine = [item.offer for item in _home(jid(root), "", "any", "", now).items if item.offer.id == jid(o)];
+        assert len(mine) == 1 and mine[0].my_qr_payload == held.qr_payload;
+        assert not [item for item in _home("", "", "any", "", now).items if item.offer.id == jid(o)];
+        with patch.dict(list_offers.__globals__, {"_actor_id": lambda () -> str { return jid(root); }}) {
+            with patch.dict(get_offer.__globals__, {"_actor_id": lambda () -> str { return jid(root); }}) {
+                assert [v for v in list_offers() if v.id == jid(o)];
+                assert (get_offer(jid(o)) as OfferView).my_qr_payload == held.qr_payload;
+                c.expires_ts = now - 1;
+                assert not [item for item in _home(jid(root), "", "any", "", now).items if item.offer.id == jid(o)];
+                assert not [v for v in list_offers() if v.id == jid(o)];
+                assert get_offer(jid(o)) is None;
+                c.expires_ts = now + 1200;
+                c.status = "redeemed";
+                assert not [item for item in _home(jid(root), "", "any", "", now).items if item.offer.id == jid(o)];
+                assert not [v for v in list_offers() if v.id == jid(o)];
+                assert get_offer(jid(o)) is None;
+            }
+        }
+    }
+}
+
 
 test "profile projects public fields without ownership or claim credentials" {
     now = time.time();
     r = _profile_fixture("Public cafe");
+    r.image_url = "https://images.example.test/cafe.png";
     o = _profile_offer(r, "Public lunch", now);
     o +>:ClaimedAs():+> Redemption(actor_id=jid(root),
         restaurant_slug=r.slug, qr_payload="private-qr-credential", code="legacy-secret",
@@ -81,6 +137,7 @@ test "profile projects public fields without ownership or claim credentials" {
         v = get_business_profile(r.slug);
     }
     assert v.ok and v.cuisine == "Cafe" and v.blurb == "Lunch around the corner";
+    assert getattr(v, "image_url", "") == r.image_url;
     assert v.address == "123 Example Street" and v.neighborhood == "Kerrytown";
     assert v.entrance_note == "Use the north entrance" and v.note_date == "2026-09-27" and not v.is_demo;
     for private_field in ["owner_actor_id", "merchant_key", "claims", "source"] {

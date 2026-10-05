@@ -180,6 +180,9 @@ def prepare_business_activation(actor: str, raw: dict[str, any]) -> dict[str, st
         raise ValueError("Sign in with a verified business account to save a business profile.");
     }
     result = validate_draft(raw);
+    if not state.approval_covers(actor, result) {
+        raise ValueError("Your business needs host approval before publishing.");
+    }
     result["status"] = "draft";
     result["slug"] = state.reserve_business(actor);
     return result;

@@ -2,6 +2,11 @@
 
 ## Shared hosting status
 
+October 4, 2026 read-only check: the previously published app address below
+returned an AWS load-balancer HTTP 404. The current dashboard address, deployed
+revision and storage topology remain unverified. The September 29 observations
+are historical, not confirmation that today's candidate is deployed.
+
 Verified September 29, 2026. The JacHammer app is at
 **https://m-local-main-prjc0b.jachammer.app/**. Its application, gateway and
 PostgreSQL passed readiness checks with three healthy pods and zero restarts.
@@ -114,10 +119,14 @@ Stop an existing hosting launcher before changing startup options.
 
 Everyone opens the same public URL and signs in with their own email address.
 Student accounts use their own U-M inbox; business testers use distinct business
-emails. A verified business can save its company profile and publish immediately.
+emails. A verified business submits its company profile for operator approval.
+Once approved, it can publish and manage offers. Later name/address changes
+require review; routine profile edits remain self-service.
 All devices share the published catalog, while account profiles, preferences,
-company ownership and claim credentials belong to each account. Unsaved form
-edits stay in that browser page. Refresh offers shows another tester's new post;
+company ownership and claim credentials belong to each account. New-offer drafts
+recover on the same device after refresh; Cancel, successful publishing and
+sign-out clear them. Other unsaved form edits stay in that browser page.
+Refresh offers shows another tester's new post;
 the active offers page also refreshes automatically.
 
 On one computer, use separate browser profiles or private browser sessions for

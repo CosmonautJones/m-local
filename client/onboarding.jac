@@ -188,7 +188,7 @@ def:pub EmailOnboarding(
 glob emptyDraft: dict[str, any] = {
     "name": "", "cuisine": "", "description": "", "address": "", "website": "",
     "menu_text": "", "menu_url": "", "image_url": "", "status": "draft",
-    "image_urls": [], "menu_urls": [], "sources": []
+    "image_urls": [], "menu_urls": [], "sources": [], "approved_name": "", "approved_address": ""
 };
 
 def ImageChoice(url: str, selected: bool, disabled: bool, choose: Callable[[str], None]) -> JsxElement {
@@ -251,6 +251,9 @@ def:pub BusinessOnboarding(
     def field(key: str, value: str) {
         nextDraft = {**draftRef.current, "status": "draft"};
         nextDraft[key] = value;
+        if nextDraft.get("approved_name") and nextDraft.get("name") == nextDraft.get("approved_name") and nextDraft.get("address") == nextDraft.get("approved_address") {
+            nextDraft["status"] = "active";
+        }
         replaceDraft(nextDraft as BusinessDraftView);
         confirmed = False;
     }
@@ -301,6 +304,10 @@ def:pub BusinessOnboarding(
         return await saveDraft(draft.name, draft.cuisine, draft.description, draft.address,
             draft.website, draft.menu_text, draft.menu_url, draft.image_url, confirmed);
     }
+    async def continueApproved() -> BusinessDraftView {
+        return await saveDraft(draft.name, draft.cuisine, draft.description, draft.address,
+            draft.website, draft.menu_text, draft.menu_url, draft.image_url, True);
+    }
     def importSubmit(event: FormEvent) { event.preventDefault(); run(importCurrentWebsite); }
     def saveSubmit(event: FormEvent) { event.preventDefault(); run(saveCurrentDraft, True); }
     def revealInvalid(event: FormEvent) {
@@ -311,7 +318,8 @@ def:pub BusinessOnboarding(
 
     return <section aria-label="Create your business profile" style={{**stack, "paddingTop": 16, "borderTop": "1px solid var(--ml-border)"}}>
         <h3 style={{"margin": 0, "fontSize": 20}}>{"Your business profile" if draft.name else "Bring your business to M-Local"}</h3>
-        {(<p role="status" style={hint}>Your saved details are here. Save your business profile to start posting.</p>) if draft.status == "pending_review" else None}
+        {(<Fragment><p role="status" style={hint}>Your business is awaiting approval. Your submitted details are saved.</p><button style={secondary} type="button" disabled={busy or not ready} onClick={load}>{"Check approval" if ready else "Checking approval..."}</button></Fragment>) if draft.status == "pending_review" else None}
+        {(<Fragment><p role="status" style={hint}>Your business is approved. You’re ready to publish offers.</p><button style={button} type="button" disabled={busy or not ready} onClick={lambda { run(continueApproved, True); }}>Continue to offers</button></Fragment>) if draft.status == "approved" else None}
         {(<Fragment><p role="status" style={hint}>Your business profile is saved.</p><button style={secondary} type="button" disabled={busy} onClick={retryManagement}>{"Opening offer management..." if busy else "Open offer management"}</button></Fragment>) if draft.status == "active" else None}
         {(<p role="status" style={hint}>Loading your business profile...</p>) if not ready and not loadFailed else None}
         {(<button style={secondary} type="button" onClick={load}>Retry business profile</button>) if loadFailed else None}
@@ -340,8 +348,8 @@ def:pub BusinessOnboarding(
                 </div>
             </details>
             <label style={{**hint, "display": "flex", "gap": 10, "alignItems": "flex-start", "minHeight": 44}}><input type="checkbox" checked={confirmed} onChange={lambda (e: ChangeEvent) { confirmed = e.target.checked; }} disabled={busy or not ready} style={{"width": 20, "height": 20, "flexShrink": 0}}/>I can represent this business and have permission to use the details and selected image.</label>
-            <button style={button} disabled={busy or not ready or not confirmed}>{"Saving..." if busy else "Save business profile"}</button>
-            <p style={hint}>Save your business profile to start posting. You can then create offers and edit your business details from Manage.</p>
+            <button style={button} disabled={busy or not ready or not confirmed}>{"Saving..." if busy else "Save business profile" if draft.status == "active" else "Update submission" if draft.status == "pending_review" else "Submit for review"}</button>
+            <p style={hint}>We review your business name and address before publication. Later name or address changes need review; offers, photos and other details are yours to manage.</p>
         </form>
     </section>;
 }

@@ -21,7 +21,7 @@ test('business setup keeps optional photo and menu fields out of the required pa
   ui.fill('Menu items and prices','Soup $8');
   extras.open=false;
   ui.document.querySelector('input[type="checkbox"]').click();
-  ui.click('Save business profile');await until(()=>ui.text().includes('Fixture save retained.'));
+  ui.click('Submit for review');await until(()=>ui.text().includes('Fixture save retained.'));
   const request=ui.calls.find(call=>call.name==='save_business_draft');
   assert.equal(request.body.image_url,'https://example.test/photo.jpg');
   assert.equal(request.body.menu_text,'Soup $8');

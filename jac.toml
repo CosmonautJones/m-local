@@ -14,6 +14,10 @@ docs_enabled = false
 # Private redemption credentials must not be exposed by the graph inspector.
 graph_enabled = false
 
+[serve.limits]
+# Per API process; leave PostgreSQL headroom for idle pools and operations.
+max_connections = 96
+
 [scale.admin]
 enabled = false
 

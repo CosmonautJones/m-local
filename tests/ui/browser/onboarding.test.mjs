@@ -119,11 +119,11 @@ test('restored business session ignores stale paths and returns to shared welcom
 });
 
 test('business import fills an editable draft and requires confirmation before saving',async()=>{
- let activated=false;
+ let submitted=false,approved=false,activated=false;
  const ui=await app({role:'business',verified:true,intercept(name,body){
-  if(name==='get_business_draft')return rpc({ok:true});
+  if(name==='get_business_draft')return rpc({ok:true,...(submitted?{name:'Reviewed Cafe',address:'123 Fixture St'}:{}),status:approved?'approved':submitted?'pending_review':'draft'});
   if(name==='import_business_website')return rpc({ok:true,name:'Imported Cafe',address:'123 Fixture St',website:body.website,menu_text:'Soup $8',sources:[body.website],menu_urls:[body.website+'/menu'],image_url:body.website+'/photo.jpg',image_urls:[body.website+'/photo.jpg'],message:'Review the imported details.'});
-  if(name==='save_business_draft'){activated=true;return rpc({...body,ok:true,status:'active',message:'Business profile saved.'});}
+  if(name==='save_business_draft'){submitted=true;activated=approved;return rpc({...body,ok:true,status:approved?'active':'pending_review',message:approved?'Business profile saved.':'Submitted for review.'});}
   if(name==='current_session'&&activated)return rpc({authenticated:true,actor_id:'fixture-business',role:'merchant',restaurant_id:'owned-business',display_name:'Fixture owner',is_demo:false,email_verified:true});
  }});
  try{
@@ -138,9 +138,13 @@ test('business import fills an editable draft and requires confirmation before s
   assert.equal((preview.getAttribute('referrerpolicy')||preview.referrerPolicy),'no-referrer');
   assert.equal(ui.find('Review selected image'),undefined);
   assert.equal(ui.find('Found images'),undefined);
-  assert.equal(ui.find('Save business profile').disabled,true);
+  assert.equal(ui.find('Submit for review').disabled,true);
   ui.fill('Business name','Reviewed Cafe');
-  ui.document.querySelector('input[type="checkbox"]').click();ui.click('Save business profile');
+  ui.document.querySelector('input[type="checkbox"]').click();ui.click('Submit for review');
+  await until(()=>ui.find('Check approval'));
+  assert.equal(ui.find('Insights'),undefined);assert.equal(ui.find('Manage'),undefined);
+  approved=true;ui.click('Check approval');await until(()=>ui.find('Continue to offers'));
+  ui.click('Continue to offers');
   await until(()=>ui.find('Insights'));
   ui.click('Manage');await until(()=>ui.find('New offer'));
   const request=ui.calls.find(c=>c.name==='save_business_draft');
