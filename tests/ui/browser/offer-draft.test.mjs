@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {app,until,rpc} from './harness.mjs';
 
 const storageKey='mlocal_offer_draft_fixture-merchant';
-async function openNew(ui){ui.click('Manage');await until(()=>ui.find('New offer'));ui.click('New offer');await until(()=>ui.document.querySelector('[placeholder="Lunch bowl for $7"]'));}
+async function openNew(ui){ui.click('Offers');await until(()=>ui.find('New offer'));ui.click('New offer');await until(()=>ui.document.querySelector('[placeholder="Lunch bowl for $7"]'));}
 function fill(ui){ui.fill('Lunch bowl for $7','Recoverable fixture bowl');ui.fill('7.00','7.00');ui.fill('One per student. Dine-in only.','One per student.');}
 
 test('refresh recovers a business draft and its committed but unacknowledged publish key',async()=>{

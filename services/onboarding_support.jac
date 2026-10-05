@@ -6,6 +6,7 @@ import os;
 import hmac;
 import from uuid { UUID }
 import from services.email_codes { delivery_ready, send_code, store }
+import from services.photo_reference { image_reference }
 import from services.website_import { clean_url }
 
 
@@ -122,7 +123,7 @@ def may_claim(actor: str) -> bool {
 }
 
 
-def validate_draft(raw: dict[str, any]) -> dict[str, any] {
+def validate_draft(raw: dict[str, any], actor: str = "") -> dict[str, any] {
     limits: dict[str, int] = {
         "name": 120, "cuisine": 80, "description": 1000, "address": 240,
         "website": 2048, "menu_url": 2048, "image_url": 2048, "menu_text": 4000
@@ -144,7 +145,7 @@ def validate_draft(raw: dict[str, any]) -> dict[str, any] {
     }
     for key in ("website", "menu_url", "image_url") {
         if result[key] {
-            result[key] = clean_url(result[key]);
+            result[key] = image_reference(result[key], actor) if key == "image_url" else clean_url(result[key]);
         }
     }
     result["status"] = "pending_review";
@@ -168,7 +169,7 @@ def persist_draft(actor: str, raw: dict[str, any]) -> dict[str, any] {
     if account.get("kind") != "business" {
         raise ValueError("Sign in with a verified business account to edit a business profile.");
     }
-    result = validate_draft(raw);
+    result = validate_draft(raw, actor);
     state.save_draft(actor, result);
     return result;
 }
@@ -179,7 +180,7 @@ def prepare_business_activation(actor: str, raw: dict[str, any]) -> dict[str, st
     if state.account(actor).get("kind") != "business" {
         raise ValueError("Sign in with a verified business account to save a business profile.");
     }
-    result = validate_draft(raw);
+    result = validate_draft(raw, actor);
     if not state.approval_covers(actor, result) {
         raise ValueError("Your business needs host approval before publishing.");
     }
@@ -192,6 +193,6 @@ def prepare_business_activation(actor: str, raw: dict[str, any]) -> dict[str, st
 def finish_business_activation(actor: str, raw: dict[str, any]) -> dict[str, str] {
     # Re-validate and retain only known metadata. Browser-selected slugs, actor
     # IDs, roles and statuses never enter the private authority registry.
-    result = validate_draft(raw);
+    result = validate_draft(raw, actor);
     return store().activate_business(actor, result);
 }

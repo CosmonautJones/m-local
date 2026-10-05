@@ -301,6 +301,10 @@ def _collect_logo_site(url: str) -> any {
 
 test "confirmed save publishes the logo and a blank save clears it" {
     import from services.models { Publishes }
+    import from services.photo_reference { image_reference }
+    import from tests.photo_media { payload }
+    import base64;
+    def photo_fetch(url: str, allowed: any = None) -> tuple[str, str, bytes] { return (url, "image/jpeg", base64.b64decode(payload().split(",")[1])); }
     import from services.promo { save_offer, merchant_portal, get_offer, OfferView }
     actor = "ff00112233445566778899aabbccddee";
     logo = "https://example.com/logo.png";
@@ -311,10 +315,13 @@ test "confirmed save publishes the logo and a blank save clears it" {
             store().approve_business(actor, "Fixture reviewer", "Verified fixture business authority", business_revision(store().draft(actor)));
             with patch.dict(save_business_draft.__globals__, {"_actor_id": lambda () -> str { return actor; }}) {
                 with patch.dict(save_offer.__globals__, {"_actor_id": lambda () -> str { return actor; }}) {
-                    saved = save_business_draft(
+                    with patch.dict(image_reference.__globals__, {"fetch_public": photo_fetch}) {
+                        saved = save_business_draft(
                         "Fixture Cafe", "Cafe", "Lunch", "123 Test St", "", "Soup $5", "", logo, True
                     );
-                    assert saved.ok and saved.image_url == logo, saved.message;
+                    }
+                    assert saved.ok and saved.image_url.startswith("/static/photos/"), saved.message;
+                    logo = saved.image_url;
                     owned = _merchant_for_actor(actor) as Restaurant;
                     restaurant_id = jid(owned);
                     slug = owned.slug;

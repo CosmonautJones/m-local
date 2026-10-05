@@ -131,10 +131,10 @@ test('business import fills an editable draft and requires confirmation before s
   await until(()=>!ui.document.querySelector('input[placeholder="Business name"]').disabled);
   ui.fill('https://your-business.com','https://example.com');ui.click('Import website details');
   await until(()=>ui.document.querySelector('input[placeholder="Business name"]').value==='Imported Cafe');
-  const preview=ui.document.querySelector('img[alt="Imported Cafe"]');
+  const preview=ui.document.querySelector('img[alt="Selected business photo"]');
   assert.equal(preview?.getAttribute('src'),'https://example.com/photo.jpg');
-  assert.equal(preview.style.height,'160px');
-  assert.equal(preview.style.objectFit,'cover');
+  assert.equal(ui.window.getComputedStyle(preview).height,'190px');
+  assert.equal(ui.window.getComputedStyle(preview).objectFit,'contain');
   assert.equal((preview.getAttribute('referrerpolicy')||preview.referrerPolicy),'no-referrer');
   assert.equal(ui.find('Review selected image'),undefined);
   assert.equal(ui.find('Found images'),undefined);
@@ -142,11 +142,11 @@ test('business import fills an editable draft and requires confirmation before s
   ui.fill('Business name','Reviewed Cafe');
   ui.document.querySelector('input[type="checkbox"]').click();ui.click('Submit for review');
   await until(()=>ui.find('Check approval'));
-  assert.equal(ui.find('Insights'),undefined);assert.equal(ui.find('Manage'),undefined);
+  assert.equal(ui.find('Insights'),undefined);assert.equal(ui.find('Offers'),undefined);
   approved=true;ui.click('Check approval');await until(()=>ui.find('Continue to offers'));
   ui.click('Continue to offers');
   await until(()=>ui.find('Insights'));
-  ui.click('Manage');await until(()=>ui.find('New offer'));
+  ui.click('Offers');await until(()=>ui.find('New offer'));
   const request=ui.calls.find(c=>c.name==='save_business_draft');
   assert.equal(request.body.name,'Reviewed Cafe');assert.equal(request.body.confirmed,true);
   assert.equal('actor_id' in request.body,false);assert.equal('role' in request.body,false);

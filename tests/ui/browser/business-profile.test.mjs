@@ -99,11 +99,11 @@ test('logout cancels a pending business view and guest visits never request a pr
 test('merchants can preview their public business page without exposing management controls',async()=>{
  const ui=await app({role:'merchant',verified:true,intercept(name){if(name==='get_business_profile')return rpc(profile());}});
  try{
-  ui.click('Manage');await until(()=>ui.find('View business page'));
+  ui.click('Offers');await until(()=>ui.find('View business page'));
   ui.click('View business page');await until(()=>ui.find('A neighborhood kitchen with a changing seasonal menu.'));
   assert.deepEqual(ui.calls.find(c=>c.name==='get_business_profile').body,{slug:'',offer_id:''});
   assert.equal(ui.find('Save profile'),undefined);assert.equal(ui.find('Claim this offer'),undefined);
-  ui.click('Back to Manage');await until(()=>ui.find('Edit business details'));
+  ui.click('Back to offers');await until(()=>ui.find('Edit business details'));
   assert.deepEqual(ui.errors,[]);
  }finally{ui.close();}
 });

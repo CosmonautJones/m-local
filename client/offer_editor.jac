@@ -1,4 +1,7 @@
 """Offer editing with unchanged validation, draft callbacks and submit guards."""
+import from "./photo-picker.jsx" { PhotoPicker }
+import from ..services.photos { upload_business_photo, import_business_photo }
+import from ..services.business_onboarding { import_business_website }
 import from .ui { ui, formStack, formInput, formSecondary, formHint }
 import type from ..services.promo { ActionResult }
 
@@ -33,7 +36,7 @@ def validateOfferDraft(draft: dict[str, str]) -> str {
 
 def:pub OfferEditor(initial: dict[str, str], draftOwner: str, onDraftChange: Callable[[dict[str, str]], None],
     onBusyChange: Callable[[bool], None],
-    saveOffer: Callable[[str, str, str, str, str, str, str, str, str, str, str, str, str], ActionResult],
+    saveOffer: Callable[[str, str, str, str, str, str, str, str, str, str, str, str, str, str], ActionResult],
     onSaved: Callable[[str], None], onCancel: Callable[[], None]) -> JsxElement {
     draft = {**initial, "start_local": initial["start_local"].replace(" ", "T", 1), "end_local": initial["end_local"].replace(" ", "T", 1)};
     has busy: bool = False,
@@ -55,6 +58,7 @@ def:pub OfferEditor(initial: dict[str, str], draftOwner: str, onDraftChange: Cal
                     restored = saved["draft"] as dict[str, str];
                     updated = {**draft};
                     for key in draft {
+                        if key == "image_url" and key not in restored { continue; }
                         if not isinstance(restored.get(key), str) or len(restored[key]) > 2000 { raise Exception("Invalid draft"); }
                         updated[key] = restored[key];
                     }
@@ -113,7 +117,7 @@ def:pub OfferEditor(initial: dict[str, str], draftOwner: str, onDraftChange: Cal
         try {
             if not draft["offer_id"] and not createKey.current { createKey.current = (crypto as any).randomUUID(); }
             if not keepDraft(draft) { return; }
-            reply = await saveOffer(draft["offer_id"], draft["title"].strip(), draft["description"].strip(), draft["price"], draft["regular_price"], draft["start_local"], draft["end_local"], draft["quantity"], draft["eligibility"].strip(), draft["terms"].strip(), draft["dietary"], draft["menu_item"].strip(), createKey.current or "");
+            reply = await saveOffer(draft["offer_id"], draft["title"].strip(), draft["description"].strip(), draft["price"], draft["regular_price"], draft["start_local"], draft["end_local"], draft["quantity"], draft["eligibility"].strip(), draft["terms"].strip(), draft["dietary"], draft["menu_item"].strip(), createKey.current or "", draft["image_url"]);
             if not mounted.current { return; }
             if not reply.ok { showError(reply.message or "The offer could not be saved."); return; }
             clearDraft();
@@ -136,6 +140,7 @@ def:pub OfferEditor(initial: dict[str, str], draftOwner: str, onDraftChange: Cal
         <p style={formHint}>{"Saving updates future claims. Existing claims keep their promised price, terms and expiry. Paused offers stay paused." if draft["offer_id"] else "Your offer appears publicly when you publish. A future start time schedules it. Your draft is kept on this device; Cancel discards it."}</p>
         {if recovered { <p role="status" style={formHint}>Recovered your draft from this device.</p> }}
         {textField("title", "Title *", "Lunch bowl for $7", 120, {"required": True, "autoFocus": True})}
+        <PhotoPicker label="Offer photo" value={draft["image_url"]} uploadPhoto={upload_business_photo} importPhoto={import_business_photo} importWebsite={import_business_website} onChange={lambda (picked: str) { field("image_url", picked); }} onBusyChange={lambda (value: bool) { busy = value; onBusyChange(value); }} disabled={busy}/>
         {multiField("description", "Description", "What the student gets")}
         <div style={editorRow}>{textField("price", "Offer price ($) *", "7.00", 10, {"inputMode": "decimal", "required": True})}{textField("regular_price", "Regular price ($), optional", "11.50", 10, {"inputMode": "decimal"})}</div>
         <p style={formHint}>Prices exclude tax unless your terms say otherwise. No payment is collected here.</p>

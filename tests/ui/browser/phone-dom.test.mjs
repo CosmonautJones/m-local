@@ -30,7 +30,7 @@ test('claim failure clears busy state and allows one explicit retry',async()=>{
 test('offer and profile save failures keep values and enable retry',async()=>{
  const attempts={save_offer:0,update_profile:0};
  const ui=await app({role:'merchant',intercept(name){if(name in attempts&&attempts[name]++===0)throw new Error('Synthetic offline');}});
- try{ui.click("Manage");await until(()=>ui.text().includes("New offer"));ui.click('Manage');await until(()=>ui.find('Edit business details'));ui.click('Edit business details');await until(()=>ui.document.querySelector('[placeholder="Restaurant name"]'));ui.fill('Restaurant name','Edited fixture name');ui.click('Save profile');await until(()=>ui.text().includes('Profile could not be saved'));assert.equal(ui.document.querySelector('[placeholder="Restaurant name"]').value,'Edited fixture name');assert.equal(ui.text().includes('Saving...'),false);
+ try{ui.click("Offers");await until(()=>ui.text().includes("New offer"));ui.click('Offers');await until(()=>ui.find('Edit business details'));ui.click('Edit business details');await until(()=>ui.document.querySelector('[placeholder="Restaurant name"]'));ui.fill('Restaurant name','Edited fixture name');ui.click('Save profile');await until(()=>ui.text().includes('Profile could not be saved'));assert.equal(ui.document.querySelector('[placeholder="Restaurant name"]').value,'Edited fixture name');assert.equal(ui.text().includes('Saving...'),false);
  ui.click('Save profile');await until(()=>attempts.update_profile===2&&!ui.text().includes('Profile could not be saved')&&!ui.text().includes('Saving...'),'profile retry');
  ui.click('New offer');await until(()=>ui.document.querySelector('[placeholder="Lunch bowl for $7"]'));ui.fill('Lunch bowl for $7','Unsaved fixture bowl');ui.fill('7.00','7.00');ui.fill('One per student. Dine-in only.','One per student.');ui.click('Publish offer');await until(()=>ui.text().includes('Could not save the offer.'));assert.equal(ui.document.querySelector('[placeholder="Lunch bowl for $7"]').value,'Unsaved fixture bowl');assert.equal(ui.text().includes('Saving...'),false);ui.click('Publish offer');await until(()=>ui.text().includes('Fixture offer saved'),'offer retry');assert.equal(attempts.save_offer,2);assert.deepEqual(ui.errors,[]);
   const publishes=ui.calls.filter(c=>c.name==='save_offer');
@@ -52,8 +52,8 @@ test('confirmed offer save survives a failed portal refresh and refresh can be r
    if(saved&&portalReads===2)throw new Error('Synthetic refresh failure after confirmed save');
   }
  }});
- try{ui.click("Manage");await until(()=>ui.text().includes("New offer"));
-  ui.click('Manage');await until(()=>ui.text().includes('Restaurant profile'));
+ try{ui.click("Offers");await until(()=>ui.text().includes("New offer"));
+  ui.click('Offers');await until(()=>ui.text().includes('Restaurant profile'));
   ui.click('New offer');await until(()=>ui.document.querySelector('[placeholder="Lunch bowl for $7"]'));
   ui.fill('Lunch bowl for $7','Confirmed fixture bowl');ui.fill('7.00','7.00');ui.fill('One per student. Dine-in only.','One per student.');ui.click('Publish offer');
   await until(()=>portalReads===2&&!ui.text().includes('Saving...'),'save completed and portal refresh failed');
@@ -77,7 +77,7 @@ test('lost publish response recovers as already published and closes the form',a
   assert.equal(body.create_key,committedKey);
   return rpc({ok:true,message:'Offer already published.',code:'saved-after-lost-response'});
  }});
- try{ui.click('Manage');await until(()=>ui.find('New offer'));ui.click('New offer');
+ try{ui.click('Offers');await until(()=>ui.find('New offer'));ui.click('New offer');
   await until(()=>ui.document.querySelector('[placeholder="Lunch bowl for $7"]'));
   ui.fill('Lunch bowl for $7','Committed fixture bowl');ui.fill('7.00','7.00');ui.fill('One per student. Dine-in only.','One per student.');ui.click('Publish offer');
   await until(()=>ui.text().includes('Could not save the offer.'));ui.click('Publish offer');
@@ -94,7 +94,7 @@ test('changed details after a lost publish response retain input and allow Cance
   if(!committed){committed=true;throw new Error('Response lost after commit');}
   return rpc({ok:false,message});
  }});
- try{ui.click('Manage');await until(()=>ui.find('New offer'));ui.click('New offer');
+ try{ui.click('Offers');await until(()=>ui.find('New offer'));ui.click('New offer');
   await until(()=>ui.document.querySelector('[placeholder="Lunch bowl for $7"]'));
   ui.fill('Lunch bowl for $7','Original committed bowl');ui.fill('7.00','7.00');ui.fill('One per student. Dine-in only.','One per student.');ui.click('Publish offer');
   await until(()=>ui.text().includes('Could not save the offer.'));ui.fill('Lunch bowl for $7','Changed draft bowl');ui.click('Publish offer');
@@ -119,7 +119,7 @@ test('signout ignores a delayed private detail response',async()=>{
 
 test('actual scanner composition recovers from denied camera permission',async()=>{
  const ui=await app({role:'merchant'});
- try{ui.click("Manage");await until(()=>ui.text().includes("New offer"));Object.defineProperty(ui.window,'isSecureContext',{value:true,configurable:true});Object.defineProperty(ui.window.navigator,'mediaDevices',{value:{getUserMedia:async()=>{throw new ui.window.DOMException('Synthetic denial','NotAllowedError');}},configurable:true});ui.click('Redeem');await until(()=>ui.text().includes('Start camera scan'));ui.click('Start camera scan');await until(()=>ui.text().includes('Camera permission was denied'));assert.ok(ui.text().includes('Retry camera scan'));assert.equal(ui.calls.some(c=>c.name==='redeem_claim'),false);assert.deepEqual(ui.errors,[]);}finally{ui.close();}
+ try{ui.click("Offers");await until(()=>ui.text().includes("New offer"));Object.defineProperty(ui.window,'isSecureContext',{value:true,configurable:true});Object.defineProperty(ui.window.navigator,'mediaDevices',{value:{getUserMedia:async()=>{throw new ui.window.DOMException('Synthetic denial','NotAllowedError');}},configurable:true});ui.click('Scan QR');await until(()=>ui.text().includes('Start camera scan'));ui.click('Start camera scan');await until(()=>ui.text().includes('Camera permission was denied'));assert.ok(ui.text().includes('Retry camera scan'));assert.equal(ui.calls.some(c=>c.name==='redeem_claim'),false);assert.deepEqual(ui.errors,[]);}finally{ui.close();}
 });
 
 

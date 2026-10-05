@@ -42,7 +42,7 @@ test('business bottom navigation uses the requested main labels without subtitle
  try{
   const buttons=[...ui.document.querySelectorAll('[data-testid="app-tabbar"] button')];
   assert.deepEqual(buttons.map(button=>[...button.children].filter(child=>child.tagName!=='svg').map(child=>child.textContent)),[
-   ['Insights'],['Manage'],['Redeem'],['Account']
+   ['Offers'],['Scan QR'],['Insights'],['Account']
   ]);
  }finally{ui.close();}
 });

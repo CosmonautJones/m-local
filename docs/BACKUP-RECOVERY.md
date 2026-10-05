@@ -33,6 +33,7 @@ Retain one coordinated recovery set:
 |---|---|
 | PostgreSQL | Complete application database, including anchors, graph types, native identities, lookup tables, state and outbox tables; required roles/extensions/configuration recorded separately |
 | Private onboarding directory | Online SQLite backup of `onboarding.sqlite3`, plus `code.key`; accounts, owners, drafts, submitted reviews, approvals, OTP state and quotas are in this database |
+| Photos | All uploaded JPEGs under `assets/photos/`, coordinated with an online backup of private `photo-ownership.sqlite3` in `MLOCAL_ONBOARDING_DIR`; restore both together and verify owner access |
 | Native signing state | `.jac/data/jwt_secret` and the configured signing-secret location if it differs |
 | Release | Source revision and tree digest, runtime version and distribution digest, dependency/configuration files, generated artifact digest and canonical entry path |
 | Deployment | Database selection, persistent volume locations, ingress rules, process/replica configuration and secret references; secret values stay in protected recovery storage |
@@ -47,6 +48,12 @@ Store encrypted backups away from the application host with restricted access.
 Record the snapshot time, completion time, checksums and retention/deletion
 owner. Exercise the scheduled job and retrieval procedure; a local dump proves
 neither remote durability nor a current recovery point.
+
+The current phone source-sync helper treats `assets/` as replaceable source.
+Before deploying the photo revision, separate durable uploaded photos from
+source replacement and prove that an update and a restore retain the photos
+and their private ownership registry. Uploads are ignored by Git. The local
+photo preview's same-store restart test does not prove deployment or recovery.
 
 ## Recovery procedure
 

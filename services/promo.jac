@@ -9,6 +9,7 @@ worker processes on one machine only; several machines would need a shared lock.
 """
 
 import os;
+import from services.photo_reference { image_reference }
 import fcntl;
 import re;
 import sys;
@@ -103,6 +104,7 @@ obj OfferView {
         menu_item: str = "",
         is_demo: bool = False,
         image_url: str = "",
+        offer_image_url: str = "",
         fits: bool = True,
         reasons: list[str] = [],
         my_qr_payload: str = "",
@@ -308,11 +310,11 @@ def _set_claim_status(c: Redemption, status: str, now: float) {
 
 
 def _state(o: Offer, now: float, remaining: int | None = None) -> str {
-    if o.status == "paused" {
-        return "paused";
-    }
     if now >= o.end_ts {
         return "expired";
+    }
+    if o.status == "paused" {
+        return "paused";
     }
     if now < o.start_ts {
         return "scheduled";
@@ -444,6 +446,7 @@ def _view(
         description=o.description,
         restaurant=public_name(r.name) if r else "",
         image_url=r.image_url if r else "",
+        offer_image_url=o.image_url,
         cuisine=r.cuisine if r else "",
         location_id=jid(loc) if loc else "",
         address=loc.address if loc else "",
@@ -626,12 +629,16 @@ def _save_offer(
     dietary: str,
     menu_item: str,
     now: float,
-    create_key: str = ""
+    create_key: str = "",
+    image_url: str | None = None
 ) -> ActionResult {
     if not offer_id and create_key and re.fullmatch(r"[A-Za-z0-9_-]{20,80}", create_key) is None {
         return ActionResult(message="Refresh the app and try publishing again.");
     }
     errors: list[str] = [];
+    photo = "";
+    try { if image_url is not None { photo = image_reference(image_url.strip(), _actor_id()); } }
+    except ValueError as photo_error { errors.append(str(photo_error)); }
     p = -1;
     rp = -1;
     try {
@@ -679,11 +686,11 @@ def _save_offer(
     digest = "";
     if not offer_id and create_key {
         digest = hashlib.sha256(json.dumps([title.strip(), description.strip(), p, rp, st, en, qty,
-            eligibility.strip(), terms.strip(), sorted(tags), menu_item.strip()]).encode()).hexdigest();
+            eligibility.strip(), terms.strip(), sorted(tags), menu_item.strip(), photo]).encode()).hexdigest();
         for existing in [r ->:Publishes:->] {
             if existing.create_key != create_key { continue; }
             if existing.create_digest != digest {
-                return ActionResult(message="This offer was already published with different details. Cancel this form and open it from Manage to edit.");
+                return ActionResult(message="This offer was already published with different details. Cancel this form and open it from Offers to edit.");
             }
             return ActionResult(ok=True, message="Offer already published.", code=jid(existing));
         }
@@ -720,6 +727,7 @@ def _save_offer(
     o.terms = terms.strip();
     o.dietary = tags;
     o.menu_item = menu_item.strip();
+    if image_url is not None { o.image_url = photo; }
     for e in [edge o ->:Features:->] {
         del e;
     }
@@ -878,7 +886,8 @@ def:protect update_profile(
     address: str,
     neighborhood: str,
     entrance_note: str,
-    note_date: str
+    note_date: str,
+    image_url: str | None = None
 ) -> MerchantView {
     fd = _lock();
     try {
@@ -898,6 +907,9 @@ def:protect update_profile(
                 error = _text_error(value, label, limit, required);
                 if error { errors.append(error); }
             }
+            photo = r.image_url;
+            try { if image_url is not None { photo = image_reference(image_url.strip(), _actor_id()); } }
+            except ValueError as photo_error { errors.append(str(photo_error)); }
             if errors {
                 view = _portal(r, time.time(), "Fix: " + "; ".join(errors) + ".");
                 view.ok = False;
@@ -907,7 +919,7 @@ def:protect update_profile(
             } else {
                 # Keep the intended edits before touching the graph. A private
                 # store failure cannot leave a newer public/stale private pair.
-                try { store().update_business_details(_actor_id(), cuisine.strip(), blurb.strip()); }
+                try { store().update_business_details(_actor_id(), cuisine.strip(), blurb.strip(), photo); }
                 except ValueError as error {
                     view = _portal(r, time.time(), str(error));
                     view.ok = False;
@@ -915,6 +927,7 @@ def:protect update_profile(
                 }
                 r.cuisine = cuisine.strip();
                 r.blurb = blurb.strip();
+                r.image_url = photo;
                 if loc is None {
                     loc = Location(address="");
                     r +>:HasLocation():+> loc;
@@ -946,7 +959,8 @@ def:protect save_offer(
     terms: str,
     dietary: str,
     menu_item: str,
-    create_key: str = ""
+    create_key: str = "",
+    image_url: str | None = None
 ) -> ActionResult {
     fd = _lock();
     try {
@@ -972,7 +986,8 @@ def:protect save_offer(
                 dietary,
                 menu_item,
                 time.time(),
-                create_key
+                create_key,
+                image_url
             );
         }
     } finally {

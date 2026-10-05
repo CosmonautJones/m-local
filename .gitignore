@@ -18,3 +18,6 @@ __pycache__/
 *.log
 .DS_Store
 Thumbs.db
+
+# Uploaded business and offer photos are persistent application data.
+/assets/photos/

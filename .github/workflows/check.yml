@@ -36,6 +36,8 @@ jobs:
         run: ./scripts/test.sh insights
       - name: Run onboarding security tests
         run: bash scripts/test.sh onboarding
+      - name: Test photo normalization and ownership
+        run: bash scripts/python.sh -m unittest tests/photo_media.py
       - name: Verify business approval over HTTP and after restart
         run: bash scripts/test-business-approval.sh
       - name: Test deployment source and data separation

@@ -9,7 +9,7 @@ import {validateHomeFeed} from '../client/feed-validation.mjs';
 const functions = new Set(['list_offers', 'get_offer', 'claim_offer', 'merchant_portal',
   'update_profile', 'save_offer', 'set_offer_status', 'resolve_claim', 'redeem_claim',
   'cancel_claim', 'offer_defaults', 'current_session', 'request_email_code', 'verify_email_code',
-  'get_business_draft', 'import_business_website', 'save_business_draft', 'get_business_profile',
+  'get_business_draft', 'import_business_website', 'upload_business_photo', 'import_business_photo', 'save_business_draft', 'get_business_profile',
   'get_account_profile', 'save_account_profile', 'merchant_insights', 'local_activity', 'list_places', 'nearby_places',
   'home_feed', 'taste_choices', 'save_taste', 'toggle_favorite', 'nearby_after']);
 
@@ -21,7 +21,8 @@ export function createShareProxy({ upstreamHost = 'localhost', upstreamPort = 82
     const read = ['GET', 'HEAD'].includes(req.method);
     const allowed = read && (path === '/' || path === '/index.html' || path === '/favicon.ico' || path === '/static/client.js'
       || /^\/assets\/[\w-]+\.(js|css|png|svg|ico|webp|woff2?)$/.test(path)
-      || /^\/static\/assets\/brand\/[\w-]+\.(png|ttf)$/.test(path))
+      || /^\/static\/assets\/brand\/[\w-]+\.(png|ttf)$/.test(path)
+      || /^\/static\/photos\/[a-f0-9]{32}\.jpg$/.test(path))
       || req.method === 'POST' && functions.has(path.replace(/^\/function\//, '')) && path.startsWith('/function/');
     res.setHeader('x-content-type-options', 'nosniff');
     res.setHeader('referrer-policy', 'no-referrer');
@@ -107,9 +108,10 @@ export function createShareProxy({ upstreamHost = 'localhost', upstreamPort = 82
     if(body)upstream.end(body);else req.pipe(upstream);
     };
     if(req.method!=='POST'){forward();return;}
-    // The largest profile form is well below 64 KiB. Buffer bounded RPC bodies
+    // Resized photo payloads get a separate bound; profile forms stay at 64 KiB.
+    // Buffer bounded RPC bodies
     // so a chunked oversized request cannot partly execute at the upstream.
-    const maxBody=64*1024;
+    const maxBody=path==='/function/upload_business_photo'?1400000:64*1024;
     let bytes=0, rejected=false;
     const chunks=[];
     const rejectBody=status=>{

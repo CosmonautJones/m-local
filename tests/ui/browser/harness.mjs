@@ -15,7 +15,7 @@ export function offer(extra={}) {return {
  id:'fixture-offer',title:'Current bowl',description:'Fictional UI test meal',restaurant:'Fixture Kitchen',
  price:9,regular_price:12,address:'Fictional test address',neighborhood:'Test area',state:'active',remaining:4,quantity:5,
  eligibility:'Student ID',terms:'Current offer terms',menu_item:'',dietary:[],reasons:[],is_demo:false,time_label:'Until tonight',
- my_status:'',my_claim_id:'',my_qr_payload:'',my_title:'',my_price_cents:0,my_terms:'',my_eligibility:'',my_expires:'',my_expires_ts:0,entrance_note:'',note_date:'',image_url:'',access_context:{state:'none',notices:[]},
+ my_status:'',my_claim_id:'',my_qr_payload:'',my_title:'',my_price_cents:0,my_terms:'',my_eligibility:'',my_expires:'',my_expires_ts:0,entrance_note:'',note_date:'',image_url:'',offer_image_url:'',access_context:{state:'none',notices:[]},
  start_input:'2026-09-26 17:00',end_input:'2026-09-26 23:00', ...extra
 };}
 export function held(extra={}) {return offer({my_claim_id:'fixture-claim',my_status:'claimed',my_qr_payload:qr,
@@ -64,7 +64,7 @@ export async function app({role='student',verified=false,audience='student',item
  w.addEventListener('error',e=>errors.push(e.message));
  w.eval(executable);
  const initialTitle=item.my_claim_id&&['claimed','redeemed'].includes(item.my_status)?item.my_title:item.title;
- try{await until(()=>[initialTitle,'Welcome to M-Local','Offers are on their way','Could not load offers.','Sign in to M-Local','List your business','YOUR BUSINESS','Profile and offers'].some(text=>w.document.body.textContent.includes(text)),'initial app render');}
+ try{await until(()=>[initialTitle,'Welcome to M-Local','Offers are on their way','Could not load offers.','Sign in to M-Local','List your business','YOUR BUSINESS','Business offers'].some(text=>w.document.body.textContent.includes(text)),'initial app render');}
  catch(error){dom.window.close();throw error;}
  return {window:w,document:w.document,calls,errors,text:()=>w.document.body.textContent,
   find(text){return [...w.document.querySelectorAll('*')].find(n=>n.textContent===text&&n.children.length===0);},

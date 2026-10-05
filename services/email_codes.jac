@@ -309,7 +309,7 @@ obj CodeStore {
         }
     }
 
-    def update_business_details(actor: str, cuisine: str, description: str) -> None {
+    def update_business_details(actor: str, cuisine: str, description: str, image_url: str | None = None) -> None {
         with self.transaction() as db {
             row = db.execute("SELECT d.body FROM drafts d JOIN accounts a ON a.actor=d.actor WHERE d.actor=? AND a.kind='business'", (actor,)).fetchone();
             if row {
@@ -319,6 +319,7 @@ obj CodeStore {
                 }
                 body["cuisine"] = cuisine;
                 body["description"] = description;
+                if image_url is not None { body["image_url"] = image_url; }
                 db.execute("UPDATE drafts SET body=?,updated=? WHERE actor=?", (json.dumps(body), self.clock(), actor));
             }
         }
