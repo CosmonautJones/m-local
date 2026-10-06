@@ -11,6 +11,12 @@ four CPUs or 17,179,869,184 memory bytes stops before checkout, authenticated
 artifact retrieval, downloads, storage provisioning or compiler execution.
 The parent independently enforces Ubuntu 24.04, systemd, cgroup v2, root
 provisioning, non-WSL, fresh storage and all bounded worker controls.
+It loads the resource helper from its verified committed bytes. A separately
+bound launcher adapter preserves its resource controls and uses `setpriv` to
+drop real and effective UID/GID to 65534 with no supplementary groups before
+starting each scoped workload. Both original and adapted code hashes are
+included in the sanitized summary. The fixture identity test does not replace
+execution of the resource controls on a qualified full-package host.
 
 After provisioning storage and before runtime downloads or compiler work,
 the parent runs the pinned source-isolation control on fresh owned fixtures.
@@ -50,7 +56,7 @@ the test-tool prerequisite; it does not run the application UI suite or prove
 browser compatibility, performance or production runtime adoption.
 
 The manual defaults bind the reviewed successful source commit
-`990c7b33c920e6a93431d34a01df7b8c87c432ba` and run `37477834755`.
+`82d2789dcbbfea32d3362ee4008104b7e52b193a` and run `37532312763`.
 The parent authenticates their exact successful job and unexpired artifact,
 then checks the archive and every committed source/package input. Updating
 these defaults requires current successful source evidence. Caller-supplied
@@ -98,9 +104,17 @@ the effective group, so that API does not represent this empty-list control.
 The reviewed 39-package graph is frozen in `ui-dependency-inputs/v1/`, with
 exact file hashes and inventory checked by the package-input workflow. Its
 preparation evidence is the successful [dependency job at `0b82936`](https://github.com/CosmonautJones/m-local/actions/runs/37535107874).
-Fresh full-suite installation must consume these committed inputs and verify
-every downloaded tarball before populating an empty offline cache. The frozen
-receipt proves the preparation fixture, not application test execution.
+The parent now consumes these exact committed files after package acceptance,
+checks fresh tarball sizes, hashes and integrity, and populates an empty private
+cache before an offline installation and DOM probe. Each command uses the
+bounded workload launcher and a private root-owned log. The installed files,
+Node tools, mounts and preparation receipt are rechecked before cleanup.
+The live dependency directory remains available for the later application
+test adapter; the public summary contains hashes and counts only. A supported
+Linux fixture exercises this installation and rejects mutated receipts and
+files. Its status remains `dependencies_prepared`, with application tests
+explicitly unexecuted. Full application suite integration and execution remain
+required before compatibility acceptance.
 
 The nine original compatibility, catalog, loader and native-gate sources are
 also frozen byte-for-byte in `native-inputs/native-suite-v5/`. Their manifest

@@ -38,6 +38,8 @@ jobs:
         run: python3 -I -B runtime-proof/test-runtime-direct-use.py
       - name: Check fresh package acceptance and cleanup boundaries
         run: python3 -I -B runtime-proof/test-fresh-package.py
+      - name: Check workload launcher binding and dropped identity
+        run: sudo -n python3 -I -B runtime-proof/test-workload-launcher.py
       - name: Check source isolation and restoration on owned fixtures
         run: sudo -n python3 -I -B runtime-proof/test-source-isolation.py
       - name: Check private tracing client and tracee environment on owned fixtures
@@ -50,6 +52,8 @@ jobs:
         run: sudo -n python3 -I -B runtime-proof/test-prepared-runtime-matrix.py
       - name: Check browser-test dependency lock and integrity boundaries
         run: python3 -I -B runtime-proof/test-ui-dependency-lock.py
+      - name: Check frozen browser-test dependency installation on owned fixtures
+        run: sudo -n python3 -I -B runtime-proof/test-ui-dependency-consumer.py
       - name: Verify frozen browser-test dependency inputs without installing them
         run: |
           echo 'd47b342bea74d64fa3575673a07b90d5595fdabe0e87a93f714cc6d7caa7c635  runtime-proof/verify-package-preflight.py' | sha256sum -c -

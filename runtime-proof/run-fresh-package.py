@@ -29,6 +29,8 @@ FILE_TRACE_CONTROL_SHA = 'd0567f05d046da61c772e8ce20dbabbbcea7e0d6868307ac402448
 PG_CLIENT_CONTROL_SHA = 'bf1bbe1647b9fd1f577e0140452c085903847211111610c212e5da8291521de7'
 NODE_CLIENT_CONTROL_SHA = '79097e21e7f8f1647fa6984b85903d470824cb6f240bb0b82d1e8c435dfa15f5'
 PREPARED_MATRIX_SHA = 'b97a3b695d90d9ad60b3aac06a0ee34cfd13597f2dbbb9e26512d869e91d28ba'
+WORKLOAD_LAUNCHER_SHA = 'b08eef9990e640f66c3ecff6619052eae83b50a100da6a5beccbad24770ddd3b'
+UI_DEPENDENCY_CONTROL_SHA = 'f1497cfde5745fe57a7722cfb1fa6a6a980fdc8c802f141fab12aa07546ba66c'
 RECIPE_SHA = 'ec820c414d5a83d498f894eddcee105d5eb3e287a030c2d6b87045fe7d32129f'
 VERIFIER_SHA = '9f7acdfd45c3a66913c8c3c9205f3afc8b00801147b1082e2af329a17f27d8de'
 CLASSIFIER_SHA = '33dd3dbe88aadb16317f60bd518430225a7a8ef466596c70271b16371006f363'
@@ -230,7 +232,8 @@ def run_bounded(runner, directory, command, cwd, environment, timeout, label):
     process = state = None
     guard = None
     started = time.monotonic()
-    with (directory / (label + '.log')).open('xb') as log:
+    with os.fdopen(os.open(directory / (label + '.log'),
+                           os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o600), 'wb') as log:
         try:
             process, state = helper['launch_scope'](directory, command, cwd, environment, log)
             runner['ACTIVE'] = process
@@ -332,6 +335,12 @@ def main(argv=None):
             ('runtime-proof/public-download-pins.json', '6cf9b071cce3f5fb40f829764d9d5be9550d7aaa25b56e04f96f6d244a529db7')):
         if preflight['sha'](preflight['committed_file'](ROOT, args.expected_package_commit, relative)) != pin:
             fail('fresh package support input binding')
+    resource_helper = load_committed(preflight, 'runtime-proof/kali-build-resources-v2.py',
+                                     args.expected_package_commit,
+                                     pin='72fa698df809ec63c0d2cd7ce1c9d51bd5ee8a9e2b0bfba5bff979814217837b')
+    if resource_helper['e_root'] != runner['E_ROOT'] or runner['RESOURCE_HELPER'] is not None:
+        fail('committed resource helper storage binding')
+    runner['RESOURCE_HELPER'] = resource_helper
     runner['MIN_HOST_MEMORY'] = MIN_HOST_MEMORY
     runner['host_guard']()
     host_cpus = len(os.sched_getaffinity(0))
@@ -356,6 +365,11 @@ def main(argv=None):
     try:
         probe_path, probe = runner['run_probe'](workspace)
         runner['mount_image']()
+        launcher_control = load_committed(preflight, 'runtime-proof/bind-fresh-workload-launcher.py',
+                                          args.expected_package_commit, pin=WORKLOAD_LAUNCHER_SHA)
+        launcher = launcher_control['bind_launcher'](preflight, runner, args.expected_package_commit)
+        if launcher.get('status') != 'prepared_not_executed' or launcher.get('executed') is not False:
+            fail('workload launcher binding scope')
         isolation_control = load_committed(preflight, 'runtime-proof/run-fresh-source-isolation.py',
                                            args.expected_package_commit, pin=SOURCE_ISOLATION_SHA)
         isolation_directory, isolation_identity = fresh_mount(runner, 'm-local-source-isolation-control-v1-')
@@ -502,6 +516,23 @@ def main(argv=None):
             expected_controls_code_sha256=preflight['sha'](control_source), official_cache_raw=official_cache_raw,
             expected_official_cache_receipt_sha256=preflight['sha'](official_cache_raw),
             expected_official_cache_code_sha256=preflight['sha'](cache_code))
+        ui_control = load_committed(preflight, 'runtime-proof/prepare-fresh-ui-dependencies.py',
+                                    args.expected_package_commit, pin=UI_DEPENDENCY_CONTROL_SHA)
+        ui_directory, ui_identity = fresh_mount(runner, 'm-local-ui-dependency-control-v1-')
+
+        def ui_command(label, command, *, cwd, env, timeout, log):
+            if log != ui_directory / (label + '.log'):
+                fail('UI dependency workload log binding')
+            mount_identity(ui_directory, runner['E_ROOT'], 'm-local-ui-dependency-control-v1-', ui_identity)
+            state = run_bounded(runner, ui_directory, command, cwd, env, timeout, label)
+            mount_identity(ui_directory, runner['E_ROOT'], 'm-local-ui-dependency-control-v1-', ui_identity)
+            return state
+
+        ui_runner = dict(runner, run_command=ui_command)
+        prepared_ui = ui_control['prepare_dependencies'](preflight, ui_runner, ui_directory,
+            args.expected_package_commit, node_client, remaining_seconds(deadline, 360))
+        if prepared_ui.get('status') != 'dependencies_prepared' or prepared_ui.get('application_tests_executed') is not False:
+            fail('UI dependency preparation scope')
         remaining_seconds(deadline, 1)
         mount_identity(isolation_directory, runner['E_ROOT'], 'm-local-source-isolation-control-v1-', isolation_identity)
         if regular_hash(preflight, isolation['receipt_path'], maximum=1024 ** 2)[0] != isolation['receipt_sha256']:
@@ -535,12 +566,18 @@ def main(argv=None):
         node_client_control['verify_inventory'](node_client['clients_directory'], node_client['extracted_inventory_sha256'])
         mount_identity(matrix_directory, runner['E_ROOT'], 'm-local-prepared-runtime-matrix-v1-', matrix_identity)
         matrix_control['verify_prepared'](preflight, matrix_directory, prepared_matrix)
+        mount_identity(ui_directory, runner['E_ROOT'], 'm-local-ui-dependency-control-v1-', ui_identity)
+        ui_control['verify_prepared'](preflight, ui_runner, ui_directory, prepared_ui,
+                                      args.expected_package_commit, node_client)
         summary = dict(accepted, source=source_gate['source'], source_job_id=authenticated['job_id'],
                        source_artifact_id=authenticated['artifact_id'],
                        source_archive_sha256=authenticated['artifact_digest'],
                        executed_parent_sha256=preflight['sha'](parent_raw),
                        package_commit=args.expected_package_commit, source_commit=args.expected_source_commit,
                        runner_controls_receipt_sha256=runner['digest'](probe_path),
+                       workload_launcher_control_sha256=WORKLOAD_LAUNCHER_SHA,
+                       workload_launcher_source_sha256=launcher['source_helper_sha256'],
+                       workload_launcher_adapted_sha256=launcher['adapted_launch_sha256'],
                        source_isolation_control_code_sha256=SOURCE_ISOLATION_SHA,
                        source_isolation_fixture_receipt_sha256=isolation['receipt_sha256'],
                        source_isolation_fixture_helper_sha256=isolation['helper_sha256'],
@@ -567,6 +604,14 @@ def main(argv=None):
                        prepared_runtime_matrix_inventory_sha256=prepared_matrix['prepared_inventory_sha256'],
                        prepared_runtime_matrix_status=prepared_matrix['status'],
                        prepared_runtime_matrix_executed=False,
+                       ui_dependency_control_sha256=UI_DEPENDENCY_CONTROL_SHA,
+                       ui_dependency_prepared_receipt_sha256=prepared_ui['receipt_sha256'],
+                       ui_dependency_frozen_inputs_sha256=prepared_ui['frozen_inputs_sha256'],
+                       ui_dependency_installed_inventory_sha256=prepared_ui['installed_inventory_sha256'],
+                       ui_dependency_installed_file_count=prepared_ui['installed_file_count'],
+                       ui_dependency_installed_file_bytes=prepared_ui['installed_file_bytes'],
+                       ui_dependency_status=prepared_ui['status'],
+                       ui_dependency_application_tests_executed=False,
                        host_cpu_count=host_cpus, minimum_host_memory_bytes=MIN_HOST_MEMORY,
                        controls_confirmed_before_workload=assembly['controls_confirmed_before_workload'],
                        assembly_elapsed_limit_seconds=ASSEMBLY_SECONDS,
