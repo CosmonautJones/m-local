@@ -1,10 +1,16 @@
 import ast
 import json
+import io
+import os
+import shutil
+import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
-from pathlib import Path
+import zipfile
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -114,6 +120,41 @@ class FreshSourceTests(unittest.TestCase):
                 download('jac', {}, workspace / 'jac.bin', workspace)
             self.assertEqual(json.loads(output.read_text()), {'failure_type': 'PermissionError', 'http_status': None})
             self.assertNotIn('private fixture address', output.read_text())
+
+    def test_extracted_postgres_root_is_readable_by_restricted_process(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            workspace = Path(directory)
+            payload = io.BytesIO()
+            with tarfile.open(fileobj=payload, mode='w:xz') as archive:
+                entry = tarfile.TarInfo('bin')
+                entry.type, entry.mode = tarfile.DIRTYPE, 0o755
+                archive.addfile(entry)
+                for name in ['postgres', 'pg_ctl']:
+                    entry = tarfile.TarInfo('bin/' + name)
+                    entry.size, entry.mode = 1, 0o755
+                    archive.addfile(entry, io.BytesIO(b'x'))
+            jar = workspace / 'postgres.jar'
+            with zipfile.ZipFile(jar, 'w') as archive:
+                archive.writestr('postgres.txz', payload.getvalue())
+
+            def fail(label):
+                raise RuntimeError(label)
+
+            extract = runner_function('safe_extract_jar', {'Path': Path, 'PurePosixPath': PurePosixPath,
+                'io': io, 'os': os, 'shutil': shutil, 'stat': stat, 'tarfile': tarfile, 'zipfile': zipfile, 'fail': fail})
+            modes = []
+            original_chmod = Path.chmod
+
+            def chmod(path, mode, *args, **kwargs):
+                modes.append((path, mode))
+                return original_chmod(path, mode, *args, **kwargs)
+
+            target = workspace / 'runtime/postgres'
+            with patch.object(Path, 'chmod', chmod):
+                self.assertEqual(extract(jar, target), target)
+            self.assertIn((target, 0o755), modes)
+            if os.name == 'posix':
+                self.assertEqual(target.stat().st_mode & 0o777, 0o755)
 
 
 if __name__ == '__main__':

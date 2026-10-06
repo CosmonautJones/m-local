@@ -659,6 +659,7 @@ def safe_extract_jar(jar, target):
     if target.exists() or target.is_symlink():
         fail('fresh PostgreSQL target guard')
     shutil.copytree(candidate, target, symlinks=True)
+    target.chmod(0o755)
     return target
 
 
@@ -757,7 +758,8 @@ def materialize_runtime(workspace, pins, log):
     os.chown(cache, 65534, 65534)
     cache.chmod(0o755)
     environment = dict(PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', HOME='/nonexistent',
-                       LANG='C.UTF-8', JAC_NO_DEV_SOURCE='1', PYTHONDONTWRITEBYTECODE='1')
+                       LANG='C.UTF-8', JAC_NO_DEV_SOURCE='1', PYTHONDONTWRITEBYTECODE='1',
+                       LD_LIBRARY_PATH=str(pg / 'lib'))
     version_scope = scoped_command('PostgreSQL version', [str(postgres), '--version'], cwd=pg,
                                    environment=environment, workspace=Path(log).parent, timeout=30)
     version_log = Path(version_scope['log_path'])
