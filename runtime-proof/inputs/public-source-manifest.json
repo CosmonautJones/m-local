@@ -1,0 +1,179 @@
+{
+  "base": "58cb97eb75cdff8b5ee78f4094ca2be16376601c",
+  "direct_use_rule": "Fresh fork must apply the current patch and byte-match all 17 Jac sources before compile/bootstrap/matrix; these are the actual implementation files, not filler",
+  "files": {
+    "outputs/identity-bootstrap-source-v2/source-inputs/runtime.patch": {
+      "bytes": 31494,
+      "kind": "public_proof_source",
+      "sha256": "80fd38c7555e31ad60cb36f4e7af904e848d584c98da76f9066bcee950acd0b7"
+    },
+    "source/jac/jaclang/compiler/types/stubcat/reader.jac": {
+      "bytes": 35011,
+      "kind": "used_runtime_jac_source",
+      "sha256": "7b62307a3456fb8ff1cf57fa9244566bc70d2dc8eacab46c5efe2c79092d5f55"
+    },
+    "source/jac/jaclang/compiler/types/stubcat/writer.jac": {
+      "bytes": 50583,
+      "kind": "used_runtime_jac_source",
+      "sha256": "a40440eac72cbde58ded68d4dd4cdd70ee49286520896e92fb2ab2b9b42125a6"
+    },
+    "source/jac/jaclang/data/impl/serializer.impl.jac": {
+      "bytes": 43792,
+      "kind": "used_runtime_jac_source",
+      "sha256": "d7023496a40df0f5531c5afe740025b3a93bbde35f25f3d303329f1672f64560"
+    },
+    "source/jac/jaclang/data/impl/store.impl.jac": {
+      "bytes": 43547,
+      "kind": "used_runtime_jac_source",
+      "sha256": "ff8f6cbae67cf0daa86f90d0d32ac92f56ad5321d08cda5315db17bf0720c653"
+    },
+    "source/jac/jaclang/data/serializer.jac": {
+      "bytes": 4874,
+      "kind": "used_runtime_jac_source",
+      "sha256": "a773a5d3f7df72ea9269c53191d4ece73c91b92655b13e89bf8f10c4cc0395e6"
+    },
+    "source/jac/jaclang/data/store.jac": {
+      "bytes": 6834,
+      "kind": "used_runtime_jac_source",
+      "sha256": "d65c906d6215920d62865092caf6c5a1db0b8c20e1fac194cddd79ad58002697"
+    },
+    "source/jac/jaclang/runtime/context.jac": {
+      "bytes": 1864,
+      "kind": "used_runtime_jac_source",
+      "sha256": "606d18da7d64ce7d65163d9564f00b52646a25fbdcc09e3614c28fdae944ad06"
+    },
+    "source/jac/jaclang/runtime/impl/context.impl.jac": {
+      "bytes": 4545,
+      "kind": "used_runtime_jac_source",
+      "sha256": "23a9afac764e791d7a9954b51718a053ff0682c61c6ecf4c8b3f65c2f62a91dc"
+    },
+    "source/jac/jaclang/scale/memory/impl/context.impl.jac": {
+      "bytes": 1172,
+      "kind": "used_runtime_jac_source",
+      "sha256": "1cf47627bad233b58489a5c46a5db336061a5bf511dac78a8fe9af5cb860f6dd"
+    },
+    "source/jac/jaclang/server/identity/identity_storage.jac": {
+      "bytes": 4680,
+      "kind": "used_runtime_jac_source",
+      "sha256": "3ffcb0900847aa20d48f07a6b1732fe9fde7fb87ddf6b7e5dd783e6cb38d5e92"
+    },
+    "source/jac/jaclang/server/identity/impl/identity_storage.impl.jac": {
+      "bytes": 13171,
+      "kind": "used_runtime_jac_source",
+      "sha256": "2ca4211e782cfec7bf2a647410f39b3403f78f361f995f3f66f6f57706fda9e7"
+    },
+    "source/jac/jaclang/server/identity/impl/identity_storage.pg.impl.jac": {
+      "bytes": 15182,
+      "kind": "used_runtime_jac_source",
+      "sha256": "46856b750bb693fed472e2f75dc0b11878a6344845aaeb04924f4632f2125063"
+    },
+    "source/jac/jaclang/server/identity/impl/user_manager.impl.jac": {
+      "bytes": 18248,
+      "kind": "used_runtime_jac_source",
+      "sha256": "5c493141861d9dfca7156f626fe7701b8f51e7d4fd1b505cc8827b98788fae83"
+    },
+    "source/jac/jaclang/server/identity/user_manager.jac": {
+      "bytes": 4292,
+      "kind": "used_runtime_jac_source",
+      "sha256": "596e3bf601c20c31b14cf8d3386bd1fc5615a292004691291aec53db1898a4b6"
+    },
+    "source/jac/jaclang/server/impl/server.impl.jac": {
+      "bytes": 62526,
+      "kind": "used_runtime_jac_source",
+      "sha256": "86cb2dac13689e59637de219746a091fb736f24ac9acdaec01fe6cf036980d7a"
+    },
+    "source/jac/jaclang/server/impl/session.impl.jac": {
+      "bytes": 32169,
+      "kind": "used_runtime_jac_source",
+      "sha256": "9ab51d035b3cb52cac93234e0ce0fd2c3aaa731b3f27810792f481bc8628ac6a"
+    },
+    "source/jac/jaclang/server/session.jac": {
+      "bytes": 5873,
+      "kind": "used_runtime_jac_source",
+      "sha256": "377ea7d8473ed76547e9fe6628cc0283dd28c52532a13cf236eb146af01fe319"
+    },
+    "work/export-emergency-checkpoint.py": {
+      "bytes": 5127,
+      "kind": "public_proof_source",
+      "sha256": "e73a01554b5b3fccb66b4544773b7dc74928c7d7ce7dbb1fcc60bf3c9f26caf4"
+    },
+    "work/identity-bootstrap-source-proof-v4.py": {
+      "bytes": 27167,
+      "kind": "public_proof_source",
+      "sha256": "ca4d3ae731268a40db481dd722e2277c0bd25f9b123173f467059f2be1df4f5d"
+    },
+    "work/identity-runtime-v3/run-identity-runtime-regressions.py": {
+      "bytes": 11162,
+      "kind": "public_proof_source",
+      "sha256": "c2cdc4b2c7015891ac7c24241f04985e73df9a2c9c20f1fdd4981c05f6e6f657"
+    },
+    "work/identity-runtime-v3/runtime-loader-provenance.py": {
+      "bytes": 2206,
+      "kind": "public_proof_source",
+      "sha256": "94e4da642dfa1dfff57001517362f701da109acec7246d0c7ad08afe1d5f724c"
+    },
+    "work/identity-runtime-v3/runtime.patch": {
+      "bytes": 32442,
+      "kind": "public_proof_source",
+      "sha256": "d3630dfc5d9942e2b7ac6edf0ee1dd10bdb7a0f0919865e543220a27b27fe366"
+    },
+    "work/kali-build-resources-v2.py": {
+      "bytes": 9802,
+      "kind": "public_proof_source",
+      "sha256": "72fa698df809ec63c0d2cd7ce1c9d51bd5ee8a9e2b0bfba5bff979814217837b"
+    },
+    "work/run-runtime-type-compile-v3.py": {
+      "bytes": 4433,
+      "kind": "public_proof_source",
+      "sha256": "af7d6ffcb989becdee298932a366cc80b2cbeb2e98aeaa0ba41307658314245b"
+    },
+    "work/runtime-boundary-probe.py": {
+      "bytes": 4403,
+      "kind": "public_proof_source",
+      "sha256": "e77969e637f80cbd3b38d488f0a365efeb68d700dcf9100846b3feeb094dfff2"
+    },
+    "work/runtime-interface-codec-controls-probe.py": {
+      "bytes": 2227,
+      "kind": "public_proof_source",
+      "sha256": "ed3c46f6054d9f46bd8d37cc41c7738e8c1b57a73813eb4bb891ec6ea3bcb092"
+    },
+    "work/runtime-interface-codec-probe.py": {
+      "bytes": 1970,
+      "kind": "public_proof_source",
+      "sha256": "9d422e5d2b939a4f8ff13e684204500fb71509cc0556cfd22d913ce8fb473d3f"
+    },
+    "work/runtime-lifecycle-probe.py": {
+      "bytes": 3735,
+      "kind": "public_proof_source",
+      "sha256": "a50cc828151020e2fb74210cb810f6727699b5abd386187b0c149dba10262036"
+    },
+    "work/runtime-materialization-probe.py": {
+      "bytes": 6586,
+      "kind": "public_proof_source",
+      "sha256": "e53fa112502664b2b1bd822153d78df28561cb736ddb2d945bb24ab24a725e1f"
+    },
+    "work/runtime-nested-context-probe.py": {
+      "bytes": 7147,
+      "kind": "public_proof_source",
+      "sha256": "819b5cb46a6d3df18c2cd3b5737e5ed7bd6c7fc667e1ec9f2098fd3ac65ede2d"
+    },
+    "work/runtime-probe.py": {
+      "bytes": 5776,
+      "kind": "public_proof_source",
+      "sha256": "50ebddd640859f215808e623fb4993a0c2e341a487ede097366bf99ad3564e09"
+    },
+    "work/runtime-request-context-probe.py": {
+      "bytes": 6375,
+      "kind": "public_proof_source",
+      "sha256": "2e1dc723e34dd24ffb9a7575fc3e7bdf769fb59d85d5810b7666dd68165487bd"
+    },
+    "work/runtime-served-probe.py": {
+      "bytes": 11274,
+      "kind": "public_proof_source",
+      "sha256": "f6eecc34398b2ff3681333548ba361243f3e4e8c085fe9a5e009e22650996575"
+    }
+  },
+  "patch_sha256": "d3630dfc5d9942e2b7ac6edf0ee1dd10bdb7a0f0919865e543220a27b27fe366",
+  "scope": "Only public source/probes and two reviewed patches; no historical receipt, cache, graph, account, image or private log",
+  "status": "staged_not_executed"
+}

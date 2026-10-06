@@ -1,0 +1,802 @@
+diff --git a/jac/jaclang/compiler/types/stubcat/reader.jac b/jac/jaclang/compiler/types/stubcat/reader.jac
+index 95db55c..5b5e1ff 100644
+--- a/jac/jaclang/compiler/types/stubcat/reader.jac
++++ b/jac/jaclang/compiler/types/stubcat/reader.jac
+@@ -892,7 +892,7 @@ obj StubCatalog {
+             is_external = c.u() == 1;
+             mid = c.ref();
+             file_path = self.abs_path(rel)
+-                if "/" in rel or rel.endswith(".pyi")
++                if rel in (".", "..") or "/" in rel or rel.endswith(".pyi")
+                 else rel;
+             mt = ModuleType(
+                 mod_name=mod_name,
+diff --git a/jac/jaclang/compiler/types/stubcat/writer.jac b/jac/jaclang/compiler/types/stubcat/writer.jac
+index 6b878bf..ebec3e9 100644
+--- a/jac/jaclang/compiler/types/stubcat/writer.jac
++++ b/jac/jaclang/compiler/types/stubcat/writer.jac
+@@ -505,7 +505,17 @@ obj CatalogWriter {
+         if real.startswith(prefix) {
+             return real[len(prefix):].replace(os.sep, "/");
+         }
+-        return self.path_mapper(real) if self.path_mapper is not None else real;
++        mapped = self.path_mapper(real) if self.path_mapper is not None else real;
++        if mapped != real {
++            return mapped;
++        }
++        parent = os.path.dirname(self.base_dir);
++        try {
++            if os.path.commonpath([parent, real]) == parent {
++                return os.path.relpath(real, self.base_dir).replace(os.sep, "/");
++            }
++        } except ValueError {}
++        return real;
+     }
+ 
+     def add_module(mod: Module, dotted: str) -> None {
+diff --git a/jac/jaclang/data/impl/serializer.impl.jac b/jac/jaclang/data/impl/serializer.impl.jac
+index b1408bd..db6f39c 100644
+--- a/jac/jaclang/data/impl/serializer.impl.jac
++++ b/jac/jaclang/data/impl/serializer.impl.jac
+@@ -916,7 +916,7 @@ def _node_stub(raw_id: object, role: str) -> NodeAnchor {
+ }
+ 
+ 
+-impl Serializer._deserialize_anchor(data: dict[str, object]) -> (Anchor | None) {
++impl Serializer._deserialize_anchor(data: dict[str, object], compute_hash: bool = True) -> (Anchor | None) {
+     try {
+         anchor: Anchor = _new_anchor(data.get('__type__', ''));
+         raw_id = data.get('id');
+@@ -1017,7 +1017,7 @@ impl Serializer._deserialize_anchor(data: dict[str, object]) -> (Anchor | None)
+             }
+         }
+ 
+-        anchor.hash = Serializer._compute_hash(anchor);
++        anchor.hash = Serializer._compute_hash(anchor) if compute_hash else 0;
+         return anchor;
+     } except Exception as e {
+         failed_arch = data.get('archetype');
+diff --git a/jac/jaclang/data/impl/store.impl.jac b/jac/jaclang/data/impl/store.impl.jac
+index 2a0d2de..82da2b9 100644
+--- a/jac/jaclang/data/impl/store.impl.jac
++++ b/jac/jaclang/data/impl/store.impl.jac
+@@ -393,7 +393,25 @@ def _park_conn(info: any, conn: any, in_txn: bool, listened: bool) -> None {
+ }
+ 
+ 
++impl PgStore._discard_main(conn: any) -> None {
++    with self._lock {
++        try {
++            conn.close();
++        } finally {
++            if self._conn is conn {
++                self._conn = None;
++                self._in_txn = False;
++                self._isolation = None;
++            }
++        }
++    }
++}
++
++
+ impl PgStore._main -> any {
++    if self._pinned_conn is not None and self._conn is not self._pinned_conn {
++        raise RuntimeError('Pinned database connection was replaced');
++    }
+     if self._conn is None {
+         self._conn = self._connect();
+     }
+@@ -452,6 +470,14 @@ def _conn_dead(e: Exception) -> bool {
+ 
+ 
+ impl PgStore._run(sql: str, params: dict[str, any]) -> list[any] {
++    with self._lock {
++        if self._pinned_conn is not None {
++            if self._conn is not self._pinned_conn {
++                raise RuntimeError('Pinned database connection was replaced');
++            }
++            return self._pinned_conn.run(sql, **params) or [];
++        }
++    }
+     self._ensure_ready();
+     with self._lock {
+         conn: any = None;
+@@ -826,6 +852,9 @@ impl PgStore.takeover -> int {
+ 
+ impl PgStore.begin(isolation: TxnIsolation = TxnIsolation.SERIALIZABLE) -> None {
+     with self._lock {
++        if self._pinned_conn is not None and self._conn is not self._pinned_conn {
++            raise RuntimeError('Pinned database connection was replaced');
++        }
+         if self._in_txn {
+             return;
+         }
+@@ -841,6 +870,9 @@ impl PgStore.begin(isolation: TxnIsolation = TxnIsolation.SERIALIZABLE) -> None
+ 
+ impl PgStore.commit -> None {
+     with self._lock {
++        if self._pinned_conn is not None and self._conn is not self._pinned_conn {
++            raise RuntimeError('Pinned database connection was replaced');
++        }
+         if not self._in_txn {
+             return;
+         }
+@@ -856,6 +888,9 @@ impl PgStore.commit -> None {
+ 
+ impl PgStore.rollback -> None {
+     with self._lock {
++        if self._pinned_conn is not None and self._conn is not self._pinned_conn {
++            raise RuntimeError('Pinned database connection was replaced');
++        }
+         if not self._in_txn {
+             return;
+         }
+diff --git a/jac/jaclang/data/serializer.jac b/jac/jaclang/data/serializer.jac
+index c54295f..9d95fb8 100644
+--- a/jac/jaclang/data/serializer.jac
++++ b/jac/jaclang/data/serializer.jac
+@@ -113,7 +113,7 @@ obj Serializer {
+     static def _occurrence_note(n: int) -> str;
+     static def _reset_warn_cache -> None;
+     static def _id_to_stub(anchor_cls: type[Anchor], id_str: str) -> (Anchor | None);
+-    static def _deserialize_anchor(data: dict[str, object]) -> (Anchor | None);
++    static def _deserialize_anchor(data: dict[str, object], compute_hash: bool = True) -> (Anchor | None);
+     static def _deserialize_permission(data: object) -> (Permission | None);
+     static def _deserialize_access(data: object) -> Access;
+     static def _deserialize_archetype(
+diff --git a/jac/jaclang/data/store.jac b/jac/jaclang/data/store.jac
+index bac8f89..401dc5a 100644
+--- a/jac/jaclang/data/store.jac
++++ b/jac/jaclang/data/store.jac
+@@ -126,6 +126,7 @@ obj PgStore(Store) {
+         promotions: dict[str, list[str]] = {},
+         auto_schema: bool = False,
+         pending_reset: bool = False,
++        _pinned_conn: (any | None) = None,
+         _conn: (any | None) postinit,
+         _side_conn: (any | None) postinit,
+         _lock: threading.RLock postinit,
+@@ -179,6 +180,7 @@ obj PgStore(Store) {
+     def _ensure_ready -> None;
+     def _connect -> any;
+     def _main -> any;
++    def _discard_main(conn: any) -> None;
+     def _side -> any;
+     def _run(sql: str, params: dict[str, any]) -> list[any];
+     def _side_run(sql: str, params: dict[str, any]) -> list[any];
+diff --git a/jac/jaclang/runtime/context.jac b/jac/jaclang/runtime/context.jac
+index 0b4fba7..6062e6e 100644
+--- a/jac/jaclang/runtime/context.jac
++++ b/jac/jaclang/runtime/context.jac
+@@ -23,6 +23,7 @@ obj ExecutionContext {
+         diagnostics: list[PermissionDenied] = [],
+         pending_effects: list[Callable] = [],
+         read_versions: dict[UUID, int] = {},
++        read_ids: set[UUID] = set(),
+         custom: any = MISSING,
+         call_state: ContextVar[CallState] = ContextVar('call_state'),
+         base_path_dir: (str | None) = None,
+diff --git a/jac/jaclang/runtime/impl/context.impl.jac b/jac/jaclang/runtime/impl/context.impl.jac
+index 23cc609..63b0889 100644
+--- a/jac/jaclang/runtime/impl/context.impl.jac
++++ b/jac/jaclang/runtime/impl/context.impl.jac
+@@ -11,6 +11,8 @@ impl ExecutionContext.postinit -> None {
+     import from jaclang.runtime.runtime { JacRuntime }
+     if self._parent is not None {
+         self.mem = self._parent.mem;
++        self.read_ids = self._parent.read_ids;
++        self.read_versions = self._parent.read_versions;
+         self.base_path_dir = self._parent.base_path_dir;
+         self.full_target_path = self._parent.full_target_path;
+         return;
+@@ -104,9 +106,13 @@ impl ExecutionContext.close -> None {
+         return;
+     }
+ 
+-    self.mem.close();
+-
+-    self.run_pending_effects();
++    try {
++        self.mem.close();
++        self.run_pending_effects();
++    } finally {
++        self.read_ids.clear();
++        self.read_versions.clear();
++    }
+ }
+ 
+ impl ExecutionContext.on_commit(callback: Callable) -> None {
+diff --git a/jac/jaclang/scale/memory/impl/context.impl.jac b/jac/jaclang/scale/memory/impl/context.impl.jac
+index 52d8923..e00a3e9 100644
+--- a/jac/jaclang/scale/memory/impl/context.impl.jac
++++ b/jac/jaclang/scale/memory/impl/context.impl.jac
+@@ -23,6 +23,7 @@ impl JScaleExecutionContext.init(self: JScaleExecutionContext) -> None {
+     self.diagnostics: list[PermissionDenied] = [];
+     self.pending_effects = [];
+     self.read_versions = {};
++    self.read_ids = set();
+     self.custom: any = MISSING;
+     self.call_state: ContextVar[CallState] = ContextVar('call_state');
+ }
+diff --git a/jac/jaclang/server/identity/identity_storage.jac b/jac/jaclang/server/identity/identity_storage.jac
+index 5f4ff3f..11c3320 100644
+--- a/jac/jaclang/server/identity/identity_storage.jac
++++ b/jac/jaclang/server/identity/identity_storage.jac
+@@ -1,4 +1,5 @@
+ import json;
++import from jaclang.data.store { TxnIsolation }
+ import from jaclang.server.serving.authcrypt {
+     hash_password as _scrypt_hash,
+     verify_password as _scrypt_verify,
+diff --git a/jac/jaclang/server/identity/impl/identity_storage.impl.jac b/jac/jaclang/server/identity/impl/identity_storage.impl.jac
+index 8c9eb1f..c7121fb 100644
+--- a/jac/jaclang/server/identity/impl/identity_storage.impl.jac
++++ b/jac/jaclang/server/identity/impl/identity_storage.impl.jac
+@@ -14,6 +14,9 @@ impl IdentityStorage.create_user(
+     import from jaclang.runtime.constructs { Root }
+     import from jaclang { JacRuntime as Jac }
+ 
++    if isinstance(self, PgIdentityStorage) and self.store.in_txn() {
++        raise RuntimeError('Identity creation requires its own transaction');
++    }
+     type_counts: dict[str, int] = {};
+     for identity in identities {
+         id_type = identity.get('type', '');
+diff --git a/jac/jaclang/server/identity/impl/identity_storage.pg.impl.jac b/jac/jaclang/server/identity/impl/identity_storage.pg.impl.jac
+index 58bb4a0..7916ea5 100644
+--- a/jac/jaclang/server/identity/impl/identity_storage.pg.impl.jac
++++ b/jac/jaclang/server/identity/impl/identity_storage.pg.impl.jac
+@@ -67,41 +67,98 @@ impl PgIdentityStorage.postinit -> None {
+ }
+ 
+ impl PgIdentityStorage.ensure_indexes -> None {
+-    for stmt in _PG_IDENTITY_SCHEMA {
+-        self.store.rows(stmt, {});
++    with self.store._lock {
++        if self.store.in_txn() {
++            raise RuntimeError('Identity schema initialization requires its own transaction');
++        }
++        self.store.begin(TxnIsolation.READ_COMMITTED);
++        try {
++            self.store.rows("SELECT pg_advisory_xact_lock(hashtext('jac:identity_schema'))", {});
++            for stmt in _PG_IDENTITY_SCHEMA {
++                self.store.rows(stmt, {});
++            }
++            self.store.commit();
++        } except BaseException {
++            self.store.rollback();
++            raise;
++        }
+     }
+ }
+ 
+ impl PgIdentityStorage._store_user(user_doc: dict[str, any]) -> None {
+-    user_id = str(user_doc['user_id']);
+-    self.store.rows(
+-        """
+-        INSERT INTO identity_users (user_id, doc)
+-        VALUES (:u, CAST(:d AS jsonb))
+-        """,
+-        {'u': user_id, 'd': json.dumps(user_doc, `default=_pg_json_default)}
+-    );
+-    for identity in user_doc.get('identities', []) {
+-        if identity.get('type') == 'sso' and identity.get('provider') {
+-            self.store.rows(
+-                """
+-                INSERT INTO sso_lookups (provider, external_id, user_id)
+-                VALUES (:p, :e, :u) ON CONFLICT DO NOTHING
+-                """,
+-                {
+-                    'p': identity['provider'],
+-                    'e': identity.get('external_id', ''),
+-                    'u': user_id
+-                }
+-            );
+-        } elif identity.get('value_normalized') {
++    with self.store._lock {
++        if self.store.in_txn() {
++            raise RuntimeError('Identity insertion requires its own transaction');
++        }
++        conn: any = self.store._main();
++        previous_pin: any = self.store._pinned_conn;
++        if previous_pin is not None and previous_pin is not conn {
++            raise RuntimeError('Pinned database connection was replaced');
++        }
++        self.store._pinned_conn = conn;
++        committing = False;
++        try {
++            self.store.begin(TxnIsolation.READ_COMMITTED);
++            user_id = str(user_doc['user_id']);
+             self.store.rows(
+                 """
+-                INSERT INTO identity_lookups (value_normalized, user_id)
+-                VALUES (:v, :u) ON CONFLICT DO NOTHING
++                INSERT INTO identity_users (user_id, doc)
++                VALUES (:u, CAST(:d AS jsonb))
+                 """,
+-                {'v': identity['value_normalized'], 'u': user_id}
++                {'u': user_id, 'd': json.dumps(user_doc, `default=_pg_json_default)}
+             );
++            for identity in user_doc.get('identities', []) {
++                if identity.get('type') == 'sso' and identity.get('provider') {
++                    self.store.rows(
++                        """
++                        INSERT INTO sso_lookups (provider, external_id, user_id)
++                        VALUES (:p, :e, :u)
++                        """,
++                        {
++                            'p': identity['provider'],
++                            'e': identity.get('external_id', ''),
++                            'u': user_id
++                        }
++                    );
++                } elif identity.get('value_normalized') {
++                    self.store.rows(
++                        """
++                        INSERT INTO identity_lookups (value_normalized, user_id)
++                        VALUES (:v, :u)
++                        """,
++                        {'v': identity['value_normalized'], 'u': user_id}
++                    );
++                }
++            }
++            committing = True;
++            self.store.commit();
++        } except BaseException as error {
++            if committing {
++                try {
++                    self.store._discard_main(conn);
++                } except BaseException {}
++            } else {
++                try {
++                    conn.run('ROLLBACK');
++                    self.store._in_txn = False;
++                    self.store._isolation = None;
++                } except BaseException {
++                    try {
++                        self.store._discard_main(conn);
++                    } except BaseException {}
++                }
++                for arg in getattr(error, 'args', ()) {
++                    if isinstance(arg, dict) and arg.get('C') == '23505'
++                        and arg.get('n') == 'identity_lookups_pkey' {
++                        raise IdentityTakenError('Identity is already registered') from error;
++                    }
++                }
++            }
++            raise;
++        } finally {
++            if self.store._pinned_conn is conn {
++                self.store._pinned_conn = previous_pin;
++            }
+         }
+     }
+ }
+diff --git a/jac/jaclang/server/identity/impl/user_manager.impl.jac b/jac/jaclang/server/identity/impl/user_manager.impl.jac
+index 1c95b60..5b4a4e4 100644
+--- a/jac/jaclang/server/identity/impl/user_manager.impl.jac
++++ b/jac/jaclang/server/identity/impl/user_manager.impl.jac
+@@ -44,22 +44,73 @@ impl UserManager.create_internal_user(
+ impl UserManager.ensure_internal_user(
+     username: str, password: str, role: str = 'user'
+ ) -> dict[str, any] {
+-    existing = self.find_user_by_identity(username);
+-    if existing {
+-        user_id = str(existing.get('user_id') or '');
+-        if role != 'user' and self.get_user_role(user_id) != role {
+-            self.set_user_role(user_id, role);
++    store: any = self._identity_storage.store;
++    with store._lock {
++        if store.in_txn() {
++            raise RuntimeError('Internal identity provisioning requires its own transaction');
+         }
+-        return existing;
+-    }
+-    created = self.create_internal_user(username, password, role);
+-    if 'error' in created {
+-        again = self.find_user_by_identity(username);
+-        if again {
+-            return again;
++        conn: any = store._main();
++        previous_pin: any = store._pinned_conn;
++        if previous_pin is not None and previous_pin is not conn {
++            raise RuntimeError('Pinned database connection was replaced');
++        }
++        previous_timeout = conn.run('SHOW lock_timeout')[0][0];
++        acquired = False;
++        failed = False;
++        store._pinned_conn = conn;
++        try {
++            conn.run("SELECT set_config('lock_timeout', :timeout, false)", timeout='10s');
++            conn.run("SELECT pg_advisory_lock(hashtext('jac:identity_bootstrap'))");
++            acquired = True;
++            existing = self.find_user_by_identity(username);
++            if existing {
++                user_id = str(existing.get('user_id') or '');
++                if role != 'user' and self.get_user_role(user_id) != role {
++                    self.set_user_role(user_id, role);
++                }
++                return existing;
++            }
++            created = self.create_internal_user(username, password, role);
++            if 'error' in created {
++                again = self.find_user_by_identity(username);
++                if again {
++                    return again;
++                }
++            }
++            return created;
++        } except BaseException {
++            failed = True;
++            raise;
++        } finally {
++            try {
++                if not acquired or store.in_txn() {
++                    conn.run('ROLLBACK');
++                    if store._conn is conn {
++                        store._in_txn = False;
++                        store._isolation = None;
++                    }
++                }
++                conn.run("SELECT set_config('lock_timeout', :timeout, false)", timeout=previous_timeout);
++                if acquired and not conn.run("SELECT pg_advisory_unlock(hashtext('jac:identity_bootstrap'))")[0][0] {
++                    raise RuntimeError('Internal identity provisioning lock was lost');
++                }
++                if store._conn is not conn {
++                    raise RuntimeError('Pinned database connection was replaced');
++                }
++            } except BaseException {
++                try {
++                    store._discard_main(conn);
++                } except BaseException {}
++                if not failed {
++                    raise;
++                }
++            } finally {
++                    if store._pinned_conn is conn {
++                    store._pinned_conn = previous_pin;
++                }
++            }
+         }
+     }
+-    return created;
+ }
+ 
+ impl UserManager.aget_root_id(user_id: str) -> str | None {
+diff --git a/jac/jaclang/server/identity/user_manager.jac b/jac/jaclang/server/identity/user_manager.jac
+index d1c2bf0..2f1f565 100644
+--- a/jac/jaclang/server/identity/user_manager.jac
++++ b/jac/jaclang/server/identity/user_manager.jac
+@@ -3,7 +3,6 @@ import from contextvars { ContextVar }
+ import from datetime { UTC, datetime, timedelta }
+ import from jaclang.runtime.constants { Constants as Con }
+ import from jaclang.server.identity.identity_storage {
+-    IdentityStorage,
+     PgIdentityStorage
+ }
+ import from jaclang.server.serving.authcrypt {
+@@ -30,7 +29,7 @@ obj UserManager {
+     has base_path: str = '',
+         provision_unknown_users: bool = False,
+         ADMIN_USER_ID: str = '00000000-0000-0000-0000-000000000000',
+-        _identity_storage: IdentityStorage postinit;
++        _identity_storage: PgIdentityStorage postinit;
+ 
+     def postinit -> None;
+     def create_user(username: str, password: str) -> dict[str, any];
+diff --git a/jac/jaclang/server/impl/server.impl.jac b/jac/jaclang/server/impl/server.impl.jac
+index 59ab77e..dcd8741 100644
+--- a/jac/jaclang/server/impl/server.impl.jac
++++ b/jac/jaclang/server/impl/server.impl.jac
+@@ -1,4 +1,5 @@
+ import asyncio;
++import from uuid { UUID }
+ import from jaclang.runtime.object_interop { fields as record_fields, is_record }
+ import from jaclang.runtime.object_model { MISSING }
+ import inspect;
+@@ -208,8 +209,39 @@ async def _run_function_with_occ(
+             call_token = ctx.call_state.set(CallState());
+             call_state = ctx.call_state.get();
+             try {
+-                outcome = await run_attempt(call_state, ctx);
+-                ctx.mem.unit_exit();
++                try {
++                    outcome = await run_attempt(call_state, ctx);
++                    ctx.mem.unit_exit();
++                } except Exception as e {
++                    # Queries can fail before Session.commit(); inspect wrapped errors too.
++                    cur: (BaseException | None) = e;
++                    seen = 0;
++                    while cur is not None and seen < 8 {
++                        c: BaseException = cur;
++                        for arg in getattr(c, 'args', ()) {
++                            if isinstance(arg, dict) {
++                                if arg.get('C') == '08006' {
++                                    # The database may already have committed this body.
++                                    ctx.mem.abort();
++                                    ctx.pending_effects.clear();
++                                    ctx.read_versions.clear();
++                                    ctx.diagnostics.clear();
++                                    return {
++                                        'error': 'The request outcome is uncertain; check its state before retrying.',
++                                        'error_code': 'commit_uncertain',
++                                        'http_status': 503
++                                    };
++                                }
++                                if arg.get('C') in ('40001', '40P01', '55P03') {
++                                    raise WriteConflict(anchor_id=UUID(int=0));
++                                }
++                            }
++                        }
++                        cur = c.__cause__ or c.__context__;
++                        seen += 1;
++                    }
++                    raise;
++                }
+                 settled = True;
+                 return outcome;
+             } except ReadOnlyRetry as rr {
+diff --git a/jac/jaclang/server/impl/session.impl.jac b/jac/jaclang/server/impl/session.impl.jac
+index 43238e0..c7cea77 100644
+--- a/jac/jaclang/server/impl/session.impl.jac
++++ b/jac/jaclang/server/impl/session.impl.jac
+@@ -279,7 +279,7 @@ def _is_serialization_conflict(e: Exception) -> bool {
+         c: BaseException = cur;
+         for arg in getattr(c, 'args', ()) {
+             if isinstance(arg, dict)
+-                and arg.get('C') in ('40001', '40P01', '55P03', '08006') {
++                and arg.get('C') in ('40001', '40P01', '55P03') {
+                 return True;
+             }
+         }
+@@ -318,6 +318,7 @@ impl Session.postinit -> None {
+     self._fetch_count = 0;
+     self._flushed_hash = {};
+     self._txn_changed = set();
++    self._txn_expected_versions = {};
+     self._active_units = 0;
+     self._flushing = None;
+     self._read_scopes = 0;
+@@ -398,7 +399,17 @@ impl Session.data_location -> (str | None) {
+ }
+ 
+ 
++impl Session._note_read(id: UUID) -> None {
++    import from jaclang { JacRuntimeInterface as JacRI }
++    ctx = JacRI.peek_context();
++    if ctx is not None and ctx.mem is self {
++        ctx.read_ids.add(id);
++    }
++}
++
++
+ impl Session.get(id: UUID) -> (Anchor | None) {
++    self._note_read(id);
+     if id in self._deleted {
+         return None;
+     }
+@@ -423,6 +434,7 @@ impl Session.delete(id: UUID) -> None {
+ 
+ 
+ impl Session.`has(id: UUID) -> bool {
++    self._note_read(id);
+     if id in self._deleted {
+         return False;
+     }
+@@ -476,6 +488,7 @@ impl Session.batch_get(ids: list[UUID]) -> dict[UUID, Anchor] {
+     out: dict[UUID, Anchor] = {};
+     missing: list[UUID] = [];
+     for i in ids {
++        self._note_read(i);
+         if i in self._deleted {
+             continue;
+         }
+@@ -533,6 +546,7 @@ impl Session.commit(anchor: (Anchor | None) = None) -> None {
+                 }
+             }
+             self._txn_changed.clear();
++            self._txn_expected_versions.clear();
+         } else {
+             self._dirty.clear();
+             self._deleted.clear();
+@@ -543,25 +557,49 @@ impl Session.commit(anchor: (Anchor | None) = None) -> None {
+ 
+ 
+ impl Session.abort -> None {
+-    if self._store is not None {
+-        self._store.rollback();
++    try {
++        if self._store is not None {
++            self._store.rollback();
++        }
++    } finally {
++        self._evict_uncommitted();
++        self._txn_changed.clear();
++        self._txn_expected_versions.clear();
++        self._dirty.clear();
++        self._deleted.clear();
++        self._drop_snapshot_reads();
++        self._on_commit = [];
+     }
+-    self._evict_uncommitted();
+-    self._dirty.clear();
+-    self._deleted.clear();
+-    self._drop_snapshot_reads();
+-    self._on_commit = [];
+ }
+ 
+ 
+ impl Session._evict_uncommitted -> None {
+     import from jaclang.data.serializer { Serializer }
++    failed = self._txn_changed.copy();
++    failed.update(self._txn_expected_versions.keys());
++    failed.update(self._dirty.keys());
++    failed.update(self._deleted);
++    import from jaclang { JacRuntimeInterface as JacRI }
++    ctx = JacRI.peek_context();
++    if ctx is not None and ctx.mem is self {
++        failed.update(ctx.read_ids);
++        failed.update(ctx.read_versions.keys());
++        ctx.read_ids.clear();
++        ctx.read_versions.clear();
++        ctx.pending_effects.clear();
++    }
++    evicted: set[UUID] = set();
++    # Deleted anchors are absent from memory but still have cached versions.
++    for id in failed {
++        self._flushed_hash.pop(id, None);
++        self._version_seen.pop(id, None);
++    }
+     for (id, anchor) in list(self.__mem__.items()) {
+         if not anchor.persistent or not anchor.is_populated() {
+             continue;
+         }
+         known = self._flushed_hash.get(id);
+-        dirty = known is None;
++        dirty = id in failed or known is None;
+         if not dirty {
+             try {
+                 dirty = Serializer._compute_hash(anchor) != known;
+@@ -576,8 +614,21 @@ impl Session._evict_uncommitted -> None {
+             }
+             self.__mem__.pop(id, None);
+             self._flushed_hash.pop(id, None);
++            self._version_seen.pop(id, None);
++            evicted.add(id);
+         }
+     }
++    # Child requests share the Session and inherit their parent's root pointers.
++    # A pointer to an evicted root must not survive this request or the next one.
++    while ctx is not None and ctx.mem is self {
++        for field in ("_system_root", "_user_root", "_entry_node") {
++            cached_root = getattr(ctx, field, None);
++            if cached_root is not None and cached_root.id in evicted {
++                setattr(ctx, field, None);
++            }
++        }
++        ctx = ctx._parent;
++    }
+ }
+ 
+ 
+@@ -710,7 +761,8 @@ impl Session.read_scope_exit -> None {
+             logger.warning(
+                 f"read snapshot close failed; rolling back: {type(e).__name__}: {e}"
+             );
+-            self._rollback_quiet();
++            self.abort();
++            raise;
+         }
+         self._drop_snapshot_reads();
+     }
+@@ -729,14 +781,9 @@ impl Session.unit_exit -> None {
+             }
+             try {
+                 self.commit();
+-            } except WriteConflict {
+-                self._rollback_quiet();
++            } except Exception {
++                self.abort();
+                 raise;
+-            } except Exception as e {
+-                logger.warning(
+-                    f"unit close commit failed; rolling back: {type(e).__name__}: {e}"
+-                );
+-                self._rollback_quiet();
+             }
+         } finally {
+             if self._unit_stack {
+@@ -775,9 +822,23 @@ impl Session._rollback_quiet -> None {
+ 
+ 
+ impl Session._recover_conflict -> None {
++    import from jaclang { JacRuntimeInterface as JacRI }
++    ctx = JacRI.peek_context();
++    if ctx is not None and ctx.mem is self and ctx.call_state.get(None) is not None {
++        # Values already used by this body must be reread by the served retry loop.
++        raise WriteConflict(anchor_id=UUID(int=0));
++    }
+     self._rollback_quiet();
+-    for id in list(self._txn_changed) {
++    ids = self._txn_changed.copy();
++    ids.update(self._txn_expected_versions.keys());
++    for id in ids {
++        if id in self._txn_expected_versions {
++            self._version_seen[id] = self._txn_expected_versions[id];
++        }
+         if id in self.__mem__ {
++            if id in self._txn_expected_versions {
++                self.__mem__[id].version = self._txn_expected_versions[id];
++            }
+             self._flushed_hash.pop(id, None);
+             self._dirty[id] = None;
+         } else {
+@@ -862,6 +923,11 @@ impl Session._flush_locked(full: bool) -> None {
+             self.ensure_writable_txn();
+         }
+         if rows {
++            # Retain the first expected version through every flush until COMMIT.
++            # A rollback must never retry against an uncommitted advanced version.
++            for row in rows {
++                self._txn_expected_versions.setdefault(row.id, row.version);
++            }
+             self._store.upsert(rows);
+             for (i, (anchor, h)) in enumerate(pending) {
+                 aid = anchor.ensure_id();
+@@ -929,13 +995,16 @@ impl Session._serialize(anchor: Anchor, props: (any | None) = None) -> AnchorRow
+ 
+ 
+ impl Session._materialize(row: AnchorRow) -> (Anchor | None) {
++    self._note_read(row.id);
+     import from functools { partial }
+     import from jaclang.data.serializer { Serializer }
+     existing = self.__mem__.get(row.id);
+     if existing is not None and existing.is_populated() {
+         return existing;
+     }
+-    got = Serializer.deserialize(row.props);
++    got = Serializer._deserialize_anchor(row.props, compute_hash=False)
++        if isinstance(row.props, dict) and row.props.get('__type__') in ('Anchor', 'NodeAnchor', 'EdgeAnchor')
++        else Serializer.deserialize(row.props);
+     if not isinstance(got, Anchor) {
+         logger.warning(
+             f"could not materialize anchor {row.id} ({row.arch_type}); skipping"
+@@ -958,9 +1027,9 @@ impl Session._materialize(row: AnchorRow) -> (Anchor | None) {
+         anchor.version = row.version;
+     }
+     self._version_seen[row.id] = row.version;
+-    self.__mem__[row.id] = anchor;
+     self._flushed_hash[row.id] = _persist_hash(anchor);
+     anchor.hash = self._flushed_hash[row.id];
++    self.__mem__[row.id] = anchor;
+     if self._store is not None
+         and self._store.txn_isolation() is TxnIsolation.SNAPSHOT_READ_ONLY {
+         self._snapshot_reads.add(row.id);
+@@ -994,6 +1063,7 @@ impl Session._load_edges(nd: NodeAnchor) -> list[EdgeAnchor] {
+     }
+     edges: list[EdgeAnchor] = [];
+     for eid in ids {
++        self._note_read(eid);
+         stub = Serializer._id_to_stub(EdgeAnchor, str(eid));
+         if isinstance(stub, EdgeAnchor) {
+             edges.append(stub);
+diff --git a/jac/jaclang/server/session.jac b/jac/jaclang/server/session.jac
+index 5998e1e..89fd819 100644
+--- a/jac/jaclang/server/session.jac
++++ b/jac/jaclang/server/session.jac
+@@ -127,6 +127,7 @@ obj Session(Memory) {
+         _lease: (RuntimeLease | None) = None,
+         _flushed_hash: dict[UUID, int] postinit,
+         _txn_changed: set[UUID] postinit,
++        _txn_expected_versions: dict[UUID, int] postinit,
+         _fetch_count: int postinit,
+         _active_units: int postinit,
+         _flushing: (int | None) postinit,
+@@ -158,6 +159,7 @@ obj Session(Memory) {
+     def _boot_store -> None;
+     def data_location -> (str | None);
+     def __repr__ -> str;
++    def _note_read(id: UUID) -> None;
+     def get(id: UUID) -> (Anchor | None);
+     def delete(id: UUID) -> None;
+     def close -> None;

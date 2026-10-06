@@ -5,3 +5,5 @@
 # Preserve the recovered source's CRLF while checking real whitespace mistakes.
 *.jac whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 *.toml whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+# Reviewed proof inputs retain the exact hashed bytes and original line endings.
+runtime-proof/inputs/** -text

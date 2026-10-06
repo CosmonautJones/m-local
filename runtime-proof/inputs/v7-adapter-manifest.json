@@ -1,0 +1,22 @@
+{
+  "status": "staged_not_executed",
+  "scope": "Frozen new source adapters only, without generated output or historical receipts",
+  "files": {
+    "work/identity-runtime-v7/run-source-cold-compile-v7.py": {
+      "sha256": "2865dcba8da5b4080b50a50b49b3f7c6f3035412a7e1e82cc9d0fda6ae621057",
+      "bytes": 8758
+    },
+    "work/identity-runtime-v7/run-source-bootstrap-v7.py": {
+      "sha256": "e5eb1b6c88b5d27ae8e8d508f7105b1cfc8e61521e21db11e88089d79b2dbfdd",
+      "bytes": 11573
+    },
+    "work/identity-runtime-v7/run-source-matrix-v7.py": {
+      "sha256": "d2b5de2314a083a03bb46c4fbd4aa61e8318bdae7b8cac3e9d4c5ffdfaae7f27",
+      "bytes": 15207
+    },
+    "work/identity-runtime-v7/run-source-stage-v7.py": {
+      "sha256": "6c30ecb62bee5eaf7f2fe7b76fcf3eeeac7cc3a078a09d3fcfa20d50043e4540",
+      "bytes": 8599
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "status": "declared_before_execution",
+  "jac_release": "https://github.com/jaseci-labs/jac/releases/tag/v0.37.23",
+  "runtime_base": "58cb97eb75cdff8b5ee78f4094ca2be16376601c",
+  "application_revision": "b0f2321016ba004b3a77db6fe05828080c755cd3",
+  "application_digest": "71f73c9482f65ae41ca9521650f22bf5d226bc535c39379ef16ddce465341f42",
+  "downloads": {
+    "jac": {
+      "url": "https://github.com/jaseci-labs/jac/releases/download/v0.37.23/jac-0.37.23-linux-x86_64",
+      "bytes": 110690032,
+      "sha256": "2c3c697616b08516caf01704571e7e7020f4b294cd2bef7f04e8ef1ceec9d6ad"
+    },
+    "jacpython": {
+      "url": "https://github.com/jaseci-labs/jac/releases/download/v0.37.23/jac-0.37.23-linux-x86_64-jacpython",
+      "bytes": 113192253,
+      "sha256": "198225fb91707f48461f3fec1684d444ab0fd7b5a1e0913f0a0a8f11c9d02542"
+    },
+    "postgres": {
+      "url": "https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64/18.6.0/embedded-postgres-binaries-linux-amd64-18.6.0.jar",
+      "bytes": 15119738,
+      "sha256": "008ee189eaa7ca2b58bd01dd950291e638b998392cf982297acd4779ec898ac1",
+      "sha256_source": "https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64/18.6.0/embedded-postgres-binaries-linux-amd64-18.6.0.jar.sha256",
+      "sha1": "0a36625fa44dc0d65cb1cee6041e468d96bdbb8d",
+      "distribution": "linux-amd64-18.6.0"
+    }
+  },
+  "scope": "Only public official Jac release and pinned embedded Zonky distribution; no downloads or runtime execution performed by this manifest"
+}
