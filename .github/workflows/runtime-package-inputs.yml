@@ -11,6 +11,8 @@ on:
       - 'runtime-proof/test-package-inputs.py'
       - 'runtime-proof/verify-package-preflight.py'
       - 'runtime-proof/test-package-preflight.py'
+      - 'runtime-proof/verify-source-origin.py'
+      - 'runtime-proof/test-source-origin.py'
 
 permissions:
   contents: read
@@ -30,3 +32,5 @@ jobs:
         run: python3 -B runtime-proof/test-package-inputs.py
       - name: Check source and package commitment preflight
         run: python3 -I -B runtime-proof/test-package-preflight.py
+      - name: Check authenticated source job origin boundaries
+        run: python3 -I -B runtime-proof/test-source-origin.py
