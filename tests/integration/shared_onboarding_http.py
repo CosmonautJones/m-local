@@ -104,6 +104,7 @@ def main():
 
     def start(index):
         with socket.socket() as probe:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             probe.bind(('127.0.0.1', ports[index]))
         log_path = workspace / ('api-' + str(len(processes)) + '.log')
         with log_path.open('wb') as log:
@@ -225,6 +226,7 @@ def main():
             active[1].wait(timeout=15)
             stop_process(active[1])
             check(owners[0].call('current_session')['role'] == 'merchant', 'first API remains usable after the idle peer crashes')
+            PHASE = 'replacement native API startup'
             start(1)
             apis[1] = ready(1)
             owners[1] = Api(apis[1].origin, token)
@@ -295,5 +297,6 @@ if __name__ == '__main__':
     try:
         main()
     except (OSError, RuntimeError, AssertionError, ValueError, KeyError, subprocess.SubprocessError) as error:
-        print(json.dumps({'status': 'failed', 'phase': PHASE, 'error': type(error).__name__}), flush=True)
+        print(json.dumps({'status': 'failed', 'phase': PHASE, 'error': type(error).__name__,
+                          'errno': getattr(error, 'errno', None)}), flush=True)
         raise SystemExit(1) from None

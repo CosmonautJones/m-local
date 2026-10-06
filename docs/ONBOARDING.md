@@ -241,7 +241,12 @@ native Jac APIs, one private graph database and a common onboarding directory.
 It delivers codes through a local TLS SMTP sink, then checks cross-API sign-in,
 single-use codes, shared sending budgets, business approval/activation and draft
 visibility after replacing an idle crashed API. The dedicated workflow runs this
-fixture; its first native execution is pending. The sink accepts only explicitly
+fixture. Its [first native run](https://github.com/CosmonautJones/m-local/actions/runs/37419329648)
+passed sign-in, approval and cross-API writes, then failed during replacement
+startup. A small Linux socket reproduction showed the port probe rejected a
+recently closed connection; it now uses address reuse, matching the existing
+recovery verifier. The corrected full journey is pending execution.
+The sink accepts only explicitly
 allowed fictional recipients and never forwards email. This does not establish
 real inbox delivery, public ingress, independent-host replication, cold seed
 deduplication, browser capacity or safety during an in-flight crash.
