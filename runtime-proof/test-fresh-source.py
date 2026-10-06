@@ -495,5 +495,45 @@ class FreshSourceTests(unittest.TestCase):
                             check(runtime, cache, target)
 
 
+    def test_matrix_storage_binding_matches_producer_and_retains_mount_guards(self):
+        producer = ast.parse((ROOT / 'inputs/work/identity-runtime-v3/run-identity-runtime-regressions.py').read_text())
+        receipt = next(node.value for node in producer.body if isinstance(node, ast.Assign) and
+                       any(isinstance(target, ast.Name) and target.id == 'receipt' for target in node.targets))
+        binding = next(item for item in receipt.keywords if item.arg == 'storage_binding')
+        shape = ast.Module(body=[ast.Assign(targets=[ast.Name(id='matrix_inner', ctx=ast.Store())],
+                           value=ast.Call(func=ast.Name(id='dict', ctx=ast.Load()), args=[], keywords=[binding]))],
+                           type_ignores=[])
+        main = next(node for node in ast.parse((ROOT / 'run-fresh-source.py').read_text()).body
+                    if isinstance(node, ast.FunctionDef) and node.name == 'main')
+        body = next(node.body for node in ast.walk(main) if isinstance(node, (ast.Try, ast.FunctionDef)) and
+                    any(isinstance(item, ast.Assign) and any(isinstance(target, ast.Name) and target.id == 'storage'
+                        for target in item.targets) for item in node.body))
+        start = next(index for index, node in enumerate(body) if isinstance(node, ast.Assign) and
+                     any(isinstance(target, ast.Name) and target.id == 'storage' for target in node.targets))
+        end = next(index for index, node in enumerate(body[start:], start) if isinstance(node, ast.Expr) and
+                   isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name) and
+                   node.value.func.id == 'verify_leaf_controls')
+        guard = compile(ast.Module(body=body[start:end], type_ignores=[]), '<actual-matrix-storage-guard>', 'exec')
+        root = Path('/var/tmp/owned-image')
+        def fail(label):
+            raise RuntimeError(label)
+        cases = ('valid', 'foreign-root', 'not-mounted', 'symlink', 'wrong-owner', 'public-mode')
+        for case in cases:
+            with self.subTest(case=case):
+                values = {'storage': {'storage_root': str(root if case != 'foreign-root' else root.parent / 'foreign')},
+                          'Path': Path, 'E_ROOT': root, 'fail': fail,
+                          'is_mount': lambda path: case != 'not-mounted'}
+                exec(compile(ast.fix_missing_locations(shape), '<actual-matrix-receipt-key>', 'exec'), values)
+                metadata = SimpleNamespace(st_uid=0 if case == 'wrong-owner' else 65534,
+                                           st_mode=0o40755 if case == 'public-mode' else 0o40700)
+                with patch.object(Path, 'stat', lambda path: metadata), \
+                     patch.object(Path, 'is_symlink', lambda path: case == 'symlink'):
+                    if case == 'valid':
+                        exec(guard, values)
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, '^matrix storage mount gate$'):
+                            exec(guard, values)
+
+
 if __name__ == '__main__':
     unittest.main()

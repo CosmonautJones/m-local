@@ -7,7 +7,10 @@ itself. The application stays pinned to official Jac 0.37.23.
 `inputs/public-source-manifest.json` binds the reviewed proof sources, patches
 and 17 modified Jac implementation files. These are the actual files the fresh
 fork must byte-match before compile, bootstrap and matrix execution.
-`inputs/v7-adapter-manifest.json` binds the four new finite source adapters.
+`inputs/v8-adapter-manifest.json` binds the four current finite source adapters.
+The v8 matrix binds the frozen loader to the fresh fork after checking its
+original hash; every implementation and module containment assertion remains.
+The original v3 sources, v7 adapters and v7 manifest remain unchanged.
 No historical caches, accounts, graph state, private photos or logs are inputs.
 The input directory preserves its original bytes in Git, including line endings
 and patch context whitespace; its manifests verify the staged blobs before push.

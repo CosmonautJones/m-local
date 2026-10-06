@@ -11,6 +11,8 @@ on:
       - 'runtime-proof/run-fresh-source.py'
       - 'runtime-proof/test-fresh-source.py'
       - 'runtime-proof/verify-source-handoff.py'
+      - 'runtime-proof/verify-source-handoff-v8.py'
+      - 'runtime-proof/test-source-matrix-v8.py'
       - 'runtime-proof/test-source-handoff.py'
       - 'runtime-proof/test-source-export.py'
       - 'runtime-proof/test-source-failure.py'
@@ -55,6 +57,9 @@ jobs:
       - name: Check sanitized source failure context
         run: python3 -B runtime-proof/test-source-failure.py
 
+      - name: Check fresh matrix loader provenance binding
+        run: python3 -I -B runtime-proof/test-source-matrix-v8.py
+
       - name: Run fresh source/bootstrap/matrix proof
         id: source
         env:
@@ -84,7 +89,7 @@ jobs:
         env:
           CONTRACT_SHA: ${{ steps.source.outputs.contract_sha256 }}
         run: |
-          python3 -B runtime-proof/verify-source-handoff.py \
+          python3 -I -B runtime-proof/verify-source-handoff-v8.py \
             --bundle runtime-proof/source-handoff-export --trusted-checkout "$GITHUB_WORKSPACE" \
             --expected-commit "$GITHUB_SHA" --expected-run-id "$GITHUB_RUN_ID" \
             --expected-contract-sha256 "$CONTRACT_SHA"

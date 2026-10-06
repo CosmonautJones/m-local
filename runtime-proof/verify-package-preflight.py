@@ -17,13 +17,13 @@ import sys
 
 
 MAX_FILE_BYTES = 1024 ** 2
-VERIFIER_SHA = '34a49d00a9cbbbc65e3b9e4e91a09e38ff33f75715bd6f36c528fa8820142fc1'
+VERIFIER_SHA = 'b8c92532e99a095f40b718a4a068330def7b47b31a78f00b8c09ff981b0a04fe'
 SOURCE_MANIFEST_SHA = 'f0ade58e7b59cc49eb5c3c3d0a6c8ca08c4f5b9804dc49ad5ea4f171cc4be037'
-ADAPTER_MANIFEST_SHA = '08f0a07fab0c63895d649d0c75835043417d260fe6f817047aaf5f1bec14064c'
+ADAPTER_MANIFEST_SHA = 'dc8a0e3f50f01d43d0e1654e94648d581c54b064b1a9b18ce204c467a7ccb7a8'
 PACKAGE_MANIFEST_SHA = '681d3cc0713d196d29f0e335a3454ed34e9cc6fa860afc0dbd30713681b81888'
 POLICY_MANIFEST_SHA = '9221e3af38924d04cc72f204512890dc3864697ac8ac40bf8eb9fa0843556ce0'
 SELF_PATH = 'runtime-proof/verify-package-preflight.py'
-VERIFIER_PATH = 'runtime-proof/verify-source-handoff.py'
+VERIFIER_PATH = 'runtime-proof/verify-source-handoff-v8.py'
 PACKAGE_PATH = 'runtime-proof/package-inputs/'
 SOURCE_CRITICAL = (
     'runtime-proof/run-fresh-source.py',
@@ -32,7 +32,7 @@ SOURCE_CRITICAL = (
     'runtime-proof/public-download-pins.json',
     'runtime-proof/JAC-LICENSE.txt',
     'runtime-proof/inputs/public-source-manifest.json',
-    'runtime-proof/inputs/v7-adapter-manifest.json',
+    'runtime-proof/inputs/v8-adapter-manifest.json',
 )
 
 
@@ -137,9 +137,9 @@ def verify_preflight(bundle, source_checkout, package_checkout, *, expected_sour
     producer = {name: committed_file(source, expected_source_commit, name) for name in SOURCE_CRITICAL}
     if (sha(producer[VERIFIER_PATH]) != VERIFIER_SHA or
             sha(producer['runtime-proof/inputs/public-source-manifest.json']) != SOURCE_MANIFEST_SHA or
-            sha(producer['runtime-proof/inputs/v7-adapter-manifest.json']) != ADAPTER_MANIFEST_SHA):
+            sha(producer['runtime-proof/inputs/v8-adapter-manifest.json']) != ADAPTER_MANIFEST_SHA):
         fail('trusted source pins')
-    for manifest_name in ('public-source-manifest.json', 'v7-adapter-manifest.json'):
+    for manifest_name in ('public-source-manifest.json', 'v8-adapter-manifest.json'):
         manifest = json.loads(producer['runtime-proof/inputs/' + manifest_name])
         for relative, metadata in manifest['files'].items():
             name = 'runtime-proof/inputs/' + relative

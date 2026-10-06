@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent
 CHECKOUT = ROOT.parent
-VERIFY_SPEC = importlib.util.spec_from_file_location('verify_source_handoff', ROOT / 'verify-source-handoff.py')
+VERIFY_SPEC = importlib.util.spec_from_file_location('verify_source_handoff', ROOT / 'verify-source-handoff-v8.py')
 VERIFY = importlib.util.module_from_spec(VERIFY_SPEC)
 VERIFY_SPEC.loader.exec_module(VERIFY)
 FIXTURE_SPEC = importlib.util.spec_from_file_location('test_source_handoff', ROOT / 'test-source-handoff.py')
@@ -56,7 +56,7 @@ class SourceExportTests(unittest.TestCase):
         live = {
             'runtime-proof/run-fresh-source.py': (ROOT / 'run-fresh-source.py').read_bytes(),
             'runtime-proof/kali-build-resources-v2.py': (ROOT / 'kali-build-resources-v2.py').read_bytes(),
-            'runtime-proof/verify-source-handoff.py': (ROOT / 'verify-source-handoff.py').read_bytes(),
+            'runtime-proof/verify-source-handoff-v8.py': (ROOT / 'verify-source-handoff-v8.py').read_bytes(),
         }
         if tamper:
             live[tamper] += b' injected blob mismatch'
@@ -138,7 +138,7 @@ class SourceExportTests(unittest.TestCase):
             ({'head': 'a' * 40}, 'source producer HEAD binding'),
         ]
         for source in ('runtime-proof/run-fresh-source.py', 'runtime-proof/kali-build-resources-v2.py',
-                       'runtime-proof/verify-source-handoff.py'):
+                       'runtime-proof/verify-source-handoff-v8.py'):
             failures.append(({'tamper': source}, 'source producer code binding'))
         for changes, label in failures:
             with self.subTest(changes=changes), self.assertRaisesRegex(RuntimeError, '^' + label + '$'):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused filesystem/schema tests for verify-source-handoff.py."""
+"""Focused filesystem/schema tests for verify-source-handoff-v8.py."""
 
 from pathlib import Path
 import hashlib
@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parent
-SPEC = importlib.util.spec_from_file_location('verify_source_handoff', ROOT / 'verify-source-handoff.py')
+SPEC = importlib.util.spec_from_file_location('verify_source_handoff', ROOT / 'verify-source-handoff-v8.py')
 VERIFY = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(VERIFY)
 
@@ -28,7 +28,7 @@ class SourceHandoffTests(unittest.TestCase):
     def setUp(self):
         self.checkout = ROOT.parent
         self.manifest = VERIFY._read_json(self.checkout / 'runtime-proof/inputs/public-source-manifest.json')
-        self.adapters = VERIFY._read_json(self.checkout / 'runtime-proof/inputs/v7-adapter-manifest.json')
+        self.adapters = VERIFY._read_json(self.checkout / 'runtime-proof/inputs/v8-adapter-manifest.json')
         self.commit = subprocess.check_output(['git', '-C', str(self.checkout), 'rev-parse', 'HEAD'], text=True).strip()
         self.temp = tempfile.TemporaryDirectory(dir=ROOT)
         self.bundle = Path(self.temp.name) / 'bundle'
@@ -67,7 +67,7 @@ class SourceHandoffTests(unittest.TestCase):
                                   checks=53, phase_count=None, interface_count=None,
                                   jacpython=VERIFY.JACPYTHON_SHA, source_override=True,
                                   cold_compile=cold_hash)
-        matrix = self._receipt('run-source-matrix-v7', matrix_result, None,
+        matrix = self._receipt('run-source-matrix-v8', matrix_result, None,
                                checks=None, phase_count=10, interface_count=2,
                                jacpython=None, source_override=None, cold_compile=None,
                                source_gate=bootstrap_result)
@@ -92,7 +92,7 @@ class SourceHandoffTests(unittest.TestCase):
     def _receipt(self, stage, result, cold_hash, *, checks, phase_count, interface_count,
                  jacpython, source_override, cold_compile, source_gate=None):
         adapter_path = {'run-source-bootstrap-v7': VERIFY.ADAPTER_PATHS[1],
-                        'run-source-matrix-v7': VERIFY.ADAPTER_PATHS[2]}[stage]
+                        'run-source-matrix-v8': VERIFY.ADAPTER_PATHS[2]}[stage]
         return {'status': 'passed', 'stage': stage,
                 'wrapper_sha256': self.adapters['files'][adapter_path]['sha256'],
                 'result_sha256': result, 'child_result_sha256': result,

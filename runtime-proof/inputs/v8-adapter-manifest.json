@@ -1,0 +1,22 @@
+{
+  "status": "staged_not_executed",
+  "scope": "Versioned fresh loader-root binding; frozen v3 source and v7 cold/bootstrap adapters unchanged",
+  "files": {
+    "work/identity-runtime-v7/run-source-cold-compile-v7.py": {
+      "sha256": "2865dcba8da5b4080b50a50b49b3f7c6f3035412a7e1e82cc9d0fda6ae621057",
+      "bytes": 8758
+    },
+    "work/identity-runtime-v7/run-source-bootstrap-v7.py": {
+      "sha256": "e5eb1b6c88b5d27ae8e8d508f7105b1cfc8e61521e21db11e88089d79b2dbfdd",
+      "bytes": 11573
+    },
+    "work/identity-runtime-v8/run-source-matrix-v8.py": {
+      "sha256": "4d5c18547af9cbec44a712eb0b59373d11da9c7adccf0920f6459a6126e57c89",
+      "bytes": 15955
+    },
+    "work/identity-runtime-v8/run-source-stage-v8.py": {
+      "sha256": "a19cc86d4cb6a6e8861a6065a742950d5f061771490f3bb3e8ef77c02f3d4c2f",
+      "bytes": 8596
+    }
+  }
+}

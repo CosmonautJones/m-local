@@ -55,7 +55,7 @@ class PackagePreflightTests(unittest.TestCase):
             destination = path / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             raw = PREFLIGHT_SOURCE.read_bytes() if relative == 'runtime-proof/verify-package-preflight.py' \
-                else git(REPO, 'show', 'HEAD:' + relative)
+                else git(REPO, 'show', ':' + relative)
             destination.write_bytes(raw)
         git(path, 'add', '--all')
         git(path, 'commit', '--quiet', '-m', 'fixture inputs')
@@ -67,15 +67,15 @@ class PackagePreflightTests(unittest.TestCase):
         source = root / 'producer'
         package = root / 'consumer'
         source_manifest = json.loads((REPO / 'runtime-proof/inputs/public-source-manifest.json').read_text())
-        adapter_manifest = json.loads((REPO / 'runtime-proof/inputs/v7-adapter-manifest.json').read_text())
+        adapter_manifest = json.loads((REPO / 'runtime-proof/inputs/v8-adapter-manifest.json').read_text())
         source_files = {
             'runtime-proof/run-fresh-source.py',
             'runtime-proof/kali-build-resources-v2.py',
-            'runtime-proof/verify-source-handoff.py',
+            'runtime-proof/verify-source-handoff-v8.py',
             'runtime-proof/public-download-pins.json',
             'runtime-proof/JAC-LICENSE.txt',
             'runtime-proof/inputs/public-source-manifest.json',
-            'runtime-proof/inputs/v7-adapter-manifest.json',
+            'runtime-proof/inputs/v8-adapter-manifest.json',
         }
         source_files.update('runtime-proof/inputs/' + relative for relative in source_manifest['files'])
         source_files.update('runtime-proof/inputs/' + relative for relative in adapter_manifest['files'])
@@ -84,7 +84,7 @@ class PackagePreflightTests(unittest.TestCase):
         package_manifest = json.loads((REPO / 'runtime-proof/package-inputs/public-package-manifest-v7.json').read_text())
         package_files = {
             'runtime-proof/verify-package-preflight.py',
-            'runtime-proof/verify-source-handoff.py',
+            'runtime-proof/verify-source-handoff-v8.py',
             'runtime-proof/package-inputs/public-package-manifest-v7.json',
             'runtime-proof/package-inputs/public-policy-manifest-v7.json',
         }
@@ -94,7 +94,7 @@ class PackagePreflightTests(unittest.TestCase):
         handoff = object.__new__(self.handoff.SourceHandoffTests)
         handoff.checkout = source
         handoff.manifest = self.handoff.VERIFY._read_json(source / 'runtime-proof/inputs/public-source-manifest.json')
-        handoff.adapters = self.handoff.VERIFY._read_json(source / 'runtime-proof/inputs/v7-adapter-manifest.json')
+        handoff.adapters = self.handoff.VERIFY._read_json(source / 'runtime-proof/inputs/v8-adapter-manifest.json')
         handoff.commit = source_commit
         handoff.bundle = root / 'bundle'
         handoff._make_bundle()
@@ -155,7 +155,7 @@ class PackagePreflightTests(unittest.TestCase):
         try:
             for relative in ('runtime-proof/run-fresh-source.py',
                              'runtime-proof/inputs/public-source-manifest.json',
-                             'runtime-proof/inputs/v7-adapter-manifest.json'):
+                             'runtime-proof/inputs/v8-adapter-manifest.json'):
                 path = fixture['source'] / relative
                 original = path.read_bytes()
                 path.write_bytes(path.read_bytes() + b'\nfixture tamper')
@@ -166,7 +166,7 @@ class PackagePreflightTests(unittest.TestCase):
 
     def test_consumer_self_verifier_manifest_and_package_tampering_is_rejected(self):
         cases = ('runtime-proof/verify-package-preflight.py',
-                 'runtime-proof/verify-source-handoff.py',
+                 'runtime-proof/verify-source-handoff-v8.py',
                  'runtime-proof/package-inputs/public-package-manifest-v7.json',
                  'runtime-proof/package-inputs/package-runtime-candidate-v7.py')
         fixture = self.fixture()
@@ -201,7 +201,7 @@ class PackagePreflightTests(unittest.TestCase):
         try:
             if os.name == 'posix':
                 target.unlink()
-                target.symlink_to(fixture['package'] / 'runtime-proof/verify-source-handoff.py')
+                target.symlink_to(fixture['package'] / 'runtime-proof/verify-source-handoff-v8.py')
                 self.assert_rejected(fixture)
             else:
                 with patch.object(fixture['preflight'].Path, 'is_symlink',
@@ -210,7 +210,7 @@ class PackagePreflightTests(unittest.TestCase):
             target.unlink()
             target.write_bytes(original)
             if os.name == 'posix':
-                source = fixture['package'] / 'runtime-proof/verify-source-handoff.py'
+                source = fixture['package'] / 'runtime-proof/verify-source-handoff-v8.py'
                 target.unlink()
                 os.link(source, target)
                 self.assert_rejected(fixture)
