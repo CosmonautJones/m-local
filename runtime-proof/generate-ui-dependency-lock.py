@@ -18,6 +18,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 
 
 ROOT = Path(__file__).absolute().parent
@@ -218,27 +219,60 @@ def validate_tarball(raw, integrity):
         _fail('dependency tarball integrity')
     try:
         with tarfile.open(fileobj=io.BytesIO(raw), mode='r:gz') as archive:
-            names = set()
+            names = {}
+            physical_members = 0
             expanded = 0
             for member in archive:
-                if len(names) >= MAX_ARCHIVE_MEMBERS:
+                physical_members += 1
+                if physical_members > MAX_ARCHIVE_MEMBERS:
                     _fail('dependency tarball paths')
                 name = member.name
-                if (not name or name in names or name != posixpath.normpath(name) or name.startswith('/') or
-                        not (name == 'package' or name.startswith('package/')) or '\\' in name or
-                        any(part in ('', '.', '..') for part in name.split('/'))):
+                parts = name.split('/')
+                normalized = posixpath.normpath(name)
+                if (not name or parts[0] != 'package' or name.startswith('/') or '\\' in name or
+                        any(ord(char) < 0x20 or ord(char) == 0x7f for char in name) or
+                        any(part in ('', '..') for part in parts) or
+                        not (normalized == 'package' or normalized.startswith('package/'))):
                     _fail('dependency tarball paths')
-                names.add(name)
                 if member.isdir():
+                    record = (member.type, stat.S_IMODE(member.mode))
+                    if normalized in names and names[normalized] != record:
+                        _fail('dependency tarball collision')
+                    names[normalized] = record
                     continue
                 if not member.isfile() or member.issym() or member.islnk() or member.size < 0:
                     _fail('dependency tarball member type')
                 expanded += member.size
                 if expanded > MAX_ARCHIVE_BYTES:
                     _fail('dependency tarball expanded size')
+                digest = hashlib.sha256()
+                length = 0
+                with archive.extractfile(member) as payload:
+                    while True:
+                        chunk = payload.read(min(1024 * 1024, member.size + 1 - length))
+                        if not chunk:
+                            break
+                        length += len(chunk)
+                        if length > member.size:
+                            _fail('dependency tarball member size')
+                        digest.update(chunk)
+                if length != member.size:
+                    _fail('dependency tarball member size')
+                record = (member.type, stat.S_IMODE(member.mode), length, digest.hexdigest())
+                if normalized in names and names[normalized] != record:
+                    _fail('dependency tarball collision')
+                names[normalized] = record
             if not names:
                 _fail('dependency tarball paths')
-    except (OSError, tarfile.TarError):
+            while True:
+                tail = archive.fileobj.read(1024 * 1024)
+                if archive.fileobj.tell() > MAX_ARCHIVE_BYTES + MAX_ARCHIVE_MEMBERS * 1024 + 10240:
+                    _fail('dependency tarball expanded size')
+                if not tail:
+                    break
+                if any(tail):
+                    _fail('dependency tarball trailing data')
+    except (OSError, EOFError, zlib.error, tarfile.TarError):
         _fail('dependency tarball archive')
 
 

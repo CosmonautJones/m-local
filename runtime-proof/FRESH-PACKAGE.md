@@ -88,6 +88,9 @@ receipt are exported. The reviewed graph must be frozen in committed inputs
 before the full suite consumes it; a newly generated artifact cannot replace
 those commitments automatically. This fixture does not run application browser
 tests or change the full package host requirements.
+Tar validation permits harmless `.` path aliases only inside the package root.
+Repeated normalized files must match in type, permissions, size and content;
+every physical entry still counts toward member and expanded-byte limits.
 
 The nine original compatibility, catalog, loader and native-gate sources are
 also frozen byte-for-byte in `native-inputs/native-suite-v5/`. Their manifest

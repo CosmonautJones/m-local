@@ -196,29 +196,44 @@ class PureTests(unittest.TestCase):
         self.assert_rejected(self._encode(value))
 
     @staticmethod
-    def make_tarball(name='package/package.json'):
-        output = io.BytesIO()
-        with tarfile.open(fileobj=output, mode='w:gz') as archive:
-            body = b'{"name":"fixture"}\n'
-            info = tarfile.TarInfo(name)
-            info.size = len(body)
-            info.mtime = 0
-            archive.addfile(info, io.BytesIO(body))
-        return output.getvalue()
+    def make_archive(entries):
+        tar_output = io.BytesIO()
+        with tarfile.open(fileobj=tar_output, mode='w') as archive:
+            for name, body, mode, kind in entries:
+                info = tarfile.TarInfo(name)
+                info.mode = mode
+                info.mtime = 0
+                if kind == 'file':
+                    info.size = len(body)
+                    archive.addfile(info, io.BytesIO(body))
+                elif kind == 'directory':
+                    info.type = tarfile.DIRTYPE
+                    archive.addfile(info)
+                else:
+                    info.type = tarfile.SYMTYPE
+                    info.linkname = body.decode('utf-8')
+                    archive.addfile(info)
+        return gzip.compress(tar_output.getvalue(), mtime=0)
 
-    @staticmethod
-    def make_link_tarball():
-        output = io.BytesIO()
-        with tarfile.open(fileobj=output, mode='w:gz') as archive:
-            info = tarfile.TarInfo('package/link')
-            info.type = tarfile.SYMTYPE
-            info.linkname = '../escape'
-            archive.addfile(info)
-        return output.getvalue()
+    @classmethod
+    def make_tarball(cls, name='package/package.json'):
+        return cls.make_archive([(name, b'{"name":"fixture"}\n', 0o644, 'file')])
+
+    @classmethod
+    def make_link_tarball(cls):
+        return cls.make_archive([('package/link', b'../escape', 0o644, 'symlink')])
 
     def test_validate_tarball_checks_integrity_size_and_safe_members(self):
         raw = self.make_tarball()
         self.assertIsNone(self.control.validate_tarball(raw, sha512_integrity(raw)))
+        malformed = {
+            'truncated gzip footer': raw[:-1],
+            'corrupt gzip CRC': raw[:-8] + bytes([raw[-8] ^ 1]) + raw[-7:],
+            'nonzero trailing data': raw + b'nonzero trailer',
+        }
+        for name, value in malformed.items():
+            with self.subTest(gzip=name), self.assertRaises(ValueError):
+                self.control.validate_tarball(value, sha512_integrity(value))
         tampered = bytearray(raw)
         tampered[-1] ^= 1
         with self.assertRaises(ValueError):
@@ -232,6 +247,43 @@ class PureTests(unittest.TestCase):
         unsafe_link = self.make_link_tarball()
         with self.assertRaises(ValueError):
             self.control.validate_tarball(unsafe_link, sha512_integrity(unsafe_link))
+        for name in ('package//dist/index.js', 'package/../escape', 'package/\x01bad',
+                     './package/dist/index.js'):
+            with self.subTest(path=name):
+                invalid_path = self.make_tarball(name)
+                with self.assertRaises(ValueError):
+                    self.control.validate_tarball(invalid_path, sha512_integrity(invalid_path))
+
+    def test_validate_tarball_allows_identical_normalized_duplicate_and_rejects_collisions(self):
+        body = b'console.log("fixture");\n'
+        valid_entries = (
+            ('package/dist/index.js', body, 0o644, 'file'),
+            ('package/./dist/index.js', body, 0o644, 'file'),
+        )
+        valid = self.make_archive(valid_entries)
+        self.assertIsNone(self.control.validate_tarball(valid, sha512_integrity(valid)))
+        with patch.object(self.control, 'MAX_ARCHIVE_MEMBERS', 1):
+            with self.assertRaises(ValueError):
+                self.control.validate_tarball(valid, sha512_integrity(valid))
+        with patch.object(self.control, 'MAX_ARCHIVE_BYTES', len(body) * 2 - 1):
+            with self.assertRaises(ValueError):
+                self.control.validate_tarball(valid, sha512_integrity(valid))
+        collisions = (
+            ('different body', (
+                ('package/dist/index.js', body, 0o644, 'file'),
+                ('package/./dist/index.js', body + b'!', 0o644, 'file'))),
+            ('different mode', (
+                ('package/dist/index.js', body, 0o644, 'file'),
+                ('package/./dist/index.js', body, 0o755, 'file'))),
+            ('different type', (
+                ('package/dist/index.js', body, 0o644, 'file'),
+                ('package/./dist/index.js', b'', 0o755, 'directory'))),
+        )
+        for name, entries in collisions:
+            with self.subTest(collision=name):
+                raw = self.make_archive(entries)
+                with self.assertRaises(ValueError):
+                    self.control.validate_tarball(raw, sha512_integrity(raw))
 
     def test_safe_environment_scrubs_private_values_and_forces_cache_policy(self):
         runner = {'minimal_environment': lambda: {
