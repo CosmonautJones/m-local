@@ -12,6 +12,15 @@ artifact retrieval, downloads, storage provisioning or compiler execution.
 The parent independently enforces Ubuntu 24.04, systemd, cgroup v2, root
 provisioning, non-WSL, fresh storage and all bounded worker controls.
 
+After provisioning storage and before runtime downloads or compiler work,
+the parent runs the pinned source-isolation control on fresh owned fixtures.
+It proves readable baselines, four permission-denied operations under
+UID/GID 65534 with zero capabilities, and exact restoration of directory
+ownership, permissions, inode and contents. The separate package-input
+workflow exercises this control on a small disposable Linux filesystem.
+This fixture result does not prove candidate/source isolation throughout
+application compatibility or native execution; those remain separate gates.
+
 The manual defaults bind the reviewed successful source commit
 `990c7b33c920e6a93431d34a01df7b8c87c432ba` and run `37477834755`.
 The parent authenticates their exact successful job and unexpired artifact,

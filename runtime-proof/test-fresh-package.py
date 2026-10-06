@@ -317,6 +317,9 @@ class FreshPackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'package helper pin'):
             PACKAGE.load_committed(preflight, 'runtime-proof/check-official-package-cache.py', 'a' * 40,
                                    pin=sha(b'cache helper source'))
+        with self.assertRaisesRegex(ValueError, 'package helper pin'):
+            PACKAGE.load_committed(preflight, 'runtime-proof/run-fresh-source-isolation.py', 'a' * 40,
+                                   pin=PACKAGE.SOURCE_ISOLATION_SHA)
         marker = b"root = Path('/var/tmp/m-local-build-e-drive-01a1050e/identity-type-source-v3-6c9r0m6y/fork').resolve()"
         with self.assertRaisesRegex(ValueError, 'loader source binding'):
             PACKAGE.adapt_loader(marker + marker, Path('fork'))

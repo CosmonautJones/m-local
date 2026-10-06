@@ -24,6 +24,7 @@ ORIGIN_SHA = '1bd1597d02e289e0931375de4e9abecd34a2bc7775564bd08c668b82a3c0e30a'
 DOWNLOAD_SHA = '8860ccc2b05ce5e21a4f1dc18ce885de25e6e537a88de608b373b791304a37ed'
 CACHE_CHECK_SHA = '4aefeb54a64577594b2408548c7a6a2e3843e6184440bc56947e7e54651427a2'
 CLASSIFIER_CONTROL_SHA = '242e1aefd09969e07fd557c5737cc6957fafd97920ba8e069f20b5c517bdf518'
+SOURCE_ISOLATION_SHA = '5b47f940cb4d7e939f987cf07c7f84a5d4b7e8ce2764a9b12a7ae4a23c250f6d'
 RECIPE_SHA = 'ec820c414d5a83d498f894eddcee105d5eb3e287a030c2d6b87045fe7d32129f'
 VERIFIER_SHA = '9f7acdfd45c3a66913c8c3c9205f3afc8b00801147b1082e2af329a17f27d8de'
 CLASSIFIER_SHA = '33dd3dbe88aadb16317f60bd518430225a7a8ef466596c70271b16371006f363'
@@ -351,6 +352,14 @@ def main(argv=None):
     try:
         probe_path, probe = runner['run_probe'](workspace)
         runner['mount_image']()
+        isolation_control = load_committed(preflight, 'runtime-proof/run-fresh-source-isolation.py',
+                                           args.expected_package_commit, pin=SOURCE_ISOLATION_SHA)
+        isolation_directory, isolation_identity = fresh_mount(runner, 'm-local-source-isolation-control-v1-')
+        isolation = isolation_control['run_control'](preflight, runner, isolation_directory,
+                                                    args.expected_package_commit, remaining_seconds(deadline, 75))
+        mount_identity(isolation_directory, runner['E_ROOT'], 'm-local-source-isolation-control-v1-', isolation_identity)
+        if isolation.get('status') != 'passed':
+            fail('source isolation fixture control')
         runner['prepare_task'](runner['CANONICAL_TASK'], manifest, adapters, workspace / 'checkout.log')
         official, materialized = runner['materialize_runtime'](workspace, pins, workspace / 'runtime.log')
         old, fork = runner['prepare_forks'](workspace, manifest, workspace / 'forks.log')
@@ -456,12 +465,19 @@ def main(argv=None):
             expected_official_cache_receipt_sha256=preflight['sha'](official_cache_raw),
             expected_official_cache_code_sha256=preflight['sha'](cache_code))
         remaining_seconds(deadline, 1)
+        mount_identity(isolation_directory, runner['E_ROOT'], 'm-local-source-isolation-control-v1-', isolation_identity)
+        if regular_hash(preflight, isolation['receipt_path'], maximum=1024 ** 2)[0] != isolation['receipt_sha256']:
+            fail('source isolation fixture receipt changed')
         summary = dict(accepted, source=source_gate['source'], source_job_id=authenticated['job_id'],
                        source_artifact_id=authenticated['artifact_id'],
                        source_archive_sha256=authenticated['artifact_digest'],
                        executed_parent_sha256=preflight['sha'](parent_raw),
                        package_commit=args.expected_package_commit, source_commit=args.expected_source_commit,
                        runner_controls_receipt_sha256=runner['digest'](probe_path),
+                       source_isolation_control_code_sha256=SOURCE_ISOLATION_SHA,
+                       source_isolation_fixture_receipt_sha256=isolation['receipt_sha256'],
+                       source_isolation_fixture_helper_sha256=isolation['helper_sha256'],
+                       source_isolation_fixture_probe_sha256=isolation['probe_sha256'],
                        host_cpu_count=host_cpus, minimum_host_memory_bytes=MIN_HOST_MEMORY,
                        controls_confirmed_before_workload=assembly['controls_confirmed_before_workload'],
                        assembly_elapsed_limit_seconds=ASSEMBLY_SECONDS,
