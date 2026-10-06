@@ -1,4 +1,5 @@
 import ast
+import hashlib
 import json
 import io
 import os
@@ -155,6 +156,45 @@ class FreshSourceTests(unittest.TestCase):
             self.assertIn((target, 0o755), modes)
             if os.name == 'posix':
                 self.assertEqual(target.stat().st_mode & 0o777, 0o755)
+
+    def test_patch_apply_reads_verified_task_copies(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            workspace = Path(directory)
+            task, image = workspace / 'task', workspace / 'image'
+            image.mkdir()
+            copies = [task / 'outputs/identity-bootstrap-source-v2/source-inputs/runtime.patch',
+                      task / 'work/identity-runtime-v3/runtime.patch']
+            for path, value in zip(copies, [b'old patch', b'current patch']):
+                path.parent.mkdir(parents=True)
+                path.write_bytes(value)
+            applied = []
+
+            class AppliedBoth(Exception):
+                pass
+
+            def scoped_command(label, command, **kwargs):
+                if command[1] == 'clone':
+                    Path(command[-1]).mkdir()
+                if command[-1] == 'HEAD':
+                    log = workspace / 'revision.log'
+                    log.write_text('base\n')
+                    return {'log_path': str(log)}
+                if 'apply' in command:
+                    self.assertEqual(Path(command[-1]), copies[len(applied)])
+                    applied.append(Path(command[-1]))
+                    if len(applied) == 2:
+                        raise AppliedBoth()
+
+            prepare = runner_function('prepare_forks', {'Path': Path, 'E_ROOT': image, 'CANONICAL_TASK': task,
+                'INPUTS': workspace / 'unavailable-checkout', 'os': SimpleNamespace(chown=lambda *args: None),
+                'minimal_environment': lambda: {}, 'scoped_command': scoped_command,
+                'JAC_REPOSITORY': 'public-fixture', 'JAC_BASE': 'base',
+                'PATCH_BEFORE': hashlib.sha256(copies[0].read_bytes()).hexdigest(),
+                'PATCH_AFTER': hashlib.sha256(copies[1].read_bytes()).hexdigest(),
+                'digest': lambda path: hashlib.sha256(path.read_bytes()).hexdigest()})
+            with self.assertRaises(AppliedBoth):
+                prepare(workspace, {}, workspace / 'private.log')
+            self.assertEqual(applied, copies)
 
 
 if __name__ == '__main__':

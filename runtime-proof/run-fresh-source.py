@@ -455,8 +455,8 @@ def prepare_forks(workspace, manifest, log):
                    cwd=parent, environment=environment, workspace=workspace, timeout=600)
     scoped_command('current source fork clone', ['git', 'clone', '--quiet', '--no-local', str(base), str(current)],
                    cwd=parent, environment=environment, workspace=workspace, timeout=600)
-    old_patch = INPUTS / 'outputs/identity-bootstrap-source-v2/source-inputs/runtime.patch'
-    current_patch = INPUTS / 'work/identity-runtime-v3/runtime.patch'
+    old_patch = CANONICAL_TASK / 'outputs/identity-bootstrap-source-v2/source-inputs/runtime.patch'
+    current_patch = CANONICAL_TASK / 'work/identity-runtime-v3/runtime.patch'
     if digest(old_patch) != PATCH_BEFORE or digest(current_patch) != PATCH_AFTER:
         fail('source patch identity guard')
     scoped_command('old patch apply', ['git', '-C', str(old), 'apply', '--binary', str(old_patch)],
