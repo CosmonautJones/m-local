@@ -12,6 +12,7 @@ on:
       - 'runtime-proof/test-fresh-source.py'
       - 'runtime-proof/verify-source-handoff.py'
       - 'runtime-proof/test-source-handoff.py'
+      - 'runtime-proof/test-source-export.py'
       - 'runtime-proof/inputs/**'
       - 'runtime-proof/public-download-pins.json'
       - 'runtime-proof/download-pinned-inputs.py'
@@ -31,6 +32,10 @@ jobs:
   source-proof:
     runs-on: ubuntu-24.04
     timeout-minutes: 230
+    outputs:
+      contract_sha256: ${{ steps.source.outputs.contract_sha256 }}
+      artifact_id: ${{ steps.handoff.outputs.artifact-id }}
+      artifact_digest: ${{ steps.handoff.outputs.artifact-digest }}
     steps:
       - name: Checkout public proof inputs
         uses: actions/checkout@v4
@@ -43,11 +48,50 @@ jobs:
       - name: Check sanitized source handoff verifier
         run: python3 -B runtime-proof/test-source-handoff.py
 
+      - name: Check source producer and export boundaries
+        run: python3 -B runtime-proof/test-source-export.py
+
       - name: Run fresh source/bootstrap/matrix proof
+        id: source
         env:
           PYTHONDONTWRITEBYTECODE: '1'
           GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          sudo env PYTHONDONTWRITEBYTECODE=1 GITHUB_SHA="$GITHUB_SHA" \
-            python3 runtime-proof/run-fresh-source.py
+          sudo env PYTHONDONTWRITEBYTECODE=1 GITHUB_SHA="$GITHUB_SHA" GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            python3 runtime-proof/run-fresh-source.py | tee "$RUNNER_TEMP/m-local-source-summary.json"
+          python3 -B - "$RUNNER_TEMP/m-local-source-summary.json" <<'PY'
+          from pathlib import Path
+          import json, os, re, sys
+          summary = json.loads(Path(sys.argv[1]).read_text())
+          handoff = summary['handoff']
+          verified = handoff['verification']
+          value = handoff['contract_sha256']
+          assert summary['status'] == verified['status'] == 'passed'
+          assert verified['commit_sha'] == os.environ['GITHUB_SHA']
+          assert verified['run_id'] == os.environ['GITHUB_RUN_ID']
+          assert re.fullmatch(r'[0-9a-f]{64}', value) and verified['contract_sha256'] == value
+          with open(os.environ['GITHUB_OUTPUT'], 'a', newline='\n') as stream:
+              stream.write('contract_sha256=' + value + '\n')
+          PY
+
+      - name: Verify exported source handoff
+        env:
+          CONTRACT_SHA: ${{ steps.source.outputs.contract_sha256 }}
+        run: |
+          python3 -B runtime-proof/verify-source-handoff.py \
+            --bundle runtime-proof/source-handoff-export --trusted-checkout "$GITHUB_WORKSPACE" \
+            --expected-commit "$GITHUB_SHA" --expected-run-id "$GITHUB_RUN_ID" \
+            --expected-contract-sha256 "$CONTRACT_SHA"
+
+      - name: Retain verified public source handoff
+        id: handoff
+        if: ${{ success() && steps.source.outputs.contract_sha256 != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: m-local-source-handoff-${{ github.sha }}-${{ github.run_id }}
+          path: runtime-proof/source-handoff-export
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: false

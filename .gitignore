@@ -21,3 +21,6 @@ Thumbs.db
 
 # Uploaded business and offer photos are persistent application data.
 /assets/photos/
+
+# Verified public proof exports are retained as CI artifacts.
+/runtime-proof/source-handoff-export/

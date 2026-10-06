@@ -31,5 +31,11 @@ Only a privacy-reviewed fresh proof handoff may cross to a later package job.
 `verify-source-handoff.py` checks the exact public source files, sanitized
 receipt commitments and required license sidecar against a trusted checkout.
 It requires external commit, run and contract-hash bindings and never executes
-bundle contents. Its synthetic tests run in CI; producer integration and
-artifact transfer are still pending. No real handoff has passed this verifier.
+bundle contents. Synthetic producer/export tests run before native proof.
+The producer binds its code to the exact GitHub commit and run, includes the
+license sidecar and bootstrap cold hash, and verifies both the private bundle
+and the exported copy. CI uploads only that verified directory after success,
+retains it for seven days and exposes the contract hash and artifact identity
+for a later package gate. Logs, caches and application state stay private.
+Actual hosted source/producer/upload acceptance is still pending; synthetic
+tests do not establish native proof, package compatibility or adoption.

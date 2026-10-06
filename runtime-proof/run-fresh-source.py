@@ -11,6 +11,7 @@ import io
 import json
 import os
 import runpy
+import re
 import shutil
 import signal
 import stat
@@ -30,6 +31,8 @@ ADAPTER_MANIFEST_PATH = INPUTS / 'v7-adapter-manifest.json'
 DOWNLOAD_HELPER = ROOT / 'runtime-proof' / 'download-pinned-inputs.py'
 PROBE = ROOT / 'runtime-proof' / 'probe-runner-controls.py'
 HELPER = ROOT / 'runtime-proof' / 'kali-build-resources-v2.py'
+HANDOFF_VERIFIER = ROOT / 'runtime-proof' / 'verify-source-handoff.py'
+SOURCE_EXPORT = ROOT / 'runtime-proof' / 'source-handoff-export'
 SOURCE_MANIFEST_SHA = 'f0ade58e7b59cc49eb5c3c3d0a6c8ca08c4f5b9804dc49ad5ea4f171cc4be037'
 ADAPTER_MANIFEST_SHA = '08f0a07fab0c63895d649d0c75835043417d260fe6f817047aaf5f1bec14064c'
 SOURCE_JAC_PATHS = (
@@ -1110,12 +1113,36 @@ def verify_leaf_controls(child, *, phases_key=None):
         fail('source leaf kernel control receipt')
 
 
+def producer_binding():
+    commit = os.environ.get('GITHUB_SHA', '')
+    run_id = os.environ.get('GITHUB_RUN_ID', '')
+    if not re.fullmatch(r'[0-9a-f]{40}', commit) or not re.fullmatch(r'[1-9][0-9]*', run_id):
+        fail('source producer context')
+    command = ['/usr/bin/git', '-C', str(ROOT)]
+    head = subprocess.check_output(command + ['rev-parse', '--verify', 'HEAD'], stderr=subprocess.DEVNULL).decode('ascii').strip()
+    if head != commit:
+        fail('source producer HEAD binding')
+    runner = ROOT / 'runtime-proof' / 'run-fresh-source.py'
+    for source in (runner, HELPER, HANDOFF_VERIFIER):
+        if source.is_symlink() or not source.is_file():
+            fail('source producer code type')
+        committed = subprocess.check_output(command + ['show', 'HEAD:' + source.relative_to(ROOT).as_posix()], stderr=subprocess.DEVNULL)
+        if hashlib.sha256(committed).hexdigest() != digest(source):
+            fail('source producer code binding')
+    return dict(commit_sha=commit, run_id=run_id, source_runner_sha256=digest(runner),
+                adapter_manifest_sha256=ADAPTER_MANIFEST_SHA, application_revision=APP_REVISION,
+                application_digest=APP_SHA, jac_base=JAC_BASE, official_binary_sha256=JAC_SHA,
+                jacpython_sha256=JACPYTHON_SHA, helper_sha256=digest(HELPER),
+                entrypoint_policy='source_only_via_pinned_adapters', evidence_scope='sanitized_commitments_only')
+
+
 def scrub_stage(stage, child):
     return dict(status=stage.get('status'), stage=stage.get('stage'), wrapper_sha256=stage.get('wrapper_sha256'),
                 result_sha256=stage.get('result_sha256'), child_result_sha256=stage.get('child_result_sha256'),
                 elapsed_seconds=stage.get('elapsed_seconds'),
                 parent_policy='JAC_NO_DEV_SOURCE=1; JAC_DEV_SOURCE and JAC_DB_URL removed; leaf controls are authoritative',
-                source_gate_sha256=stage.get('source_gate_sha256'), cold_compile_receipt_sha256=stage.get('cold_compile_receipt_sha256'),
+                source_gate_sha256=stage.get('source_gate_sha256'),
+                cold_compile_receipt_sha256=child.get('cold_compile_receipt_sha256') if stage.get('stage') == 'run-source-bootstrap-v7' else None,
                 child=dict(status=child.get('status'), checks=child.get('checks'), phase_count=child.get('phase_count'),
                            interface_count=child.get('interface_count'), runtime_patch_sha256=child.get('runtime_patch_sha256'),
                            official_binary_sha256=child.get('official_binary_sha256'), jacpython_sha256=child.get('jacpython_sha256'),
@@ -1124,7 +1151,7 @@ def scrub_stage(stage, child):
                            actual_smtp=child.get('actual_smtp')))
 
 
-def build_handoff(workspace, manifest, cold_stage, bootstrap_stage, matrix_stage, cold, bootstrap, matrix):
+def build_handoff(workspace, manifest, cold_stage, bootstrap_stage, matrix_stage, cold, bootstrap, matrix, *, producer):
     handoff = workspace / 'source-handoff-v7'
     members = handoff / 'files'
     members.mkdir(mode=0o700, parents=True)
@@ -1166,14 +1193,16 @@ def build_handoff(workspace, manifest, cold_stage, bootstrap_stage, matrix_stage
         fail('cold compile provenance identity')
     if digest(JAC_LICENSE_PATH) != JAC_LICENSE_SHA:
         fail('Jac license identity guard')
+    private_write(handoff / 'JAC-LICENSE.txt', JAC_LICENSE_PATH.read_bytes())
     contract = dict(status='prepared_not_uploaded', member_count=len(entries), total_bytes=total,
                     source_manifest_sha256=digest(SOURCE_MANIFEST_PATH), runtime_patch_sha256=PATCH_AFTER,
                     source_bootstrap_receipt_sha256=digest(handoff / 'source-bootstrap-receipt.json'),
                     source_matrix_receipt_sha256=digest(handoff / 'source-matrix-receipt.json'), members=entries,
                     cold_compile_provenance=cold_provenance,
-                    jac_license_notice=dict(path='runtime-proof/JAC-LICENSE.txt', bytes=JAC_LICENSE_PATH.stat().st_size,
-                                            sha256=JAC_LICENSE_SHA, origin='public Jac base MIT notice; retained outside 36-member handoff',
+                    jac_license_notice=dict(path='JAC-LICENSE.txt', bytes=JAC_LICENSE_PATH.stat().st_size,
+                                            sha256=JAC_LICENSE_SHA, origin='public Jac base MIT notice; mandatory handoff sidecar',
                                             text=JAC_LICENSE_PATH.read_text()),
+                    producer=producer,
                     forbidden=['cache', 'scratch', 'private logs', 'graph state', 'identity state', 'fork-generated files',
                                'credentials', 'tokens', 'raw API bodies'])
     private_write(handoff / 'contract.json', json.dumps(contract, sort_keys=True, indent=2).encode() + b'\n')
@@ -1181,8 +1210,27 @@ def build_handoff(workspace, manifest, cold_stage, bootstrap_stage, matrix_stage
                 contract_sha256=digest(handoff / 'contract.json'))
 
 
+def export_handoff(workspace, summary, producer):
+    verify = runpy.run_path(str(HANDOFF_VERIFIER))['verify_bundle']
+    bindings = dict(expected_commit=producer['commit_sha'], expected_run_id=producer['run_id'],
+                    expected_contract_sha256=summary['contract_sha256'])
+    bundle = workspace / 'source-handoff-v7'
+    private_result = verify(bundle, ROOT, **bindings)
+    if SOURCE_EXPORT.exists() or SOURCE_EXPORT.is_symlink():
+        fail('source export destination occupied')
+    shutil.copytree(bundle, SOURCE_EXPORT, copy_function=shutil.copyfile)
+    SOURCE_EXPORT.chmod(0o755)
+    for path in SOURCE_EXPORT.rglob('*'):
+        path.chmod(0o755 if path.is_dir() else 0o644)
+    exported = verify(SOURCE_EXPORT, ROOT, **bindings)
+    if exported != private_result:
+        fail('source export verification binding')
+    return exported
+
+
 def main():
     global PRIVATE_LOG_DIR
+    producer = producer_binding()
     host_guard()
     pins, manifest, adapters = manifest_inputs()
     workspace = set_private(Path(tempfile.mkdtemp(prefix='m-local-fresh-source-v7-', dir='/var/tmp')))
@@ -1237,7 +1285,8 @@ def main():
             fail('matrix storage mount gate')
         verify_leaf_controls(matrix_inner, phases_key='phases')
         verify_leaf_controls(matrix_inner, phases_key='interface_proofs')
-        handoff = build_handoff(workspace, manifest, cold_stage, bootstrap_stage, matrix_stage, cold, bootstrap, matrix)
+        handoff = build_handoff(workspace, manifest, cold_stage, bootstrap_stage, matrix_stage, cold, bootstrap, matrix, producer=producer)
+        handoff['verification'] = export_handoff(workspace, handoff, producer)
         summary = dict(status='passed', checks=['host-controls', 'fresh-64Gi-storage', 'public-app-revision',
             'public-pinned-downloads', 'postgres-distribution', 'dependency-priming-pillow', 'fresh-forks-80fd-d363',
             'cold-compile-before-after', 'bootstrap-53', 'matrix-10-plus-2', 'scrubbed-36-file-contract'],
