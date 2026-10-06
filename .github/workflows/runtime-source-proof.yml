@@ -24,7 +24,6 @@ on:
       - 'runtime-proof/probe-runner-controls.py'
       - 'runtime-proof/kali-build-resources-v2.py'
       - 'runtime-proof/JAC-LICENSE.txt'
-      - 'runtime-proof/README.md'
 
 permissions:
   contents: read
