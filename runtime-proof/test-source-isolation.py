@@ -473,12 +473,7 @@ class LinuxRootTests(unittest.TestCase):
                 'run_command': self.runner_namespace['run_command']}
 
     def preflight(self):
-        commit = subprocess.run(['/usr/bin/git', 'rev-parse', 'HEAD'], cwd=ROOT.parent,
-                                env=dict(PATH='/usr/bin:/bin', HOME='/nonexistent', LANG='C.UTF-8',
-                                         GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL='/dev/null',
-                                         GIT_NO_REPLACE_OBJECTS='1'), stdin=subprocess.DEVNULL,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                check=True, timeout=30).stdout.strip()
+        commit = self.preflight_module.git(ROOT.parent, ['rev-parse', 'HEAD']).decode().strip()
         return vars(self.preflight_module), commit
 
     def test_real_root_control_proves_denial_and_exact_restoration(self):
