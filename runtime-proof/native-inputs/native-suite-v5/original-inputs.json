@@ -1,0 +1,116 @@
+{
+  "adaptation_required": true,
+  "catalog_mutation_cases": [
+    "complete-physical-catalog",
+    "unknown-absolute-resolution-field",
+    "missing-relative-target",
+    "payload-containment-escape",
+    "python-payload-traversal",
+    "unreferenced-absolute-string"
+  ],
+  "compatibility_phases": [
+    "package-input-verification",
+    "catalog-cold-relocation",
+    "runtime-materialization",
+    "runtime-commit-40001",
+    "runtime-commit-40P01",
+    "runtime-commit-55P03",
+    "runtime-commit-08006",
+    "runtime-runtime-boundary-probe",
+    "runtime-runtime-lifecycle-probe",
+    "runtime-runtime-served-probe",
+    "runtime-runtime-request-context-probe",
+    "runtime-runtime-nested-context-probe",
+    "install",
+    "check",
+    "onboarding",
+    "analytics",
+    "core",
+    "insights",
+    "python-tooling",
+    "photo-media",
+    "ui-unit",
+    "build",
+    "ui-dependencies",
+    "browser"
+  ],
+  "evidence_scope": "immutable_original_sources_only",
+  "graph_coverage": {
+    "allowed_skips": 0,
+    "core_jac": 451,
+    "insights_jac": 62,
+    "insights_node": 11,
+    "insights_python": 12
+  },
+  "schema": "m-local-native-suite-original-inputs-v1",
+  "source_interfaces": [
+    "codec",
+    "controls"
+  ],
+  "sources": [
+    {
+      "bytes": 5127,
+      "file": "export-emergency-checkpoint.py",
+      "origin": "work/export-emergency-checkpoint.py",
+      "role": "digest_function_ast_only",
+      "sha256": "e73a01554b5b3fccb66b4544773b7dc74928c7d7ce7dbb1fcc60bf3c9f26caf4"
+    },
+    {
+      "bytes": 34100,
+      "file": "kali-capacity-proof.py",
+      "origin": "work/identity-runtime-v3/kali-capacity-proof.py",
+      "role": "native_capacity_probe",
+      "sha256": "bcad7ca8bba919ea37e4b6fe6a812c7df08c45a657fded41137e016741820ce4"
+    },
+    {
+      "bytes": 25642,
+      "file": "kali-packaged-two-api-proof.py",
+      "origin": "work/identity-runtime-v3/kali-packaged-two-api-proof.py",
+      "role": "native_http_probe",
+      "sha256": "38feab9a539c5ca98fdfa0071786c0e67e6d8617f263f2ca486eaf0773e71d95"
+    },
+    {
+      "bytes": 2399,
+      "file": "package-runtime-loader-provenance.py",
+      "origin": "work/identity-runtime-v3/package-runtime-loader-provenance.py",
+      "role": "package_loader",
+      "sha256": "ad3640c0e4efcfee41aa831b67e84456e2da8a6a96ef769cdc1533ab0582ebb2"
+    },
+    {
+      "bytes": 19583,
+      "file": "run-kali-native-gate.py",
+      "origin": "work/identity-runtime-v5/run-kali-native-gate.py",
+      "role": "native_gate_controller",
+      "sha256": "1b57dacf98225b6872927f488697f82a3412e7b7ba7d3754f66df519c99da2a9"
+    },
+    {
+      "bytes": 27518,
+      "file": "run-kali-package-suite.py",
+      "origin": "work/identity-runtime-v5/run-kali-package-suite.py",
+      "role": "compatibility_controller",
+      "sha256": "284a625ecfeb8dc77034ced6cfcdeadc7d27d171aae43dd34794dfa3dd9a55f5"
+    },
+    {
+      "bytes": 3711,
+      "file": "runtime-catalog-cold-probe.py",
+      "origin": "work/runtime-catalog-cold-probe.py",
+      "role": "cold_catalog_probe",
+      "sha256": "11aeda9794f7559e3a808c5771c7ad2a154b183090cb3f7ba35fc840bcf706ca"
+    },
+    {
+      "bytes": 8221,
+      "file": "runtime-catalog-path-audit.py",
+      "origin": "work/runtime-catalog-path-audit.py",
+      "role": "physical_catalog_audit",
+      "sha256": "ce6951fde1842b46cf1c1e26787367118953ff51c819f85728d8d7bd3aa4050e"
+    },
+    {
+      "bytes": 3914,
+      "file": "test-runtime-catalog-path-audit.py",
+      "origin": "work/test-runtime-catalog-path-audit.py",
+      "role": "catalog_mutation_controls",
+      "sha256": "3e656b49fb6e1843ac0cef14f8bed77b536dcdcab3526767685adeff569176f6"
+    }
+  ],
+  "status": "frozen_not_executed"
+}

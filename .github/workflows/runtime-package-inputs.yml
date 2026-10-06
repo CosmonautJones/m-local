@@ -48,3 +48,32 @@ jobs:
         run: sudo -n python3 -I -B runtime-proof/test-node-client-control.py
       - name: Check prepared transaction matrix bindings on owned fixtures
         run: sudo -n python3 -I -B runtime-proof/test-prepared-runtime-matrix.py
+      - name: Check browser-test dependency lock and integrity boundaries
+        run: python3 -I -B runtime-proof/test-ui-dependency-lock.py
+      - name: Verify immutable native suite sources without executing them
+        run: |
+          echo 'd47b342bea74d64fa3575673a07b90d5595fdabe0e87a93f714cc6d7caa7c635  runtime-proof/verify-package-preflight.py' | sha256sum -c -
+          python3 -I -B - <<'PY'
+          from pathlib import Path
+          import importlib.util
+          import json
+          import os
+          root = Path.cwd()
+          spec = importlib.util.spec_from_file_location('native_input_preflight', root / 'runtime-proof/verify-package-preflight.py')
+          preflight = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(preflight)
+          commit = os.environ['GITHUB_SHA']
+          preflight.checked_checkout(root, commit)
+          relative = 'runtime-proof/native-inputs/native-suite-v5/'
+          raw = preflight.committed_file(root, commit, relative + 'original-inputs.json')
+          assert preflight.sha(raw) == '27d03f9e1d8eb17956789a7b84dbc8ce84bb222dec7644dbb18ce15672e6153f'
+          manifest = json.loads(raw)
+          assert manifest['status'] == 'frozen_not_executed' and manifest['adaptation_required'] is True
+          assert len(manifest['sources']) == 9 and len(manifest['compatibility_phases']) == 24
+          assert len(manifest['catalog_mutation_cases']) == 6 and manifest['source_interfaces'] == ['codec', 'controls']
+          for row in manifest['sources']:
+              item = preflight.committed_file(root, commit, relative + row['file'])
+              assert len(item) == row['bytes'] and preflight.sha(item) == row['sha256']
+          assert sorted(path.name for path in (root / relative).iterdir()) == sorted(['original-inputs.json'] + [row['file'] for row in manifest['sources']])
+          print(json.dumps(dict(status='frozen_not_executed', source_files=9, compatibility_phases=24, executed=False)))
+          PY

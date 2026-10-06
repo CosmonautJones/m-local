@@ -9,3 +9,8 @@
 runtime-proof/inputs/** -text
 runtime-proof/package-inputs/** -text
 runtime-proof/runtime-direct-use-inputs-v1.json -text
+runtime-proof/ui-dependency-inputs/** -text
+runtime-proof/native-inputs/native-suite-v5/** -text
+# Frozen originals retain their hashed CRLF and existing terminal blank line.
+runtime-proof/native-inputs/native-suite-v5/export-emergency-checkpoint.py whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+runtime-proof/native-inputs/native-suite-v5/run-kali-native-gate.py whitespace=blank-at-eol,-blank-at-eof,space-before-tab,cr-at-eol

@@ -77,3 +77,22 @@ with `executed: false`; the authenticated source run's aggregate results remain
 separate evidence. These files still need to be adapted and executed against
 the sealed package before compatibility acceptance. The UI dependency
 installation also needs fresh, bound inputs before full-suite acceptance.
+
+The dependency preparation workflow resolves only the existing `jsdom@26.1.0`
+browser-test prerequisite using the verified private Node.js 22.16.0 and npm
+10.9.2 tools. It downloads every package in the generated lockfile, checks each
+tarball's integrity, and seeds a separate empty cache from those downloads.
+It then checks a script-free offline `npm ci` and a small DOM probe under
+UID/GID 65534. Only public package metadata, the lockfile and a preparation
+receipt are exported. The reviewed graph must be frozen in committed inputs
+before the full suite consumes it; a newly generated artifact cannot replace
+those commitments automatically. This fixture does not run application browser
+tests or change the full package host requirements.
+
+The nine original compatibility, catalog, loader and native-gate sources are
+also frozen byte-for-byte in `native-inputs/native-suite-v5/`. Their manifest
+retains all 24 compatibility phases, both separate source interfaces, the six
+physical catalog mutation cases, and strict graph coverage counts. The input
+check verifies their committed bytes without executing any original script.
+Fresh storage, cache, source-denial, tool, loader and dependency bindings still
+need to be connected by a reviewed adapter before full-suite acceptance.

@@ -1,0 +1,48 @@
+name: Prepare browser-test dependency inputs
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/runtime-verification
+    paths:
+      - '.github/workflows/runtime-ui-dependency-lock.yml'
+      - 'runtime-proof/generate-ui-dependency-lock.py'
+      - 'runtime-proof/test-ui-dependency-lock.py'
+      - 'runtime-proof/run-fresh-node-client-control.py'
+      - 'runtime-proof/test-node-client-control.py'
+      - 'runtime-proof/test-source-isolation.py'
+      - 'runtime-proof/verify-package-preflight.py'
+      - 'runtime-proof/run-fresh-source.py'
+      - 'runtime-proof/native-inputs/prepare-node-client-v1.py'
+      - 'runtime-proof/native-inputs/node-client-download-pins-v1.json'
+
+permissions:
+  contents: read
+
+jobs:
+  ui-inputs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout dependency preparation inputs
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Check dependency lock and integrity rejection boundaries
+        run: python3 -I -B runtime-proof/test-ui-dependency-lock.py
+      - name: Generate and verify script-free offline dependency installation
+        run: |
+          set -euo pipefail
+          echo 'aefd882099724becd2a5a5e0b141385124b87fdfd21e7133628ff1787ab1fbd1  runtime-proof/generate-ui-dependency-lock.py' | sha256sum -c -
+          sudo -n timeout --signal=TERM --kill-after=30s 540s \
+            python3 -I -B runtime-proof/generate-ui-dependency-lock.py \
+            --expected-commit "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/m-local-ui-dependency-inputs"
+      - name: Upload public lock and dependency receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ui-dependency-inputs-${{ github.sha }}
+          path: ${{ runner.temp }}/m-local-ui-dependency-inputs/
+          if-no-files-found: error
+          retention-days: 7
