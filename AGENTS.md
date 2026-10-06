@@ -34,7 +34,8 @@ Start with `jac guide jac-core-cheatsheet` and `jac guide jac-types`.
   This wraps `jac run --dev --host 127.0.0.1 --port 8000`; `jac start` is retired.
 - `bash scripts/test.sh core` -- run the core, QR, and provisioning tests in an isolated
   workspace/store. Never run destructive reset commands on a shared demo database.
-  Context/integration suites are pending and deliberately return nonzero.
+  Context tests are implemented. The integration suite requires protected test
+  accounts and returns nonzero when that configuration is missing.
 - `jac browse <action>` -- QA a running app in a headless browser:
   `jac browse open localhost:8000`, then `snapshot` (accessibility tree with
   `@e1`-style refs), `click @e5`, `fill '#email' user@example.com`, `screenshot`, `close`.

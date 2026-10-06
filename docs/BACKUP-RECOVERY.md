@@ -1,10 +1,18 @@
 # Backup and recovery
 
-The public release recovery gate is still open. A local, quiesced disposable
-fixture passed 20 HTTP/state checks on October 4, 2026. Its backup took 0.095
-seconds and its recovery took 57.936 seconds. These timings exclude remote
-storage, scheduled-backup lag, host provisioning, DNS/TLS and traffic cutover.
-They do not establish the proposed 15-minute RPO or 30-minute RTO.
+The public release recovery gate is still open. The current disposable CI
+rehearsal passed 71 checks at `b0f2321`, including coordinated database, signing
+state, onboarding, photo ownership and JPEG recovery followed by another
+restart. It took 221.171 seconds in total, using Jac 0.37.23 and the runner's
+PostgreSQL 16.15 distribution. Independent review accepted this matching-runtime
+cold-copy scope. The 215 copied source/test/brand Git blobs match the pushed
+candidate exactly. See [native evidence](review/recovery-v61/verification.json)
+and [source binding](review/recovery-v61/source-binding.json).
+
+The earlier October 4 fixture passed 20 HTTP/state checks, with a 0.095-second
+backup and 57.936-second recovery. Neither rehearsal includes remote storage,
+scheduled-backup lag, host provisioning, DNS/TLS or traffic cutover. Neither
+establishes the proposed 15-minute RPO or 30-minute RTO.
 
 ## Preserve the application identity
 
@@ -54,7 +62,8 @@ application data: source updates replace other application assets but never
 copy or delete the photo directory. A disposable actual read-only POSIX bind
 mount retained uploaded bytes through source update and rollback. That proof
 used a private-registry sentinel; coordinated recovery of the real ownership
-database, photos and graph data remains open. Keep the photo directory on a
+database, photos and graph data on the public deployment remains open. The
+current disposable CI rehearsal verifies those components together. Keep the photo directory on a
 durable volume and restore it with the matching ownership database. Uploads
 are ignored by Git. Same-store restart does not prove deployment or recovery.
 
@@ -102,11 +111,13 @@ Do not expose their tokens, QR payloads, email codes or keys in the receipt.
 - Repeat isolation/authorization checks at the actual ingress before opening
   it. SMTP delivery, quotas and physical camera checks are separate gates.
 
-The local rehearsal verified held/redeemed state, old price/terms, current
-offer price, approval, owner authority, signing keys and one-time redemption.
-It did not verify a fresh host, scheduled backup, actual SMTP, cutover or a
-post-restore restart. Retained private rehearsal data is not committed or
-included in shared evidence.
+The current CI rehearsal verifies held/redeemed state, original claim identities
+and snapshots, current offer price, approval, all four native actor identities,
+signing keys, distinct business/offer photo associations and bytes, ownership,
+and one-time redemption after restore and a subsequent restart. It checks that
+the owned API process groups and PostgreSQL stop. A fresh host, scheduled backup,
+actual SMTP, public ingress and cutover remain unverified. Retained private
+rehearsal data is not committed or included in shared evidence.
 
 See [release acceptance](RELEASE-ACCEPTANCE.md) and
 [hosting](HOSTING.md) for the remaining deployment gates.
