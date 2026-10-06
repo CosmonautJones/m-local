@@ -39,3 +39,5 @@ retains it for seven days and exposes the contract hash and artifact identity
 for a later package gate. Logs, caches and application state stay private.
 Actual hosted source/producer/upload acceptance is still pending; synthetic
 tests do not establish native proof, package compatibility or adoption.
+Failure context retains at most eight known stage labels across chained
+errors, including cleanup failures. It omits arbitrary messages and child logs.

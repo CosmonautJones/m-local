@@ -92,6 +92,25 @@ def fail(label):
     raise RuntimeError(label)
 
 
+def sanitized_failure_context(error):
+    allowed = {'owned mount cleanup guard'} | {
+        'source ' + stage + ' ' + reason
+        for stage in ('cold-compile', 'bootstrap', 'matrix')
+        for reason in ('failed', 'timeout', 'unavailable', 'unidentified mount cleanup')
+    }
+    labels = []
+    seen = set()
+    while error is not None and id(error) not in seen and len(seen) < 8:
+        seen.add(id(error))
+        if type(error) is RuntimeError and len(error.args) == 1 and type(error.args[0]) is str:
+            label = error.args[0]
+            if label in allowed and label not in labels:
+                labels.append(label)
+        error = error.__cause__ if error.__cause__ is not None else (
+            None if error.__suppress_context__ else error.__context__)
+    return labels
+
+
 def minimal_environment(extra=None):
     environment = dict(PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
                        HOME='/nonexistent', LANG='C.UTF-8', LC_ALL='C.UTF-8',
@@ -1311,12 +1330,14 @@ if __name__ == '__main__':
         main()
     except RuntimeError as error:
         label = str(error).splitlines()[0][:120] or 'source runner aborted'
-        print(json.dumps(dict(status='failed', error=label, private_logs=str(PRIVATE_LOG_DIR or '/var/tmp/m-local-fresh-source-v7.*')),
-                         sort_keys=True, separators=(',', ':')), flush=True)
+        print(json.dumps(dict(status='failed', error=label, failure_context=sanitized_failure_context(error),
+                             private_logs=str(PRIVATE_LOG_DIR or '/var/tmp/m-local-fresh-source-v7.*')),
+                          sort_keys=True, separators=(',', ':')), flush=True)
         raise SystemExit(1)
     except (OSError, subprocess.SubprocessError, AssertionError, ValueError, KeyError, TypeError, UnicodeError,
-            IndexError, SystemExit):
+            IndexError, SystemExit) as error:
         print(json.dumps(dict(status='failed', error='source runner aborted',
+                              failure_context=sanitized_failure_context(error),
                               private_logs=str(PRIVATE_LOG_DIR or '/var/tmp/m-local-fresh-source-v7.*')),
                          sort_keys=True, separators=(',', ':')), flush=True)
         raise SystemExit(1)
