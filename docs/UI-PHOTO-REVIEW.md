@@ -40,7 +40,7 @@ journey. It predates this photo revision and remains separate from its screensho
 
 ## Verification and scope
 
-The application source digest matches the isolated verified proposal:
+The historical visual revision matches the isolated verified proposal:
 `54c0f42cfa62a0eb06d9d4198543782cc85079925e64234e8a00cc37bc8b5826`.
 The protected gateway source was verified separately. Retained evidence reports:
 
@@ -52,16 +52,36 @@ The protected gateway source was verified separately. Retained evidence reports:
 - Browser uploads, save/reopen, independent business/offer display, thumbnail
   selection, keyboard/pointer access and measured 320/390px views were checked.
 
-The [compact receipt](review/photo-ux-v17/verification.json) records scope and
-limits. This is previously executed evidence for the identical application
-source, not a claim that fresh GitHub CI has passed. The media suite is included
-in the branch's CI workflow.
+The [original receipt](review/photo-ux-v17/verification.json) records that
+revision's scope and limits. Its screenshots and evidence remain unchanged.
+The media suite is included in the branch's CI workflow.
+
+The [follow-up receipt](review/photo-followup-v30/verification.json) records
+fresh checks for source
+`71f73c9482f65ae41ca9521650f22bf5d226bc535c39379ef16ddce465341f42`.
+Routine profile and offer saves now preserve an existing photo when its field
+is omitted or null; explicit removal and replacement remain available. The
+approval HTTP test uses a real owned upload and verifies both photos after
+restart. Source updates and rollback preserve uploaded photos, including an
+actual read-only POSIX bind mount. Unsafe overlapping paths, symlinks and
+Windows junctions are rejected before mutation. The visual layout is unchanged.
+
+Official-runtime check/build, seven media tests, 41 core tests (six skipped),
+130 compiled UI scenarios, 34 gateway/UI tests, 75 onboarding tests and 45
+native HTTP/restart checks passed. Insights passed 12 Python and 11 JavaScript
+tests; its Jac backend runner skipped one case. Linux tooling passed 22 tests
+with three platform/filesystem skips; Windows source-sync tests passed 13 with
+two POSIX skips. Five actual photo-bind update/rollback checks passed. Skips
+are not passing coverage. The first core attempt failed during embedded test
+database startup; the same source passed with a dedicated owned database.
+These are local results; GitHub CI and production acceptance remain separate.
 
 ## Release gates still open
 
 This is a review branch, not a public deployment or production release.
-Protect uploaded photos from source replacement, persist them with their private
-ownership registry, and prove coordinated backup/restore. Define conservative
+Persist uploaded photos with their private ownership registry on durable
+storage and prove coordinated backup/restore. The disposable bind-mount proof
+used a private-registry sentinel, not a database recovery set. Define conservative
 orphan cleanup before deleting unreferenced uploads. Physical iPhone/Safari/HEIC
 and large-camera-photo decoding remain unverified. Representative merchant
 website extraction remains a pilot check; the external import proof used a W3C

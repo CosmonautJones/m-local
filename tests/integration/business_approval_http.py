@@ -4,7 +4,9 @@ Use a fresh /var/tmp/m-local-release-approval.* workspace on loopback port 8252.
 No real email is sent. Test receipts stay private in that disposable workspace.
 """
 import argparse
+import base64
 from datetime import datetime, timedelta
+from io import BytesIO
 import json
 import os
 from pathlib import Path
@@ -14,6 +16,7 @@ import sys
 import urllib.error
 import urllib.request
 from zoneinfo import ZoneInfo
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -38,7 +41,13 @@ def main():
         require(owner.call('get_business_profile')['name'] == receipt['name'], 'published profile survives restart')
         require(any(o['id'] == receipt['offer'] for o in owner.call('merchant_portal')['offers']),
                 'self-managed offer survives restart')
+        require(next(o for o in owner.call('merchant_portal')['offers'] if o['id'] == receipt['offer'])['offer_image_url'] == receipt['photo'],
+                'owned offer photo survives restart')
         require(state.business_approved(receipt['actor']), 'private approval survives restart')
+        require(owner.call('get_business_profile')['image_url'] == receipt['photo'], 'owned business photo survives restart')
+        with urllib.request.urlopen(api + receipt['photo'], timeout=30) as response:
+            require(response.headers.get_content_type() == 'image/jpeg' and response.read().startswith(b'\xff\xd8'),
+                    'approved photo remains available after restart')
         return
     anonymous = Api(api)
     run = secrets.token_hex(4)
@@ -54,9 +63,13 @@ def main():
     owner, student = verify('business'), verify('student')
     actor = owner.call('current_session')['actor_id']
     slug = 'business-' + actor
+    image = BytesIO()
+    Image.new('RGB', (64, 48), 'orange').save(image, format='JPEG')
+    photo = owner.call('upload_business_photo', payload='data:image/jpeg;base64,' + base64.b64encode(image.getvalue()).decode())
+    require(photo['ok'] and photo['url'].startswith('/static/photos/'), 'business uploads an owned photo before review')
     fields = dict(name='Approval Cafe ' + run, cuisine='Cafe', description='Fictional acceptance profile',
                   address='123 Fixture Street', website='', menu_text='Soup $5', menu_url='',
-                  image_url='https://example.com/cafe.png', confirmed=True)
+                  image_url=photo['url'], confirmed=True)
     pending = owner.call('save_business_draft', **fields)
     require(pending['ok'] and pending['status'] == 'pending_review', 'business save submits a private review')
     require(owner.call('current_session')['role'] == 'business', 'submission does not confer merchant authority')
@@ -108,6 +121,16 @@ def main():
     require(owner.call('update_profile', name=original_name, cuisine='Bakery', blurb=fields['description'],
         address=portal['address'], neighborhood=portal['neighborhood'], entrance_note=portal['entrance_note'],
         note_date=portal['note_date'])['ok'], 'routine legacy edit remains self-service during identity review')
+    require(owner.call('get_business_profile')['image_url'] == photo['url'], 'omitted profile photo preserves the uploaded image')
+    routine_fields = dict(name=original_name, cuisine='Bakery', blurb=fields['description'],
+        address=portal['address'], neighborhood=portal['neighborhood'], entrance_note=portal['entrance_note'],
+        note_date=portal['note_date'])
+    require(owner.call('update_profile', **routine_fields, image_url=None)['ok'] and
+        owner.call('get_business_profile')['image_url'] == photo['url'], 'null profile photo preserves the uploaded image')
+    require(owner.call('update_profile', **routine_fields, image_url='')['ok'] and
+        owner.call('get_business_profile')['image_url'] == '', 'explicitly empty profile photo removes the image')
+    require(owner.call('update_profile', **routine_fields, image_url=photo['url'])['ok'] and
+        owner.call('get_business_profile')['image_url'] == photo['url'], 'owner restores the uploaded profile photo')
     draft = owner.call('get_business_draft')
     require(draft['name'] == fields['name'] and draft['status'] == 'pending_review' and
             draft['description'] == fields['description'] and draft['cuisine'] == 'Bakery',
@@ -117,14 +140,27 @@ def main():
     require(owner.call('save_business_draft', **fields)['status'] == 'active', 'reviewed name change publishes through owner activation')
     require(owner.call('current_session')['restaurant_id'] == first_id, 'identity review retains business and offers identity')
     now = datetime.now(ZoneInfo('America/Detroit'))
-    offer = owner.call('save_offer', offer_id='', create_key=secrets.token_hex(16), title='Approved lunch ' + run, description='Fixture offer',
+    offer_fields = dict(offer_id='', create_key=secrets.token_hex(16), title='Approved lunch ' + run, description='Fixture offer',
         price='5', regular_price='7', start_local=(now - timedelta(minutes=2)).strftime('%Y-%m-%d %H:%M'),
         end_local=(now + timedelta(hours=1)).strftime('%Y-%m-%d %H:%M'), quantity='2',
         eligibility='Valid U-M ID', terms='One per student', dietary='', menu_item='')
+    offer = owner.call('save_offer', **offer_fields)
     require(offer['ok'], 'approved owner publishes an offer without another review')
+    offer_fields['offer_id'] = offer['code']
+    require(owner.call('save_offer', **offer_fields, image_url=photo['url'])['ok'], 'owner adds an uploaded offer photo')
+    require(owner.call('save_offer', **offer_fields)['ok'] and
+        next(o for o in owner.call('merchant_portal')['offers'] if o['id'] == offer['code'])['offer_image_url'] == photo['url'],
+        'omitted offer photo preserves the uploaded image')
+    require(owner.call('save_offer', **offer_fields, image_url=None)['ok'] and
+        next(o for o in owner.call('merchant_portal')['offers'] if o['id'] == offer['code'])['offer_image_url'] == photo['url'],
+        'null offer photo preserves the uploaded image')
+    require(owner.call('save_offer', **offer_fields, image_url='')['ok'] and
+        next(o for o in owner.call('merchant_portal')['offers'] if o['id'] == offer['code'])['offer_image_url'] == '',
+        'explicitly empty offer photo removes the image')
+    require(owner.call('save_offer', **offer_fields, image_url=photo['url'])['ok'], 'owner restores the uploaded offer photo')
     require(any(item['offer']['id'] == offer['code'] for item in student.call('home_feed')['items']),
             'approved offer appears in student discovery')
-    receipt = dict(token=owner.token, actor=actor, name=fields['name'], offer=offer['code'])
+    receipt = dict(token=owner.token, actor=actor, name=fields['name'], offer=offer['code'], photo=photo['url'])
     fd = os.open(receipt_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, 'w') as stream:
         json.dump(receipt, stream)

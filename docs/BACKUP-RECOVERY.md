@@ -49,11 +49,14 @@ Record the snapshot time, completion time, checksums and retention/deletion
 owner. Exercise the scheduled job and retrieval procedure; a local dump proves
 neither remote durability nor a current recovery point.
 
-The current phone source-sync helper treats `assets/` as replaceable source.
-Before deploying the photo revision, separate durable uploaded photos from
-source replacement and prove that an update and a restore retain the photos
-and their private ownership registry. Uploads are ignored by Git. The local
-photo preview's same-store restart test does not prove deployment or recovery.
+The phone source-sync helper now treats `assets/photos/` as persistent
+application data: source updates replace other application assets but never
+copy or delete the photo directory. A disposable actual read-only POSIX bind
+mount retained uploaded bytes through source update and rollback. That proof
+used a private-registry sentinel; coordinated recovery of the real ownership
+database, photos and graph data remains open. Keep the photo directory on a
+durable volume and restore it with the matching ownership database. Uploads
+are ignored by Git. Same-store restart does not prove deployment or recovery.
 
 ## Recovery procedure
 

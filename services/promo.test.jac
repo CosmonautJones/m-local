@@ -569,7 +569,7 @@ test "merchant profile saves normalized routine fields and is readable after com
 }
 
 obj _UnavailableDetailsStore {
-    def update_business_details(actor: str, cuisine: str, description: str) -> None {
+    def update_business_details(actor: str, cuisine: str, description: str, image_url: str | None = None) -> None {
         raise RuntimeError("Private profile store unavailable");
     }
 }

@@ -879,6 +879,7 @@ def:protect merchant_portal() -> MerchantView {
 }
 
 
+# Jac 0.37.23 stringifies omitted RPC defaults; a string sentinel keeps the current photo.
 def:protect update_profile(
     name: str,
     cuisine: str,
@@ -887,7 +888,7 @@ def:protect update_profile(
     neighborhood: str,
     entrance_note: str,
     note_date: str,
-    image_url: str | None = None
+    image_url: str | None = "__keep_photo__"
 ) -> MerchantView {
     fd = _lock();
     try {
@@ -908,7 +909,7 @@ def:protect update_profile(
                 if error { errors.append(error); }
             }
             photo = r.image_url;
-            try { if image_url is not None { photo = image_reference(image_url.strip(), _actor_id()); } }
+            try { if image_url is not None and image_url != "__keep_photo__" { photo = image_reference(image_url.strip(), _actor_id()); } }
             except ValueError as photo_error { errors.append(str(photo_error)); }
             if errors {
                 view = _portal(r, time.time(), "Fix: " + "; ".join(errors) + ".");
@@ -960,7 +961,7 @@ def:protect save_offer(
     dietary: str,
     menu_item: str,
     create_key: str = "",
-    image_url: str | None = None
+    image_url: str | None = "__keep_photo__"
 ) -> ActionResult {
     fd = _lock();
     try {
@@ -987,7 +988,7 @@ def:protect save_offer(
                 menu_item,
                 time.time(),
                 create_key,
-                image_url
+                None if image_url == "__keep_photo__" else image_url
             );
         }
     } finally {
