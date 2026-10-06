@@ -16,6 +16,7 @@ their tested revisions. This checklist does not certify the public deployment.
 - [x] Compiled UI, gateway and deployment tooling checks pass in current CI.
 - [x] Aggregate command propagates missing-suite/account failures.
 - [x] Separate strict access-context suite passes in [CI at 8e369f9](https://github.com/CosmonautJones/m-local/actions/runs/37414464801).
+- [x] Two native APIs share sign-in, approval, quotas and drafts through local TLS SMTP, including idle-peer replacement; [scoped evidence](review/shared-onboarding-v70/verification.json) and [source binding](review/shared-onboarding-v70/source-binding.json).
 - [ ] Provision local demo accounts and run `tests/integration/qr_http.py`.
 - [x] Disposable HTTP approval and coordinated recovery fixtures verify same-store and post-restore restart persistence.
 - [ ] Verify persistence and coordinated recovery on the actual public deployment, including RPO/RTO.

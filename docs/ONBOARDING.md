@@ -245,8 +245,13 @@ fixture. Its [first native run](https://github.com/CosmonautJones/m-local/action
 passed sign-in, approval and cross-API writes, then failed during replacement
 startup. A small Linux socket reproduction showed the port probe rejected a
 recently closed connection; it now uses address reuse, matching the existing
-recovery verifier. The corrected full journey is pending execution.
-The sink accepts only explicitly
+recovery verifier.
+The [corrected run at 6f5e68a](https://github.com/CosmonautJones/m-local/actions/runs/37420030077)
+passed all 82 recorded assertions (23 distinct labels) in 79.392 seconds, with
+60 local TLS deliveries. Seven strict SMTP tests passed without skips. An
+independent reviewer accepted this native onboarding scope; the [receipt](review/shared-onboarding-v70/verification.json)
+and [220-file Git source binding](review/shared-onboarding-v70/source-binding.json)
+retain the actual tested candidate. The sink accepts only explicitly
 allowed fictional recipients and never forwards email. This does not establish
 real inbox delivery, public ingress, independent-host replication, cold seed
 deduplication, browser capacity or safety during an in-flight crash.
