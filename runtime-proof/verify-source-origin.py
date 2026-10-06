@@ -237,7 +237,7 @@ def verify_origin(run, jobs, artifacts, log, *, expected_commit, expected_run_id
             'artifact_size': artifact['size_in_bytes'], 'contract_sha256': contract}
 
 
-def gh_read(endpoint, limit):
+def gh_read_bytes(endpoint, limit):
     env = dict(os.environ)
     env.pop('GH_DEBUG', None)
     command = ['gh', 'api', '--hostname', 'github.com', '--method', 'GET',
@@ -261,10 +261,34 @@ def gh_read(endpoint, limit):
                     process.wait()
     except OSError:
         fail('GitHub client unavailable')
+    return raw
+
+
+def gh_read(endpoint, limit):
+    raw = gh_read_bytes(endpoint, limit)
     try:
         return raw.decode('utf-8')
     except UnicodeError:
         fail('GitHub response encoding')
+
+
+def authenticate_origin(expected_commit, expected_run_id):
+    pattern(expected_commit, r'[0-9a-f]{40}', 'expected source commit')
+    pattern(expected_run_id, r'[1-9][0-9]{0,19}', 'expected source run')
+    run_endpoint = API_ROOT + 'runs/' + expected_run_id
+    run = read_json(gh_read(run_endpoint, MAX_METADATA_BYTES))
+    attempt = verify_run(run, expected_commit, expected_run_id)
+    jobs = read_json(gh_read(run_endpoint + '/attempts/' + str(attempt) + '/jobs?per_page=100', MAX_METADATA_BYTES))
+    job, steps = verify_job(jobs, expected_commit, expected_run_id, attempt)
+    artifacts = read_json(gh_read(run_endpoint + '/artifacts?per_page=100', MAX_METADATA_BYTES))
+    verify_artifact(artifacts, expected_commit, expected_run_id, steps[STEPS[-1]])
+    log = gh_read(API_ROOT + 'jobs/' + str(job['id']) + '/logs', MAX_LOG_BYTES)
+    result = verify_origin(run, jobs, artifacts, log,
+                           expected_commit=expected_commit, expected_run_id=expected_run_id)
+    latest = read_json(gh_read(run_endpoint, MAX_METADATA_BYTES))
+    if verify_run(latest, expected_commit, expected_run_id) != attempt:
+        fail('source run attempt changed')
+    return result
 
 
 def main(argv=None):
@@ -273,21 +297,7 @@ def main(argv=None):
     parser.add_argument('--expected-run-id', required=True)
     args = parser.parse_args(argv)
     try:
-        pattern(args.expected_commit, r'[0-9a-f]{40}', 'expected source commit')
-        pattern(args.expected_run_id, r'[1-9][0-9]{0,19}', 'expected source run')
-        run_endpoint = API_ROOT + 'runs/' + args.expected_run_id
-        run = read_json(gh_read(run_endpoint, MAX_METADATA_BYTES))
-        attempt = verify_run(run, args.expected_commit, args.expected_run_id)
-        jobs = read_json(gh_read(run_endpoint + '/attempts/' + str(attempt) + '/jobs?per_page=100', MAX_METADATA_BYTES))
-        job, steps = verify_job(jobs, args.expected_commit, args.expected_run_id, attempt)
-        artifacts = read_json(gh_read(run_endpoint + '/artifacts?per_page=100', MAX_METADATA_BYTES))
-        verify_artifact(artifacts, args.expected_commit, args.expected_run_id, steps[STEPS[-1]])
-        log = gh_read(API_ROOT + 'jobs/' + str(job['id']) + '/logs', MAX_LOG_BYTES)
-        result = verify_origin(run, jobs, artifacts, log,
-                               expected_commit=args.expected_commit, expected_run_id=args.expected_run_id)
-        latest = read_json(gh_read(run_endpoint, MAX_METADATA_BYTES))
-        if verify_run(latest, args.expected_commit, args.expected_run_id) != attempt:
-            fail('source run attempt changed')
+        result = authenticate_origin(args.expected_commit, args.expected_run_id)
     except (RuntimeError, OSError, subprocess.SubprocessError):
         print('source origin verification failed', file=sys.stderr)
         return 1

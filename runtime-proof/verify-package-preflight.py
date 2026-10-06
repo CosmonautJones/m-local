@@ -23,6 +23,7 @@ ADAPTER_MANIFEST_SHA = 'dc8a0e3f50f01d43d0e1654e94648d581c54b064b1a9b18ce204c467
 PACKAGE_MANIFEST_SHA = '681d3cc0713d196d29f0e335a3454ed34e9cc6fa860afc0dbd30713681b81888'
 POLICY_MANIFEST_SHA = '9221e3af38924d04cc72f204512890dc3864697ac8ac40bf8eb9fa0843556ce0'
 SELF_PATH = 'runtime-proof/verify-package-preflight.py'
+CONSUMER_HELPERS = ('runtime-proof/verify-source-origin.py', 'runtime-proof/download-source-handoff.py')
 VERIFIER_PATH = 'runtime-proof/verify-source-handoff-v8.py'
 PACKAGE_PATH = 'runtime-proof/package-inputs/'
 SOURCE_CRITICAL = (
@@ -132,6 +133,7 @@ def verify_preflight(bundle, source_checkout, package_checkout, *, expected_sour
         fail('preflight checkout binding')
     consumer = {SELF_PATH: committed_file(package, expected_package_commit, SELF_PATH),
                 VERIFIER_PATH: committed_file(package, expected_package_commit, VERIFIER_PATH)}
+    consumer.update({name: committed_file(package, expected_package_commit, name) for name in CONSUMER_HELPERS})
     if sha(consumer[VERIFIER_PATH]) != VERIFIER_SHA:
         fail('trusted verifier pin')
     producer = {name: committed_file(source, expected_source_commit, name) for name in SOURCE_CRITICAL}

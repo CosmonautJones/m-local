@@ -13,6 +13,8 @@ on:
       - 'runtime-proof/test-package-preflight.py'
       - 'runtime-proof/verify-source-origin.py'
       - 'runtime-proof/test-source-origin.py'
+      - 'runtime-proof/download-source-handoff.py'
+      - 'runtime-proof/test-source-archive.py'
 
 permissions:
   contents: read
@@ -34,3 +36,5 @@ jobs:
         run: python3 -I -B runtime-proof/test-package-preflight.py
       - name: Check authenticated source job origin boundaries
         run: python3 -I -B runtime-proof/test-source-origin.py
+      - name: Check source archive download and extraction boundaries
+        run: python3 -I -B runtime-proof/test-source-archive.py

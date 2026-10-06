@@ -85,6 +85,8 @@ class PackagePreflightTests(unittest.TestCase):
         package_files = {
             'runtime-proof/verify-package-preflight.py',
             'runtime-proof/verify-source-handoff-v8.py',
+            'runtime-proof/verify-source-origin.py',
+            'runtime-proof/download-source-handoff.py',
             'runtime-proof/package-inputs/public-package-manifest-v7.json',
             'runtime-proof/package-inputs/public-policy-manifest-v7.json',
         }
@@ -130,7 +132,7 @@ class PackagePreflightTests(unittest.TestCase):
             self.assertEqual(result['package'], dict(
                 commit_sha=fixture['package_commit'],
                 manifest_sha256='681d3cc0713d196d29f0e335a3454ed34e9cc6fa860afc0dbd30713681b81888',
-                input_count=9, inventory_sha256=result['package']['inventory_sha256']))
+                input_count=11, inventory_sha256=result['package']['inventory_sha256']))
         finally:
             fixture['temporary'].cleanup()
 
@@ -167,6 +169,8 @@ class PackagePreflightTests(unittest.TestCase):
     def test_consumer_self_verifier_manifest_and_package_tampering_is_rejected(self):
         cases = ('runtime-proof/verify-package-preflight.py',
                  'runtime-proof/verify-source-handoff-v8.py',
+                 'runtime-proof/verify-source-origin.py',
+                 'runtime-proof/download-source-handoff.py',
                  'runtime-proof/package-inputs/public-package-manifest-v7.json',
                  'runtime-proof/package-inputs/package-runtime-candidate-v7.py')
         fixture = self.fixture()
