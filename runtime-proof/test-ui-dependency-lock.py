@@ -312,6 +312,41 @@ class PureTests(unittest.TestCase):
         self.assertEqual(offline['npm_config_offline'], 'true')
         self.assertEqual(offline['NPM_CONFIG_OFFLINE'], 'true')
 
+    def test_smoke_receipt_requires_empty_supplementary_groups_and_exact_ids(self):
+        valid = {'ok': 1, 'uid': 65534, 'gid': 65534, 'euid': 65534, 'egid': 65534, 'groups': []}
+        self.assertEqual(self.control._parse_smoke(json.dumps(valid).encode('utf-8')), valid)
+        for groups in ([65534], [0], [1], ['65534']):
+            value = dict(valid, groups=groups)
+            with self.subTest(groups=groups):
+                with self.assertRaises(ValueError):
+                    self.control._parse_smoke(json.dumps(value).encode('utf-8'))
+        for field, value in (('uid', 0), ('gid', 0), ('euid', 0), ('egid', 0),
+                             ('uid', '65534'), ('gid', True), ('euid', 65534.0), ('egid', None)):
+            mutated = dict(valid, **{field: value})
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                self.control._parse_smoke(json.dumps(mutated).encode('utf-8'))
+        for field in ('ok', 'uid', 'gid', 'euid', 'egid', 'groups'):
+            mutated = dict(valid)
+            mutated.pop(field)
+            with self.subTest(missing=field), self.assertRaises(ValueError):
+                self.control._parse_smoke(json.dumps(mutated).encode('utf-8'))
+        for extra in ({'extra': 1}, {'groups': [], 'unexpected': 'value'}):
+            mutated = dict(valid, **extra)
+            with self.subTest(extra=extra), self.assertRaises(ValueError):
+                self.control._parse_smoke(json.dumps(mutated).encode('utf-8'))
+        for raw in (b'{', b'not-json', b'{"ok":1,"ok":1}'):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                self.control._parse_smoke(raw)
+
+    def test_smoke_probe_reads_kernel_groups_and_clears_groups_directly(self):
+        source = CONTROL.read_text(encoding='utf-8')
+        self.assertIn("readFileSync('/proc/self/status'", source)
+        self.assertIn("line.startsWith('Groups:')", source)
+        self.assertIn("'--clear-groups'", source)
+        self.assertNotIn('process.getgroups()', source)
+        self.assertLess(source.index('process.getuid()!==65534'), source.index("readFileSync('/proc/self/status'"))
+        self.assertLess(source.index("readFileSync('/proc/self/status'"), source.index("require('jsdom')"))
+
     def test_preflight_pin_rejects_tamper_before_dynamic_import_or_output(self):
         preflight_path = self.control.CHECKOUT / self.control.PREFLIGHT_RELATIVE
         original_read = self.control._read_bounded

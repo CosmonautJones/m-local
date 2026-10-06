@@ -91,6 +91,9 @@ tests or change the full package host requirements.
 Tar validation permits harmless `.` path aliases only inside the package root.
 Repeated normalized files must match in type, permissions, size and content;
 every physical entry still counts toward member and expanded-byte limits.
+The DOM probe reads the running Node process's kernel supplementary group list
+from `/proc/self/status`; it must be empty. Node's `process.getgroups()` includes
+the effective group, so that API does not represent this empty-list control.
 
 The nine original compatibility, catalog, loader and native-gate sources are
 also frozen byte-for-byte in `native-inputs/native-suite-v5/`. Their manifest

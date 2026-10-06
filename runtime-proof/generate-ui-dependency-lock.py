@@ -351,6 +351,16 @@ def _safe_env(runner, *, cache, home, folder, offline):
     return env
 
 
+def _parse_smoke(raw):
+    value = _json(raw, 'dependency smoke json', 64 * 1024)
+    expected = {'ok': 1, 'uid': 65534, 'gid': 65534, 'euid': 65534, 'egid': 65534}
+    if (type(value) is not dict or set(value) != set(expected) | {'groups'} or
+            any(type(value.get(key)) is not int or value[key] != item for key, item in expected.items()) or
+            type(value.get('groups')) is not list or value['groups'] != []):
+        _fail('dependency smoke identity')
+    return value
+
+
 def _setpriv(command):
     return ['/usr/bin/setpriv', '--reuid=65534', '--regid=65534', '--clear-groups', '--', *map(str, command)]
 
@@ -658,19 +668,19 @@ def generate(output, expected_commit):
             _fail('dependency package lock changed')
         inventory_sha, file_count, file_bytes = _inventory(install / 'node_modules')
         smoke_command = _setpriv([node, '-e',
+            "if(process.getuid()!==65534||process.getgid()!==65534||process.geteuid()!==65534||process.getegid()!==65534) process.exit(1); "
+            "const groupLine=require('node:fs').readFileSync('/proc/self/status','utf8').split('\\n').find(line=>line.startsWith('Groups:')); "
+            "if(typeof groupLine!=='string') process.exit(1); "
+            "const groupText=groupLine.slice(7); if(!/^[0-9 \\t]*$/.test(groupText)) process.exit(1); "
+            "const groups=groupText.trim().split(/\\s+/).filter(Boolean).map(Number); "
+            "if(!groups.every(Number.isSafeInteger)||groups.length!==0) process.exit(1); "
+            "const identity={ok:1,uid:process.getuid(),gid:process.getgid(),euid:process.geteuid(),egid:process.getegid(),groups}; "
             "const {JSDOM}=require('jsdom'); const d=new JSDOM('<!doctype html><p id=x>ok</p>'); "
             "if(d.window.document.querySelector('#x').textContent!=='ok') process.exit(1); "
-            "process.stdout.write(JSON.stringify({ok:1,uid:process.getuid(),gid:process.getgid(),groups:process.getgroups()}));"])
+            "process.stdout.write(JSON.stringify(identity));"])
         runner['run_command']('ui jsdom smoke', smoke_command, cwd=install, env=offline_env,
                               timeout=_remaining(deadline), log=logs[3])
-        smoke_text = _private_log(logs[3], maximum=64 * 1024, allow_empty=False).decode('utf-8', 'replace').strip()
-        try:
-            smoke = json.loads(smoke_text)
-        except (ValueError, TypeError):
-            _fail('dependency smoke JSON')
-        if type(smoke) is not dict or smoke.get('ok') != 1 or smoke.get('uid') != 65534 or \
-                smoke.get('gid') != 65534 or smoke.get('groups') != []:
-            _fail('dependency smoke identity')
+        smoke = _parse_smoke(_private_log(logs[3], maximum=64 * 1024, allow_empty=False))
         final_inventory_sha, final_file_count, final_file_bytes = _inventory(install / 'node_modules')
         if (final_inventory_sha, final_file_count, final_file_bytes) != (inventory_sha, file_count, file_bytes):
             _fail('dependency inventory changed')

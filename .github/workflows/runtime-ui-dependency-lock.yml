@@ -34,7 +34,7 @@ jobs:
       - name: Generate and verify script-free offline dependency installation
         run: |
           set -euo pipefail
-          echo '5858cdc3e55731826cf4668bb2dc4d6225d2a7ad2b3e8468320bb23feebb7ce1  runtime-proof/generate-ui-dependency-lock.py' | sha256sum -c -
+          echo 'ca736a8bdf433efd8e5c49bad022c7da5d6598b87beabfd9e42e1c2215f649be  runtime-proof/generate-ui-dependency-lock.py' | sha256sum -c -
           sudo -n timeout --signal=TERM --kill-after=30s 540s \
             python3 -I -B runtime-proof/generate-ui-dependency-lock.py \
             --expected-commit "$GITHUB_SHA" \
