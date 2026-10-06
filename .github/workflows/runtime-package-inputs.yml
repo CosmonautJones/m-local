@@ -42,3 +42,5 @@ jobs:
         run: sudo -n python3 -I -B runtime-proof/test-source-isolation.py
       - name: Check private tracing client and tracee environment on owned fixtures
         run: sudo -n python3 -I -B runtime-proof/test-file-trace-control.py
+      - name: Check private PostgreSQL client bindings on owned fixtures
+        run: sudo -n python3 -I -B runtime-proof/test-pg-client-control.py

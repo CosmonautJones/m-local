@@ -32,6 +32,14 @@ The package-input workflow exercises these controls on a disposable Linux
 filesystem. This verifies the tracing fixture; tracing the fresh candidate
 through compatibility, native HTTP and capacity still requires execution.
 
+The PostgreSQL client fixture downloads fixed PGDG client and libpq archives
+and extracts them privately. It checks PostgreSQL 18.6 tool versions, binary
+and dynamic-library hashes, and execution under UID/GID 65534. Missing host
+libraries fail the check. It installs no system packages and starts no database.
+The original extractor receipt and a separate dependency binding are sealed
+and rechecked before acceptance. This proves client setup only; database
+durability, backup/restore and sustained capacity require their own execution.
+
 The manual defaults bind the reviewed successful source commit
 `990c7b33c920e6a93431d34a01df7b8c87c432ba` and run `37477834755`.
 The parent authenticates their exact successful job and unexpired artifact,

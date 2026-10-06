@@ -26,6 +26,7 @@ CACHE_CHECK_SHA = '4aefeb54a64577594b2408548c7a6a2e3843e6184440bc56947e7e5465142
 CLASSIFIER_CONTROL_SHA = '242e1aefd09969e07fd557c5737cc6957fafd97920ba8e069f20b5c517bdf518'
 SOURCE_ISOLATION_SHA = '5b47f940cb4d7e939f987cf07c7f84a5d4b7e8ce2764a9b12a7ae4a23c250f6d'
 FILE_TRACE_CONTROL_SHA = 'd0567f05d046da61c772e8ce20dbabbbcea7e0d6868307ac402448d4810f1c08'
+PG_CLIENT_CONTROL_SHA = 'bf1bbe1647b9fd1f577e0140452c085903847211111610c212e5da8291521de7'
 RECIPE_SHA = 'ec820c414d5a83d498f894eddcee105d5eb3e287a030c2d6b87045fe7d32129f'
 VERIFIER_SHA = '9f7acdfd45c3a66913c8c3c9205f3afc8b00801147b1082e2af329a17f27d8de'
 CLASSIFIER_SHA = '33dd3dbe88aadb16317f60bd518430225a7a8ef466596c70271b16371006f363'
@@ -369,6 +370,14 @@ def main(argv=None):
         mount_identity(trace_directory, runner['E_ROOT'], 'm-local-file-trace-control-v1-', trace_identity)
         if trace.get('status') != 'passed':
             fail('file trace fixture control')
+        pg_client_control = load_committed(preflight, 'runtime-proof/run-fresh-pg-client-control.py',
+                                           args.expected_package_commit, pin=PG_CLIENT_CONTROL_SHA)
+        pg_directory, pg_identity = fresh_mount(runner, 'm-local-pg-client-control-v1-')
+        pg_client = pg_client_control['run_control'](preflight, runner, pg_directory,
+                                                     args.expected_package_commit, remaining_seconds(deadline, 180))
+        mount_identity(pg_directory, runner['E_ROOT'], 'm-local-pg-client-control-v1-', pg_identity)
+        if pg_client.get('status') != 'passed':
+            fail('PostgreSQL client fixture control')
         runner['prepare_task'](runner['CANONICAL_TASK'], manifest, adapters, workspace / 'checkout.log')
         official, materialized = runner['materialize_runtime'](workspace, pins, workspace / 'runtime.log')
         old, fork = runner['prepare_forks'](workspace, manifest, workspace / 'forks.log')
@@ -481,6 +490,18 @@ def main(argv=None):
         for name in ('tracing_client', 'tracee_environment'):
             if regular_hash(preflight, trace[name + '_receipt_path'], maximum=1024 ** 2)[0] != trace[name + '_receipt_sha256']:
                 fail('file trace fixture receipt changed')
+        mount_identity(pg_directory, runner['E_ROOT'], 'm-local-pg-client-control-v1-', pg_identity)
+        for name in ('frozen', 'binding'):
+            if regular_hash(preflight, pg_client[name + '_receipt_path'], maximum=1024 ** 2)[0] != pg_client[name + '_receipt_sha256']:
+                fail('PostgreSQL client fixture receipt changed')
+        for name, expected in pg_client['tool_binary_sha256'].items():
+            path = pg_client['clients_directory'] / 'root/usr/lib/postgresql/18/bin' / name
+            if regular_hash(preflight, path, maximum=1024 ** 3)[0] != expected:
+                fail('PostgreSQL client fixture binary changed')
+        for dependencies in pg_client['dependency_sha256'].values():
+            for path, expected in dependencies.items():
+                if regular_hash(preflight, Path(path), maximum=1024 ** 3)[0] != expected:
+                    fail('PostgreSQL client fixture dependency changed')
         summary = dict(accepted, source=source_gate['source'], source_job_id=authenticated['job_id'],
                        source_artifact_id=authenticated['artifact_id'],
                        source_archive_sha256=authenticated['artifact_digest'],
@@ -497,6 +518,11 @@ def main(argv=None):
                        file_trace_fixture_client_binary_sha256=trace['client_binary_sha256'],
                        file_trace_fixture_prepare_sha256=trace['executed_prepare_sha256'],
                        file_trace_fixture_environment_probe_sha256=trace['executed_environment_probe_sha256'],
+                       pg_client_control_code_sha256=PG_CLIENT_CONTROL_SHA,
+                       pg_client_fixture_frozen_receipt_sha256=pg_client['frozen_receipt_sha256'],
+                       pg_client_fixture_binding_receipt_sha256=pg_client['binding_receipt_sha256'],
+                       pg_client_fixture_extractor_sha256=pg_client['executed_extractor_sha256'],
+                       pg_client_fixture_tool_binary_sha256=pg_client['tool_binary_sha256'],
                        host_cpu_count=host_cpus, minimum_host_memory_bytes=MIN_HOST_MEMORY,
                        controls_confirmed_before_workload=assembly['controls_confirmed_before_workload'],
                        assembly_elapsed_limit_seconds=ASSEMBLY_SECONDS,
