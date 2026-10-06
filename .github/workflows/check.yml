@@ -40,6 +40,9 @@ jobs:
         run: bash scripts/python.sh -m unittest tests/photo_media.py
       - name: Verify business approval over HTTP and after restart
         run: bash scripts/test-business-approval.sh
+      - name: Verify coordinated recovery and recovered restart
+        timeout-minutes: 22
+        run: bash scripts/test-recovery.sh
       - name: Test deployment source and data separation
         run: python3 -m unittest discover -s tests/tooling -p 'test_*.py'
       - name: Build compiled app and client dependencies

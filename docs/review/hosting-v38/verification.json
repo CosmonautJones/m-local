@@ -1,0 +1,97 @@
+{
+  "status": "observed",
+  "scope": "Read-only unauthenticated public HTTP metadata; no submitted email, native registration, login, credentials, load test or deployment",
+  "candidate_revision_verified": false,
+  "deployment_configuration_verified": false,
+  "post_access_controls_verified": false,
+  "html_fallback_paths": [
+    "/ready",
+    "/docs",
+    "/graph/data"
+  ],
+  "observations": [
+    {
+      "url": "https://m-local-main-prjc0b.jachammer.app/",
+      "method": "GET",
+      "observed_at": "2026-10-06T01:53:33.209613+00:00",
+      "http_status": 404,
+      "content_type": "text/plain; charset=utf-8",
+      "bytes_sampled": 0,
+      "sample_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "url": "https://mlocal.jachammer.app/",
+      "method": "GET",
+      "observed_at": "2026-10-06T01:53:33.211128+00:00",
+      "http_status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes_sampled": 448,
+      "sample_sha256": "972a786605c629d56bc84cdc1a3dfbe74948d328f47cfbe2e9458988e4ff28ec"
+    },
+    {
+      "url": "https://mlocal.jachammer.app/ready",
+      "method": "GET",
+      "observed_at": "2026-10-06T01:53:33.488316+00:00",
+      "http_status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes_sampled": 448,
+      "sample_sha256": "972a786605c629d56bc84cdc1a3dfbe74948d328f47cfbe2e9458988e4ff28ec"
+    },
+    {
+      "url": "https://mlocal.jachammer.app/healthz",
+      "method": "GET",
+      "observed_at": "2026-10-06T01:53:33.511921+00:00",
+      "http_status": 200,
+      "content_type": "application/json",
+      "bytes_sampled": 16,
+      "sample_sha256": "08e2c358ce13cb67f94ebb35b0f67c8763190a857c0db68da6eb196dfe9da46a"
+    },
+    {
+      "url": "https://mlocal.jachammer.app/user/login",
+      "method": "GET",
+      "observed_at": "2026-10-06T01:53:33.676238+00:00",
+      "http_status": 404,
+      "content_type": "application/json",
+      "bytes_sampled": 22,
+      "sample_sha256": "064e1262e82600f52520eec5a475fe906f349f8a6452efa8b1ba6f39250902b6"
+    },
+    {
+      "url": "https://mlocal.jachammer.app/user/register",
+      "method": "GET",
+      "observed_at": "2026-10-06T01:53:33.677759+00:00",
+      "http_status": 404,
+      "content_type": "application/json",
+      "bytes_sampled": 22,
+      "sample_sha256": "064e1262e82600f52520eec5a475fe906f349f8a6452efa8b1ba6f39250902b6"
+    },
+    {
+      "url": "https://mlocal.jachammer.app/docs",
+      "method": "GET",
+      "observed_at": "2026-10-06T01:53:33.844918+00:00",
+      "http_status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes_sampled": 448,
+      "sample_sha256": "972a786605c629d56bc84cdc1a3dfbe74948d328f47cfbe2e9458988e4ff28ec"
+    },
+    {
+      "url": "https://mlocal.jachammer.app/openapi.json",
+      "method": "GET",
+      "observed_at": "2026-10-06T01:53:33.905067+00:00",
+      "http_status": 404,
+      "content_type": "application/json",
+      "bytes_sampled": 22,
+      "sample_sha256": "064e1262e82600f52520eec5a475fe906f349f8a6452efa8b1ba6f39250902b6"
+    },
+    {
+      "url": "https://mlocal.jachammer.app/graph/data",
+      "method": "GET",
+      "observed_at": "2026-10-06T01:53:34.017676+00:00",
+      "http_status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes_sampled": 448,
+      "sample_sha256": "972a786605c629d56bc84cdc1a3dfbe74948d328f47cfbe2e9458988e4ff28ec"
+    }
+  ],
+  "source_probe_sha256": "0e439e92305fa5c8c939f6477515180d0619ad7bed1ce6dae8b107c6ab01d3a5",
+  "executed_export_sha256": "ffa9d29159f275251c61e2aacda8423ce63e6f76ec1a3664292eaf9b72a46300"
+}

@@ -2,19 +2,26 @@
 
 ## Shared hosting status
 
-October 4, 2026 read-only check: the previously published app address below
-returned an AWS load-balancer HTTP 404. The current dashboard address, deployed
-revision and storage topology remain unverified. The September 29 observations
-are historical, not confirmation that today's candidate is deployed.
+October 6, 2026 read-only check: [mlocal.jachammer.app](https://mlocal.jachammer.app/)
+serves the welcome and signup screens. The older longer address below returns
+HTTP 404. The exact deployed revision, current storage topology and authenticated
+account isolation remain unverified. Pushing this review branch does not prove
+that its code is deployed. See the [read-only receipt](review/hosting-v38/verification.json).
+
+`/healthz` returns HTTP 200 JSON. `/ready`, `/docs` and `/graph/data` return the
+same HTML shell as `/`; those responses do not prove readiness or API access.
+GET requests to the native login/registration paths return 404; their POST
+access controls have not been checked by this probe.
+
+### Historical September 29 configuration
 
 Verified September 29, 2026. The JacHammer app is at
 **https://m-local-main-prjc0b.jachammer.app/**. Its application, gateway and
 PostgreSQL passed readiness checks with three healthy pods and zero restarts.
 This host runs independently of Travis's laptop.
 
-**Cleaner address reserved:** `https://mlocal.jachammer.app`. JacHammer confirmed
-the name is claimed but serves only after the next production deployment. Until
-that deployment is verified, keep using the longer working address above.
+The short address was reserved at that time and is now serving the application.
+The observations below describe September 29, rather than the current release.
 
 All visitors connect to the same backend and persistent PostgreSQL graph store.
 Publishing an offer updates the shared catalog. Shared storage does not mean
