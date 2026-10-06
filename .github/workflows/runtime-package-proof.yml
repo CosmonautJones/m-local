@@ -1,0 +1,83 @@
+name: Fresh runtime package proof
+
+on:
+  push:
+    branches:
+      - codex/runtime-verification
+    paths:
+      - '.github/workflows/runtime-package-proof.yml'
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Reviewed successful source-proof commit
+        required: true
+        default: '990c7b33c920e6a93431d34a01df7b8c87c432ba'
+        type: string
+      source_run_id:
+        description: Successful source-proof run with its unexpired artifact
+        required: true
+        default: '37477834755'
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: fresh-runtime-package-proof
+  cancel-in-progress: false
+
+jobs:
+  package-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Qualify package host before downloads or provisioning
+        run: |
+          python3 -I -B - <<'PY'
+          from pathlib import Path
+          import json
+          import os
+          memory = int(Path('/proc/meminfo').read_text().split('MemTotal:', 1)[1].split()[0]) * 1024
+          cpus = len(os.sched_getaffinity(0))
+          eligible = memory >= 17179869184 and cpus >= 4
+          print(json.dumps(dict(status='qualified' if eligible else 'rejected',
+                                raw_memory_bytes=memory, available_cpus=cpus,
+                                required_memory_bytes=17179869184, required_cpus=4), sort_keys=True))
+          raise SystemExit(0 if eligible else 1)
+          PY
+
+      - name: Checkout reviewed package parent
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          path: package
+
+      - name: Checkout reviewed source producer
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source_commit || '990c7b33c920e6a93431d34a01df7b8c87c432ba' }}
+          persist-credentials: false
+          path: producer
+
+      - name: Verify package entry point before execution
+        working-directory: package
+        run: |
+          echo '1d08119a6722b470119db35d21b7e627c3ff62efa906bed15fd67ef8cf963245  runtime-proof/run-fresh-package.py' | sha256sum -c -
+          echo 'eaf2dc65909aa593f322cf75cf239ab86fe9b5b79621d9b35d2b42af2ea83368  runtime-proof/check-runtime-direct-use.py' | sha256sum -c -
+          python3 -I -B runtime-proof/check-runtime-direct-use.py --expected-commit "$GITHUB_SHA"
+
+      - name: Assemble and independently verify fresh private package
+        working-directory: package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_COMMIT: ${{ inputs.source_commit || '990c7b33c920e6a93431d34a01df7b8c87c432ba' }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id || '37477834755' }}
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=GH_TOKEN timeout --signal=TERM --kill-after=90s 21000s \
+            python3 -I -B runtime-proof/run-fresh-package.py \
+            --trusted-source-checkout "$GITHUB_WORKSPACE/producer" \
+            --expected-source-commit "$SOURCE_COMMIT" \
+            --expected-package-commit "$GITHUB_SHA" \
+            --expected-run-id "$SOURCE_RUN_ID"
