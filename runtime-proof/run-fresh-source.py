@@ -92,8 +92,13 @@ SCOPED_COMMAND_LABELS = {
     'pinned download jac', 'pinned download jacpython', 'pinned download postgres',
     'PostgreSQL version', 'declared dependency priming', 'Pillow dependency guard',
 }
+MATRIX_PHASE_NAMES = (
+    'materialization', 'commit-40001', 'commit-40P01', 'commit-55P03', 'commit-08006',
+    'runtime-boundary-probe', 'runtime-lifecycle-probe', 'runtime-served-probe',
+    'runtime-request-context-probe', 'runtime-nested-context-probe', 'codec', 'controls',
+)
 FAILURE_DIAGNOSTICS = dict(operation='setup', last_scoped_command=None, body_completed=False,
-                           body_failure_type=None, cleanup_failures=[])
+                           body_failure_type=None, cleanup_failures=[], matrix_failure=None)
 
 
 def digest(path):
@@ -136,6 +141,21 @@ def sanitized_failure_context(error):
     return labels
 
 
+def sanitized_matrix_failure(value):
+    if type(value) is not dict:
+        return None
+    name, status = value.get('name'), value.get('status')
+    code, reason = value.get('exit_code'), value.get('guard_reason')
+    if (type(name) is not str or name not in MATRIX_PHASE_NAMES or
+            type(status) is not str or status not in {'failed', 'guarded'} or
+            type(code) is not int or not -255 <= code <= 255):
+        return None
+    if (status == 'failed' and reason is not None) or (status == 'guarded' and
+            (type(reason) is not str or reason not in {'kernel_memory_limit', 'kernel_control_mismatch', 'disk', 'timeout'})):
+        return None
+    return dict(name=name, status=status, exit_code=code, guard_reason=reason)
+
+
 def sanitized_failure_diagnostics():
     state = FAILURE_DIAGNOSTICS if type(FAILURE_DIAGNOSTICS) is dict else {}
     operations = {
@@ -158,6 +178,7 @@ def sanitized_failure_diagnostics():
                 last_scoped_command=finite(state.get('last_scoped_command'), SCOPED_COMMAND_LABELS),
                 body_completed=state.get('body_completed') is True,
                 body_failure_type=finite(state.get('body_failure_type'), families),
+                matrix_failure=sanitized_matrix_failure(state.get('matrix_failure')),
                 cleanup_failures=list(dict.fromkeys(label for label in failures
                                                    if finite(label, cleanup_labels) is not None)))
 
@@ -965,6 +986,59 @@ def assert_no_new_mounts(before, after, label):
         fail(label + ' unidentified mount cleanup')
 
 
+def capture_matrix_failure(before):
+    try:
+        new = mounts() - before
+        if len(new) != 1:
+            return None
+        directory = next(iter(new))
+        backing = E_ROOT / directory.name
+        if (directory.parent != Path('/var/tmp') or not directory.name.startswith('m-local-kali-runtime-regressions-v3-') or
+                Path('/var/tmp').is_symlink() or E_ROOT.is_symlink() or not is_mount(E_ROOT) or
+                E_ROOT.resolve() != E_ROOT or directory.is_symlink() or backing.is_symlink() or
+                directory.resolve() != directory or backing.resolve() != backing or not is_mount(directory)):
+            return None
+        root, mounted, original = E_ROOT.stat(), directory.stat(), backing.stat()
+        if (any(item.st_uid != 65534 or item.st_mode & 0o777 != 0o700 for item in (root, mounted, original)) or
+                mounted.st_dev != root.st_dev or
+                (mounted.st_dev, mounted.st_ino) != (original.st_dev, original.st_ino)):
+            return None
+        result = directory / 'result.json'
+        metadata = result.lstat()
+        nofollow = getattr(os, 'O_NOFOLLOW', None)
+        if (nofollow is None or not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0 or
+                metadata.st_mode & 0o777 != 0o600 or metadata.st_nlink != 1 or
+                not 0 < metadata.st_size <= 1024 ** 2):
+            return None
+        with os.fdopen(os.open(result, os.O_RDONLY | nofollow), 'rb') as stream:
+            opened = os.fstat(stream.fileno())
+            fields = ('st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_mode', 'st_uid', 'st_nlink')
+            if any(getattr(opened, key) != getattr(metadata, key) for key in fields):
+                return None
+            raw = stream.read(1024 ** 2 + 1)
+            closed = os.fstat(stream.fileno())
+            if len(raw) != metadata.st_size or any(getattr(closed, key) != getattr(opened, key) for key in fields):
+                return None
+        receipt = json.loads(raw)
+        if type(receipt) is not dict:
+            return None
+        phases, interfaces = receipt.get('phases'), receipt.get('interface_proofs')
+        if (type(phases) is not list or type(interfaces) is not list or
+                not 1 <= len(phases) <= 10 or len(interfaces) > 2 or
+                (interfaces and (len(phases) != 10 or any(type(row) is not dict or row.get('status') != 'passed' for row in phases)))):
+            return None
+        for rows, expected in ((phases, MATRIX_PHASE_NAMES[:10]), (interfaces, MATRIX_PHASE_NAMES[10:])):
+            if any(type(row) is not dict or row.get('name') != expected[index] for index, row in enumerate(rows)):
+                return None
+        rows = phases + interfaces
+        if any(row.get('status') != 'passed' for row in rows[:-1]):
+            return None
+        failure = sanitized_matrix_failure(rows[-1])
+        return failure if failure is not None and receipt.get('status') == failure['status'] else None
+    except (OSError, ValueError, TypeError, RuntimeError):
+        return None
+
+
 def register_stage_mounts(stage, before, child):
     prefixes = {'cold-compile': 'm-local-identity-type-compile-v7-',
                 'bootstrap': 'm-local-identity-bootstrap-proof-v4-',
@@ -1136,6 +1210,8 @@ def run_stage(task, workspace, stage, fork, official, *, old_fork=None, cold=Non
         run_command('source ' + stage, command, cwd=task, timeout=remaining, log=workspace / (stage + '.log'),
                     first_signal=signal.SIGINT)
     except BaseException:
+        if stage == 'matrix':
+            FAILURE_DIAGNOSTICS['matrix_failure'] = capture_matrix_failure(before_mounts)
         assert_no_new_mounts(before_mounts, mounts(), 'source ' + stage)
         raise
     if not output.is_file():
@@ -1304,7 +1380,7 @@ def export_handoff(workspace, summary, producer):
 def main():
     global PRIVATE_LOG_DIR
     FAILURE_DIAGNOSTICS.update(operation='producer-binding', last_scoped_command=None,
-                               body_completed=False, body_failure_type=None, cleanup_failures=[])
+                               body_completed=False, body_failure_type=None, cleanup_failures=[], matrix_failure=None)
     producer = producer_binding()
     FAILURE_DIAGNOSTICS['operation'] = 'host-controls'
     host_guard()
