@@ -46,3 +46,5 @@ jobs:
         run: sudo -n python3 -I -B runtime-proof/test-pg-client-control.py
       - name: Check private JavaScript test-tool bindings on owned fixtures
         run: sudo -n python3 -I -B runtime-proof/test-node-client-control.py
+      - name: Check prepared transaction matrix bindings on owned fixtures
+        run: sudo -n python3 -I -B runtime-proof/test-prepared-runtime-matrix.py

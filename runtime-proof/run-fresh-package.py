@@ -28,6 +28,7 @@ SOURCE_ISOLATION_SHA = '5b47f940cb4d7e939f987cf07c7f84a5d4b7e8ce2764a9b12a7ae4a2
 FILE_TRACE_CONTROL_SHA = 'd0567f05d046da61c772e8ce20dbabbbcea7e0d6868307ac402448d4810f1c08'
 PG_CLIENT_CONTROL_SHA = 'bf1bbe1647b9fd1f577e0140452c085903847211111610c212e5da8291521de7'
 NODE_CLIENT_CONTROL_SHA = '79097e21e7f8f1647fa6984b85903d470824cb6f240bb0b82d1e8c435dfa15f5'
+PREPARED_MATRIX_SHA = 'b97a3b695d90d9ad60b3aac06a0ee34cfd13597f2dbbb9e26512d869e91d28ba'
 RECIPE_SHA = 'ec820c414d5a83d498f894eddcee105d5eb3e287a030c2d6b87045fe7d32129f'
 VERIFIER_SHA = '9f7acdfd45c3a66913c8c3c9205f3afc8b00801147b1082e2af329a17f27d8de'
 CLASSIFIER_SHA = '33dd3dbe88aadb16317f60bd518430225a7a8ef466596c70271b16371006f363'
@@ -392,6 +393,16 @@ def main(argv=None):
         old, fork = runner['prepare_forks'](workspace, manifest, workspace / 'forks.log')
         runner['materialize_shim_typeshed'](fork, old, official, workspace)
         require_inherited_inputs(preflight['verify_direct_use_fork'](fork, declaration, source_manifest))
+        matrix_control = load_committed(preflight, 'runtime-proof/prepare-fresh-runtime-matrix.py',
+                                        args.expected_package_commit, pin=PREPARED_MATRIX_SHA)
+        matrix_directory, matrix_identity = fresh_mount(runner, 'm-local-prepared-runtime-matrix-v1-')
+        prepared_matrix = matrix_control['prepare_matrix'](preflight, workspace / 'source-handoff', matrix_directory,
+            source_gate=source_gate, origin=authenticated, manifest_raw=source_manifest,
+            application=runner['CANONICAL_TASK'] / 'work/m-local', fork=fork)
+        if prepared_matrix.get('status') != 'prepared_not_executed' or prepared_matrix.get('executed') is not False:
+            fail('prepared runtime matrix scope')
+        mount_identity(matrix_directory, runner['E_ROOT'], 'm-local-prepared-runtime-matrix-v1-', matrix_identity)
+        matrix_control['verify_prepared'](preflight, matrix_directory, prepared_matrix)
         package_inputs = runner['E_ROOT'] / 'package-inputs-v7'
         package_inputs.mkdir(mode=0o755)
         frozen_manifest = json.loads(preflight['committed_file'](ROOT, args.expected_package_commit,
@@ -522,6 +533,8 @@ def main(argv=None):
             if regular_hash(preflight, Path(path), maximum=1024 ** 3)[0] != expected:
                 fail('JavaScript test-tool fixture dependency changed')
         node_client_control['verify_inventory'](node_client['clients_directory'], node_client['extracted_inventory_sha256'])
+        mount_identity(matrix_directory, runner['E_ROOT'], 'm-local-prepared-runtime-matrix-v1-', matrix_identity)
+        matrix_control['verify_prepared'](preflight, matrix_directory, prepared_matrix)
         summary = dict(accepted, source=source_gate['source'], source_job_id=authenticated['job_id'],
                        source_artifact_id=authenticated['artifact_id'],
                        source_archive_sha256=authenticated['artifact_digest'],
@@ -549,6 +562,11 @@ def main(argv=None):
                        node_client_fixture_prepare_sha256=node_client['executed_prepare_sha256'],
                        node_client_fixture_tool_binary_sha256=node_client['tool_binary_sha256'],
                        node_client_fixture_extracted_inventory_sha256=node_client['extracted_inventory_sha256'],
+                       prepared_runtime_matrix_control_sha256=PREPARED_MATRIX_SHA,
+                       prepared_runtime_matrix_receipt_sha256=prepared_matrix['receipt_sha256'],
+                       prepared_runtime_matrix_inventory_sha256=prepared_matrix['prepared_inventory_sha256'],
+                       prepared_runtime_matrix_status=prepared_matrix['status'],
+                       prepared_runtime_matrix_executed=False,
                        host_cpu_count=host_cpus, minimum_host_memory_bytes=MIN_HOST_MEMORY,
                        controls_confirmed_before_workload=assembly['controls_confirmed_before_workload'],
                        assembly_elapsed_limit_seconds=ASSEMBLY_SECONDS,

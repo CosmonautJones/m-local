@@ -68,10 +68,12 @@ verification and cleanup. A green package job proves package assembly only;
 application compatibility, native HTTP, sustained capacity, runtime adoption
 and full release acceptance still require separate current evidence.
 
-Connecting the full suite requires regenerating its ten transaction probes
-from the authenticated source inputs. The source artifact carries aggregate
-results, rather than the generated private probe files. Fresh script bindings
-must be recorded as prepared inputs and then executed against the package;
-they cannot be presented as the source run's executed probes. The two source
-interface checks remain separate from those ten phases. The UI dependency
+The parent prepares the ten transaction scripts and two separate source
+interface scripts from the authenticated public source inputs. It checks the
+frozen controller, raw probes and loader before applying only the original
+path and disposable-workspace substitutions. The generated files and receipt
+are bound by hashes and rechecked after assembly. Their status is `prepared_not_executed`,
+with `executed: false`; the authenticated source run's aggregate results remain
+separate evidence. These files still need to be adapted and executed against
+the sealed package before compatibility acceptance. The UI dependency
 installation also needs fresh, bound inputs before full-suite acceptance.
