@@ -683,17 +683,32 @@ def pg_inventory(root):
 
 def pinned_download(name, entry, destination, workspace):
     code = (
-        "import importlib.util,json,sys;"
-        "spec=importlib.util.spec_from_file_location('download_helper',sys.argv[1]);"
+        "import importlib.util,json,sys\ntry:\n"
+        " spec=importlib.util.spec_from_file_location('download_helper',sys.argv[1]);"
         "module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);"
         "result=module.download(json.loads(sys.argv[2]),sys.argv[3]);"
-        "print(json.dumps({'sha256':result['sha256'],'bytes':result['bytes']}))"
+        "print(json.dumps({'sha256':result['sha256'],'bytes':result['bytes']}))\n"
+        "except Exception as error:\n"
+        " print(json.dumps({'failure_type':type(error).__name__,'http_status':getattr(error,'code',None)}));"
+        "sys.exit(1)\n"
     )
-    result = scoped_command('pinned download ' + name,
-                            [sys.executable, '-B', '-c', code, str(DOWNLOAD_HELPER),
-                             json.dumps(entry, separators=(',', ':')), str(destination)],
-                            cwd=destination.parent, environment=minimal_environment(),
-                            workspace=workspace, timeout=180)
+    try:
+        result = scoped_command('pinned download ' + name,
+                                [sys.executable, '-B', '-c', code, str(DOWNLOAD_HELPER),
+                                 json.dumps(entry, separators=(',', ':')), str(destination)],
+                                cwd=destination.parent, environment=minimal_environment(),
+                                workspace=workspace, timeout=180)
+    except RuntimeError:
+        try:
+            error = json.loads((workspace / ('pinned-download-' + name + '-scope.log')).read_bytes().splitlines()[-1])
+        except (OSError, ValueError, IndexError):
+            raise RuntimeError('pinned download ' + name + ' failed') from None
+        if isinstance(error, dict) and error.get('failure_type') in ('HTTPError', 'URLError', 'PermissionError', 'FileNotFoundError',
+                                         'TimeoutError', 'RuntimeError', 'OSError'):
+            status = error.get('http_status')
+            suffix = ' HTTP ' + str(status) if type(status) is int and 100 <= status <= 599 else ''
+            fail('pinned download ' + name + ' ' + error['failure_type'] + suffix)
+        raise
     lines = Path(result['log_path']).read_bytes().splitlines()
     if len(lines) != 1:
         fail('pinned download receipt format')

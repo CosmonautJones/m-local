@@ -1,4 +1,7 @@
 import ast
+import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -85,6 +88,31 @@ class FreshSourceTests(unittest.TestCase):
                     with self.assertRaises(RuntimeError):
                         register('bootstrap', set(), {'workspace': str(workspace)})
                 self.assertEqual(owned, set())
+
+    def test_download_failure_reports_type_without_private_message(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            workspace = Path(directory)
+            helper = workspace / 'private-helper.py'
+            helper.write_text("raise PermissionError(13, 'private fixture address')\n")
+            output = workspace / 'pinned-download-jac-scope.log'
+
+            def fail(label):
+                raise RuntimeError(label)
+
+            def scoped_command(label, command, *, cwd, environment, workspace, timeout):
+                result = subprocess.run(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                output.write_bytes(result.stdout)
+                if result.returncode:
+                    fail(label + ' failed')
+                return {'log_path': str(output)}
+
+            download = runner_function('pinned_download', {'Path': Path, 'json': json, 'sys': sys,
+                'DOWNLOAD_HELPER': helper, 'scoped_command': scoped_command, 'minimal_environment': lambda: {},
+                'fail': fail})
+            with self.assertRaisesRegex(RuntimeError, '^pinned download jac PermissionError$'):
+                download('jac', {}, workspace / 'jac.bin', workspace)
+            self.assertEqual(json.loads(output.read_text()), {'failure_type': 'PermissionError', 'http_status': None})
+            self.assertNotIn('private fixture address', output.read_text())
 
 
 if __name__ == '__main__':
