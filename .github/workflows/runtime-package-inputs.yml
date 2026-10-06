@@ -9,6 +9,8 @@ on:
       - '.github/workflows/runtime-package-inputs.yml'
       - 'runtime-proof/package-inputs/**'
       - 'runtime-proof/test-package-inputs.py'
+      - 'runtime-proof/verify-package-preflight.py'
+      - 'runtime-proof/test-package-preflight.py'
 
 permissions:
   contents: read
@@ -26,3 +28,5 @@ jobs:
         run: python3 -B scripts/check-jac-share.py --min-jac 40
       - name: Check official cache provenance boundaries
         run: python3 -B runtime-proof/test-package-inputs.py
+      - name: Check source and package commitment preflight
+        run: python3 -I -B runtime-proof/test-package-preflight.py
