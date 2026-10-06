@@ -76,6 +76,14 @@ are not passing coverage. The first core attempt failed during embedded test
 database startup; the same source passed with a dedicated owned database.
 These are local results; GitHub CI and production acceptance remain separate.
 
+The [strict backend follow-up](review/backend-coverage-v35/verification.json)
+closes the import coverage gap for the same application source: 451 core and
+62 Jac insights tests passed without skips, alongside 12 Python and 11
+JavaScript insights tests. Each isolated workspace installs its declared Python
+dependencies, and missing imports now fail the run. Four guard checks reject
+external database URLs before graph-test or PostgreSQL state creation. An
+independent reviewer accepted this harness correction and its scoped evidence.
+
 ## Release gates still open
 
 This is a review branch, not a public deployment or production release.

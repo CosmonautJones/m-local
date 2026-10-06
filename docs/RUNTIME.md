@@ -79,6 +79,21 @@ capacity proof. Evidence is retained as `operator-store-native-v1`,
 `local-paired-preview-v3` in the task's separate outputs; private account files
 are excluded. Earlier preview receipts remain as historical snapshots.
 
+### Strict isolated backend coverage
+
+For application source `71f73c9482f65ae41ca9521650f22bf5d226bc535c39379ef16ddce465341f42`,
+the [strict backend receipt](review/backend-coverage-v35/verification.json)
+records 451 core tests and 62 Jac insights tests passing with no skips, plus
+12 Python and 11 JavaScript insights tests.
+
+Graph suites install the declared Python dependencies in their fresh workspace
+with `jac install --no-npm` and enable `JAC_TEST_STRICT=1`. This prevents missing
+imports, including Pillow, from silently skipping a test file. Fresh installs
+need network access. Unset `JAC_DB_URL` when running these suites: an external
+URL overrides Jac's per-case scratch database isolation, so the harness refuses
+it before creating test or PostgreSQL state. Integration tests retain their
+separate documented server and account setup.
+
 ## Authentication and integration gates
 
 The Jac runtime authentication API is documented in the bundled
