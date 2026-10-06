@@ -21,4 +21,5 @@ fi
 bash scripts/python.sh -c 'import socket; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(("127.0.0.1", 8252)); s.close()'
 
 exec timeout --signal=TERM --kill-after=30s 1200s \
-    env -u JAC_DB_URL bash scripts/python.sh tests/integration/recovery_http.py
+    env -u JAC_DB_URL bash scripts/python.sh -c \
+    'import runpy; runpy.run_path("tests/integration/recovery_http.py", run_name="__main__")'

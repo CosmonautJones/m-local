@@ -338,11 +338,12 @@ def offer_fields(now, title, *, price='5', terms='Original recovery terms', elig
 
 def main():
     global PRIVATE_LOG_HINT
+    print('RUN coordinated recovery fixture', flush=True)
     if Path.cwd().resolve() != ROOT:
         raise RuntimeError('Run from the repository source root')
     if os.environ.get('JAC_DB_URL'):
         raise RuntimeError('External JAC_DB_URL is forbidden')
-    if tomllib.loads((ROOT / 'jac.toml').read_text())['jac-version'] != REQUIRED_JAC:
+    if tomllib.loads((ROOT / 'jac.toml').read_text())['project']['jac-version'] != REQUIRED_JAC:
         raise RuntimeError('Repository Jac pin is not 0.37.23')
     jac = Path(os.environ.get('JAC_BIN', '')).resolve()
     if not jac.is_file() or jac.is_symlink():
@@ -410,8 +411,9 @@ def main():
               Path(pg_identity_before['distribution_root']) != pg_path,
               'resolved PostgreSQL distribution is independent of source and data paths', checks)
         environment['JAC_PG_DIST'] = pg_identity_before['distribution_root']
-        approval_fixture = candidate / 'tests/integration/business_approval_http.py'
-        run_logged('business approval/photo fixture', ['bash', str(candidate / 'scripts/python.sh'), str(approval_fixture)],
+        approval_code = 'import runpy,sys; sys.path.insert(0,"tests/integration"); runpy.run_path("tests/integration/business_approval_http.py",run_name="__main__")'
+        approval_restart_code = 'import runpy,sys; sys.path.insert(0,"tests/integration"); sys.argv=["business_approval_http.py","--verify-restart"]; runpy.run_path("tests/integration/business_approval_http.py",run_name="__main__")'
+        run_logged('business approval/photo fixture', ['bash', str(candidate / 'scripts/python.sh'), '-c', approval_code],
                    candidate, environment, logs / 'business-approval.log', 600)
         approval = json.loads((candidate / '.jac/approval-http.json').read_text())
         check((candidate / '.jac/approval-http.json').stat().st_mode & 0o777 == 0o600,
@@ -589,7 +591,7 @@ def main():
         run_logged('Jac dependency reinstallation after restore', [str(jac), 'install'], candidate, environment,
                    logs / 'install-restored.log', 300)
         process, recovered_api = start_server(candidate, jac, environment, logs / 'api-restored.log', owned)
-        run_logged('approval restart fixture', ['bash', str(candidate / 'scripts/python.sh'), str(approval_fixture), '--verify-restart'],
+        run_logged('approval restart fixture', ['bash', str(candidate / 'scripts/python.sh'), '-c', approval_restart_code],
                    candidate, environment, logs / 'approval-restored.log', 300)
         restored_owner = Api(recovered_api.origin, protected['owner_token'])
         restored_second = Api(recovered_api.origin, protected['second_token'])
@@ -639,7 +641,7 @@ def main():
         check(not process_group_alive(process), 'restored API process group is gone before restart', checks)
         owned.remove(process)
         process, restarted_api = start_server(candidate, jac, environment, logs / 'api-restarted.log', owned)
-        run_logged('approval second restart fixture', ['bash', str(candidate / 'scripts/python.sh'), str(approval_fixture), '--verify-restart'],
+        run_logged('approval second restart fixture', ['bash', str(candidate / 'scripts/python.sh'), '-c', approval_restart_code],
                    candidate, environment, logs / 'approval-restarted.log', 300)
         restarted_owner = Api(restarted_api.origin, protected['owner_token'])
         restarted_a = Api(restarted_api.origin, protected['student_a_token'])

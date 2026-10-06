@@ -1,0 +1,29 @@
+{
+  "status": "launch_fix_pending_full_recovery_execution",
+  "scope": "Disposable matching-runtime recovery fixture; no fresh-host, production or RPO/RTO acceptance",
+  "prior_run": {
+    "url": "https://github.com/CosmonautJones/m-local/actions/runs/37405951835",
+    "revision": "ad6bf3cdb1662047d2c31871c92db19956f7bf35",
+    "conclusion": "failure",
+    "recovery_exit_code": 124,
+    "elapsed_seconds": 1201,
+    "recovery_progress_labels": 0,
+    "finding": "The direct script invocation produced the default application server banner instead of recovery progress before the outer timeout. The pin expression also incorrectly read a top-level TOML key."
+  },
+  "changes": [
+    "Use the same explicit runpy __main__ launch as the passing approval fixture, including both restart argument sets and module search paths",
+    "Read the pinned version under the actual project TOML section",
+    "Print one static recovery entry marker before preflight"
+  ],
+  "verification": {
+    "actual_pin_expression_reproduced_key_error": true,
+    "actual_corrected_pin_expression_passed": true,
+    "python_ast_and_bash_syntax_passed": true,
+    "all_four_launch_commands_checked": true,
+    "fixture_sha256": "3a46c6306cf8eb4cfc8001684f779df892f28fdf6a029d01e070b4e175d16ae7",
+    "wrapper_sha256": "24ffd323fd21c424bad0f1ee377e4ab112264557b75b0ecd7b561a2343312f78",
+    "executed_pin_reproducer_sha256": "79a29651e57088b06f2ce291bcfcb0d62f52714222878c0bbf2ca042a0a4ec67",
+    "executed_launch_verifier_sha256": "936a8c2dd26f4a2d2ad4a4d327b2643b6b4beab47eaa28f4cd6eda9d3d27d280",
+    "full_recovery_passed": false
+  }
+}
