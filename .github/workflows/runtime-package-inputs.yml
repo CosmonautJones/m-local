@@ -54,6 +54,8 @@ jobs:
         run: python3 -I -B runtime-proof/test-ui-dependency-lock.py
       - name: Check frozen browser-test dependency installation on owned fixtures
         run: sudo -n python3 -I -B runtime-proof/test-ui-dependency-consumer.py
+      - name: Check native compatibility adaptation and orchestration boundaries
+        run: sudo -n python3 -I -B runtime-proof/test-native-compatibility.py
       - name: Verify frozen browser-test dependency inputs without installing them
         run: |
           echo 'd47b342bea74d64fa3575673a07b90d5595fdabe0e87a93f714cc6d7caa7c635  runtime-proof/verify-package-preflight.py' | sha256sum -c -

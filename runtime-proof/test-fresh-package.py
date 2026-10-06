@@ -475,6 +475,73 @@ class FreshPackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'package job deadline'):
             PACKAGE.remaining_seconds(time.monotonic() - 1, 900)
 
+    def test_native_receipt_requires_sealed_complete_execution_and_restoration(self):
+        control = dict(SCOPE='fresh-native-compatibility-only', PHASES=('first', 'last'),
+                       INTERFACES=('codec', 'controls'), RUNTIME_PATCH_SHA256='a' * 64,
+                       SUITE_SHA256='b' * 64, TEST_SCRIPT_SHA256='f' * 64,
+                       PRODUCTION_SOURCE_DIGEST_SHA256='0' * 64)
+        accepted = dict(candidate_binary_sha256='c' * 64)
+        preflight = dict(no_links=lambda path: None, sha=sha,
+                         read_regular=lambda path: path.read_bytes())
+        receipt = dict(status='passed', scope=control['SCOPE'], source_restoration_verified=True,
+                       package_binary_sha256=accepted['candidate_binary_sha256'],
+                       runtime_patch_sha256=control['RUNTIME_PATCH_SHA256'],
+                       original_suite_sha256=control['SUITE_SHA256'],
+                       executed_controller_source_sha256=PACKAGE.NATIVE_COMPATIBILITY_SHA,
+                       test_script_sha256=control['TEST_SCRIPT_SHA256'],
+                       source_digest_sha256=control['PRODUCTION_SOURCE_DIGEST_SHA256'],
+                       artifact_sha256='1' * 64, artifact_bytes=23,
+                       executed_suite_contract_sha256='4' * 64,
+                       adapted_suite_reference_sha256='5' * 64,
+                       phases=[dict(phase=name, status='passed') for name in control['PHASES']],
+                       interfaces=[dict(phase='interface-' + name, status='passed')
+                                   for name in control['INTERFACES']],
+                       phase_count=24, interface_count=2, catalog_count=6)
+        with tempfile.TemporaryDirectory(dir=ROOT) as temporary:
+            directory = Path(temporary)
+            path = directory / 'result.json'
+
+            def write(value):
+                if path.exists():
+                    path.chmod(0o600)
+                raw = json.dumps(value).encode()
+                path.write_bytes(raw)
+                path.chmod(0o400)
+                return dict(status='passed', scope=control['SCOPE'], receipt_path=path,
+                            receipt_sha256=sha(raw), source_restoration_verified=True,
+                            phase_count=24, interface_count=2, catalog_count=6,
+                            executed_suite_contract_sha256=receipt['executed_suite_contract_sha256'],
+                            adapted_suite_reference_sha256=receipt['adapted_suite_reference_sha256'])
+
+            compatibility = write(receipt)
+            self.assertEqual(PACKAGE.verify_native_receipt(
+                preflight, directory, compatibility, control, accepted), receipt)
+            mutations = (
+                dict(receipt, status='prepared_not_executed'),
+                dict(receipt, source_restoration_verified=False),
+                dict(receipt, package_binary_sha256='d' * 64),
+                dict(receipt, executed_controller_source_sha256='3' * 64),
+                dict(receipt, source_digest_sha256='2' * 64),
+                dict(receipt, artifact_bytes=0),
+                dict(receipt, artifact_sha256='invalid'),
+                dict(receipt, executed_suite_contract_sha256='6' * 64),
+                dict(receipt, phases=list(reversed(receipt['phases']))),
+                dict(receipt, interfaces=receipt['interfaces'][:1]),
+                dict(receipt, catalog_count=True),
+                dict(receipt, phases=[dict(phase='first', status='failed'), receipt['phases'][1]]),
+            )
+            for value in mutations:
+                with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'execution receipt'):
+                    PACKAGE.verify_native_receipt(preflight, directory, write(value), control, accepted)
+            compatibility = write(receipt)
+            for changes in (dict(receipt_path=directory / 'other.json'),
+                            dict(receipt_sha256='e' * 64), dict(source_restoration_verified=False),
+                            dict(phase_count=True)):
+                with self.subTest(changes=changes), self.assertRaisesRegex(ValueError, 'native compatibility'):
+                    PACKAGE.verify_native_receipt(preflight, directory, dict(compatibility, **changes),
+                                                  control, accepted)
+            path.chmod(0o600)
+
 
 if __name__ == '__main__':
     unittest.main()

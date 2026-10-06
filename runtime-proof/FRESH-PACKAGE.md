@@ -25,7 +25,8 @@ UID/GID 65534 with zero capabilities, and exact restoration of directory
 ownership, permissions, inode and contents. The separate package-input
 workflow exercises this control on a small disposable Linux filesystem.
 This fixture result does not prove candidate/source isolation throughout
-application compatibility or native execution; those remain separate gates.
+application compatibility or native execution. The compatibility controller
+must also prove denial while the real fork and build stage are hidden.
 
 The parent also downloads two fixed official tracing-client archives, checks
 their declared sizes and hashes, and extracts them only inside a fresh owned
@@ -70,9 +71,11 @@ termination grace leave time for owned cleanup within that limit.
 
 The job uploads no payloads, private caches or logs. Only the parent's
 sanitized acceptance summary is printed after successful independent byte
-verification and cleanup. A green package job proves package assembly only;
-application compatibility, native HTTP, sustained capacity, runtime adoption
-and full release acceptance still require separate current evidence.
+verification, compatibility execution and cleanup. A successful full package
+job would prove assembly and the adapted compatibility checks. Native HTTP,
+sustained capacity, runtime adoption and full release acceptance still require
+separate current evidence. The package-input fixture job proves its own
+boundaries and prerequisites; it does not execute the packaged application.
 
 The parent prepares the ten transaction scripts and two separate source
 interface scripts from the authenticated public source inputs. It checks the
@@ -80,9 +83,11 @@ frozen controller, raw probes and loader before applying only the original
 path and disposable-workspace substitutions. The generated files and receipt
 are bound by hashes and rechecked after assembly. Their status is `prepared_not_executed`,
 with `executed: false`; the authenticated source run's aggregate results remain
-separate evidence. These files still need to be adapted and executed against
-the sealed package before compatibility acceptance. The UI dependency
-installation also needs fresh, bound inputs before full-suite acceptance.
+separate evidence. The compatibility controller consumes these prepared
+files, relocates their workspace guards to its fresh test app, and uses the
+sealed package loader and physically extracted SDK. The two interface checks
+run separately from the 24 compatibility phases. Acceptance requires actual
+execution; preparation receipts cannot substitute for those results.
 
 The dependency preparation workflow resolves only the existing `jsdom@26.1.0`
 browser-test prerequisite using the verified private Node.js 22.16.0 and npm
@@ -109,17 +114,33 @@ checks fresh tarball sizes, hashes and integrity, and populates an empty private
 cache before an offline installation and DOM probe. Each command uses the
 bounded workload launcher and a private root-owned log. The installed files,
 Node tools, mounts and preparation receipt are rechecked before cleanup.
-The live dependency directory remains available for the later application
+The live dependency directory remains available to the application
 test adapter; the public summary contains hashes and counts only. A supported
 Linux fixture exercises this installation and rejects mutated receipts and
 files. Its status remains `dependencies_prepared`, with application tests
-explicitly unexecuted. Full application suite integration and execution remain
-required before compatibility acceptance.
+explicitly unexecuted. The compatibility controller then uses that verified
+directory for the DOM prerequisite and application browser tests, checking
+its installed inventory before and after execution.
 
 The nine original compatibility, catalog, loader and native-gate sources are
 also frozen byte-for-byte in `native-inputs/native-suite-v5/`. Their manifest
 retains all 24 compatibility phases, both separate source interfaces, the six
 physical catalog mutation cases, and strict graph coverage counts. The input
 check verifies their committed bytes without executing any original script.
-Fresh storage, cache, source-denial, tool, loader and dependency bindings still
-need to be connected by a reviewed adapter before full-suite acceptance.
+The fresh compatibility controller connects storage, cache, source-denial,
+tool, loader and dependency bindings after preparation and before parent
+cleanup. It retains the frozen phase limits, graph counts and zero-skip
+requirements, executes six catalog controls and seals a private receipt.
+It invokes the frozen package contract and probes, and runs the same
+application phases through the current bounded launcher. The full adapted
+historical script is stored as a reference. Separate hashes identify the
+executed contract, current controller and stored reference.
+The parent verifies that receipt and exact source restoration before printing
+its summary, then repeats the independent package commitments to reject any
+package changes made during compatibility execution. Pure orchestration and
+small Linux fixture tests do not establish full native execution. A qualified,
+authorized host is still required to run
+the complete application suite and the later HTTP and capacity gates.
+The frozen source producer still binds the earlier application revision.
+Matching production source bytes do not replace the supplemental tests added
+on the current release branch or its public-launch acceptance checks.

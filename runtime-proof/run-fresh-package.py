@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Assemble and independently verify the frozen runtime on a fresh Ubuntu host.
+"""Assemble, verify and test the frozen runtime on a fresh Ubuntu host.
 
-Package acceptance is separate from application compatibility, native HTTP,
-capacity, runtime adoption and deployment. Logs and payloads stay private.
+Assembly and compatibility remain separate from native HTTP, capacity,
+runtime adoption and deployment. Logs and payloads stay private.
 """
 from pathlib import Path
 import argparse
 import hashlib
 import json
 import os
+import re
 import signal
 import stat
 import subprocess
@@ -31,6 +32,7 @@ NODE_CLIENT_CONTROL_SHA = '79097e21e7f8f1647fa6984b85903d470824cb6f240bb0b82d1e8
 PREPARED_MATRIX_SHA = 'b97a3b695d90d9ad60b3aac06a0ee34cfd13597f2dbbb9e26512d869e91d28ba'
 WORKLOAD_LAUNCHER_SHA = 'b08eef9990e640f66c3ecff6619052eae83b50a100da6a5beccbad24770ddd3b'
 UI_DEPENDENCY_CONTROL_SHA = 'f1497cfde5745fe57a7722cfb1fa6a6a980fdc8c802f141fab12aa07546ba66c'
+NATIVE_COMPATIBILITY_SHA = '43d6b0b1fdc5bff5cfc51c61ed871d372fd23db820c82165c22c894615c65a1c'
 RECIPE_SHA = 'ec820c414d5a83d498f894eddcee105d5eb3e287a030c2d6b87045fe7d32129f'
 VERIFIER_SHA = '9f7acdfd45c3a66913c8c3c9205f3afc8b00801147b1082e2af329a17f27d8de'
 CLASSIFIER_SHA = '33dd3dbe88aadb16317f60bd518430225a7a8ef466596c70271b16371006f363'
@@ -272,6 +274,51 @@ def remaining_seconds(deadline, maximum):
     if remaining <= 0:
         fail('package job deadline')
     return min(maximum, remaining)
+
+
+def verify_native_receipt(preflight, directory, compatibility, control, accepted):
+    path = Path(directory) / 'result.json'
+    if (type(compatibility) is not dict or compatibility.get('receipt_path') != path or
+            compatibility.get('status') != 'passed' or compatibility.get('scope') != control['SCOPE'] or
+            compatibility.get('source_restoration_verified') is not True or
+            any(type(compatibility.get(key)) is not int or compatibility[key] != count
+                for key, count in (('phase_count', 24), ('interface_count', 2), ('catalog_count', 6)))):
+        fail('native compatibility scope')
+    digest, _ = regular_hash(preflight, path, maximum=1024 ** 2)
+    info = path.lstat()
+    if (info.st_dev != Path(directory).stat().st_dev or
+            (os.name == 'posix' and (info.st_uid != 0 or info.st_gid != 0 or
+                                    stat.S_IMODE(info.st_mode) != 0o400)) or
+            digest != compatibility.get('receipt_sha256')):
+        fail('native compatibility private receipt binding')
+    raw = preflight['read_regular'](path)
+    if preflight['sha'](raw) != digest:
+        fail('native compatibility receipt changed')
+    receipt = json.loads(raw)
+    if (receipt.get('status') != 'passed' or receipt.get('scope') != control['SCOPE'] or
+            receipt.get('source_restoration_verified') is not True or
+            receipt.get('package_binary_sha256') != accepted['candidate_binary_sha256'] or
+            receipt.get('runtime_patch_sha256') != control['RUNTIME_PATCH_SHA256'] or
+            receipt.get('original_suite_sha256') != control['SUITE_SHA256'] or
+            receipt.get('executed_controller_source_sha256') != NATIVE_COMPATIBILITY_SHA or
+            receipt.get('test_script_sha256') != control['TEST_SCRIPT_SHA256'] or
+            receipt.get('source_digest_sha256') != control['PRODUCTION_SOURCE_DIGEST_SHA256'] or
+            type(receipt.get('artifact_bytes')) is not int or receipt['artifact_bytes'] <= 0 or
+            type(receipt.get('artifact_sha256')) is not str or
+            re.fullmatch(r'[0-9a-f]{64}', receipt['artifact_sha256']) is None or
+            any(type(receipt.get(key)) is not str or
+                re.fullmatch(r'[0-9a-f]{64}', receipt[key]) is None or
+                receipt[key] != compatibility.get(key)
+                for key in ('executed_suite_contract_sha256', 'adapted_suite_reference_sha256')) or
+            tuple(row.get('phase') for row in receipt.get('phases', [])) != control['PHASES'] or
+            tuple(row.get('phase') for row in receipt.get('interfaces', [])) !=
+                tuple('interface-' + name for name in control['INTERFACES']) or
+            any(row.get('status') != 'passed' for row in
+                receipt.get('phases', []) + receipt.get('interfaces', [])) or
+            any(type(receipt.get(key)) is not int or receipt[key] != count
+                for key, count in (('phase_count', 24), ('interface_count', 2), ('catalog_count', 6)))):
+        fail('native compatibility execution receipt')
+    return receipt
 
 
 def stage_source(preflight, workspace, source_checkout, source_commit, package_commit, run_id):
@@ -533,6 +580,32 @@ def main(argv=None):
             args.expected_package_commit, node_client, remaining_seconds(deadline, 360))
         if prepared_ui.get('status') != 'dependencies_prepared' or prepared_ui.get('application_tests_executed') is not False:
             fail('UI dependency preparation scope')
+        native_control = load_committed(preflight, 'runtime-proof/run-fresh-native-compatibility.py',
+                                        args.expected_package_commit, pin=NATIVE_COMPATIBILITY_SHA)
+        native_directory, native_identity = fresh_mount(runner, 'm-local-native-compatibility-v1-')
+
+        def native_command(directory, command, cwd, env, timeout, label):
+            directory, cwd = Path(directory), Path(cwd)
+            if (type(label) is not str or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,120}', label) is None or
+                    directory.resolve() != directory or directory.is_symlink() or
+                    not directory.is_relative_to(native_directory) or
+                    cwd.resolve() != cwd or cwd.is_symlink() or
+                    not (cwd.is_relative_to(native_directory) or cwd == prepared_ui['install_directory'])):
+                fail('native compatibility workload path')
+            mount_identity(native_directory, runner['E_ROOT'], 'm-local-native-compatibility-v1-', native_identity)
+            state = run_bounded(runner, directory, command, cwd, env,
+                                remaining_seconds(deadline, timeout), label)
+            mount_identity(native_directory, runner['E_ROOT'], 'm-local-native-compatibility-v1-', native_identity)
+            return state
+
+        compatibility = native_control['run_suite'](preflight, runner, native_directory,
+            args.expected_package_commit, dict(package=package, application=runner['CANONICAL_TASK'] / 'work/m-local',
+                fork=fork, official=official, accepted=accepted, probe_path=probe_path,
+                isolation=isolation, isolation_directory=isolation_directory, trace=trace,
+                node_client=node_client, prepared_ui=prepared_ui, ui_control=ui_control, ui_runner=ui_runner,
+                ui_directory=ui_directory, matrix_directory=matrix_directory, prepared_matrix=prepared_matrix,
+                matrix_control=matrix_control, run_bounded=native_command), remaining_seconds(deadline, 8400))
+        native_receipt = verify_native_receipt(preflight, native_directory, compatibility, native_control, accepted)
         remaining_seconds(deadline, 1)
         mount_identity(isolation_directory, runner['E_ROOT'], 'm-local-source-isolation-control-v1-', isolation_identity)
         if regular_hash(preflight, isolation['receipt_path'], maximum=1024 ** 2)[0] != isolation['receipt_sha256']:
@@ -569,7 +642,20 @@ def main(argv=None):
         mount_identity(ui_directory, runner['E_ROOT'], 'm-local-ui-dependency-control-v1-', ui_identity)
         ui_control['verify_prepared'](preflight, ui_runner, ui_directory, prepared_ui,
                                       args.expected_package_commit, node_client)
-        summary = dict(accepted, source=source_gate['source'], source_job_id=authenticated['job_id'],
+        mount_identity(native_directory, runner['E_ROOT'], 'm-local-native-compatibility-v1-', native_identity)
+        verify_native_receipt(preflight, native_directory, compatibility, native_control, accepted)
+        final_accepted = accept_package(preflight, fork, package, preflight['read_regular'](verifier / 'result.json'),
+            preflight['read_regular'](wrapper / 'loader.json'), preflight['read_regular'](verification / 'controls.json'),
+            declaration, source_manifest, expected_metadata_sha256=metadata_sha,
+            expected_loader_sha256=preflight['sha'](loader_raw), expected_controls_sha256=preflight['sha'](controls_raw),
+            expected_controls_code_sha256=preflight['sha'](control_source), official_cache_raw=official_cache_raw,
+            expected_official_cache_receipt_sha256=preflight['sha'](official_cache_raw),
+            expected_official_cache_code_sha256=preflight['sha'](cache_code))
+        if final_accepted != accepted:
+            fail('package acceptance changed during compatibility')
+        remaining_seconds(deadline, 1)
+        summary = dict(accepted, scope='fresh package assembly, independent byte binding and native compatibility only; native HTTP, capacity and adoption remain separate gates',
+                       source=source_gate['source'], source_job_id=authenticated['job_id'],
                        source_artifact_id=authenticated['artifact_id'],
                        source_archive_sha256=authenticated['artifact_digest'],
                        executed_parent_sha256=preflight['sha'](parent_raw),
@@ -612,6 +698,15 @@ def main(argv=None):
                        ui_dependency_installed_file_bytes=prepared_ui['installed_file_bytes'],
                        ui_dependency_status=prepared_ui['status'],
                        ui_dependency_application_tests_executed=False,
+                       native_compatibility_control_sha256=NATIVE_COMPATIBILITY_SHA,
+                       native_compatibility_executed_contract_sha256=compatibility['executed_suite_contract_sha256'],
+                       native_compatibility_adapted_reference_sha256=compatibility['adapted_suite_reference_sha256'],
+                       native_compatibility_receipt_sha256=compatibility['receipt_sha256'],
+                       native_compatibility_phase_count=compatibility['phase_count'],
+                       native_compatibility_interface_count=compatibility['interface_count'],
+                       native_compatibility_catalog_count=compatibility['catalog_count'],
+                       native_compatibility_artifact_sha256=native_receipt['artifact_sha256'],
+                       native_compatibility_artifact_bytes=native_receipt['artifact_bytes'],
                        host_cpu_count=host_cpus, minimum_host_memory_bytes=MIN_HOST_MEMORY,
                        controls_confirmed_before_workload=assembly['controls_confirmed_before_workload'],
                        assembly_elapsed_limit_seconds=ASSEMBLY_SECONDS,
