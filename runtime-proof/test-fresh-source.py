@@ -305,6 +305,57 @@ class FreshSourceTests(unittest.TestCase):
                     if name == 'PIN':
                         target.write_bytes((typeshed / name).read_bytes())
 
+    def test_dependency_target_diagnostic_stays_bound_to_owned_runtime(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            workspace = Path(directory).resolve()
+            image, runtime = workspace / 'image', workspace / 'official'
+            image.mkdir()
+            target = runtime / 'runtime/jacpython'
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b'fixture interpreter')
+            target.chmod(0o755)
+            python = image / 'dependency-candidate-v7/.jac/venv/bin/python'
+
+            def copy_app_tree(source, destination):
+                python.parent.mkdir(parents=True)
+                (python.parent.parent / 'pyvenv.cfg').write_text('fixture')
+                if os.name == 'posix':
+                    python.symlink_to(target)
+                else:
+                    python.write_bytes(b'fixture interpreter')
+
+            def fail(label):
+                raise RuntimeError(label)
+
+            original_stat, original_resolve, original_symlink = Path.stat, Path.resolve, Path.is_symlink
+
+            def metadata(path, *args, **kwargs):
+                result = original_stat(path, *args, **kwargs)
+                if os.name != 'posix' and path in (python, target):
+                    return SimpleNamespace(st_mode=result.st_mode | 0o111)
+                return result
+
+            namespace = {'Path': Path, 'E_ROOT': image, 'os': SimpleNamespace(chown=lambda *args: None),
+                'copy_app_tree': copy_app_tree, 'chown_tree': lambda path: None,
+                'scoped_command': lambda *args, **kwargs: {}, 'fail': fail,
+                'digest': lambda path: hashlib.sha256(Path(path).read_bytes()).hexdigest()}
+            prime = runner_function('dependency_priming', namespace)
+            with patch.object(Path, 'stat', metadata), \
+                    patch.object(Path, 'resolve', lambda path, *args, **kwargs: target if path == python else original_resolve(path, *args, **kwargs)), \
+                    patch.object(Path, 'is_symlink', lambda path: path == python or original_symlink(path)):
+                with self.assertRaisesRegex(RuntimeError,
+                        '^declared dependency target official-runtime sha256=' + hashlib.sha256(target.read_bytes()).hexdigest() + '$'):
+                    prime(workspace / 'app', runtime, workspace, workspace / 'private.log')
+                namespace['E_ROOT'] = image / 'outside-test'
+                namespace['E_ROOT'].mkdir()
+                python = namespace['E_ROOT'] / 'dependency-candidate-v7/.jac/venv/bin/python'
+                target = workspace / 'outside-python'
+                target.write_bytes(b'private fixture content')
+                target.chmod(0o755)
+                namespace['digest'] = lambda path: self.fail('outside interpreter bytes must not be read')
+                with self.assertRaisesRegex(RuntimeError, '^declared dependency target outside-approved-roots$'):
+                    prime(workspace / 'app', runtime, workspace, workspace / 'private.log')
+
 
 if __name__ == '__main__':
     unittest.main()

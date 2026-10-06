@@ -810,9 +810,15 @@ def dependency_priming(app, runtime, workspace, log):
     if python is None:
         fail('declared dependency interpreter guard')
     resolved = python.resolve()
-    if not resolved.is_file() or not (resolved.stat().st_mode & 0o111) or \
-            (python.is_symlink() and resolved.parent != Path('/usr/bin') and not resolved.is_relative_to(venv.resolve())):
+    if not resolved.is_file() or not (resolved.stat().st_mode & 0o111):
         fail('declared dependency interpreter target guard')
+    if python.is_symlink() and resolved.parent != Path('/usr/bin') and not resolved.is_relative_to(venv.resolve()):
+        origin = next((name for name, root in [('official-runtime', runtime), ('dependency-cache', cache)]
+                       if resolved.is_relative_to(root.resolve())), 'outside-approved-roots')
+        label = 'declared dependency target ' + origin
+        if origin != 'outside-approved-roots':
+            label += ' sha256=' + digest(resolved)
+        fail(label)
     pillow = scoped_command('Pillow dependency guard', [str(python), '-c',
                             'from PIL import Image; Image.new("RGB", (1, 1))'], cwd=candidate,
                             environment=environment, workspace=Path(log).parent, timeout=60)
