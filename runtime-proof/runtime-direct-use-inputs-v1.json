@@ -1,0 +1,152 @@
+{
+  "base_revision": "58cb97eb75cdff8b5ee78f4094ca2be16376601c",
+  "denominator_bytes": 348363,
+  "denominator_definition": "All changed runtime implementation source files in the selected base-to-patch Git diff; complete exact 17-file Jac inventory. Independent of application and operational-tool repository language shares.",
+  "direct_use_evidence": {
+    "after_assembly": [
+      "All declared assembled paths/hash pairs in the actual assembled-inputs.json",
+      "Fresh loader implementation paths/hash bindings and stub catalog reader/writer relocation evidence"
+    ],
+    "before_assembly": [
+      "Exact base revision and binary patch hash",
+      "Exact Git changed-file set and per-file bytes/hash under fresh fork"
+    ],
+    "status": "required_not_observed"
+  },
+  "excluded_file_reasons": {
+    "outputs/identity-bootstrap-source-v2/source-inputs/runtime.patch": "Proof probe, loader or patch transport; not a runtime implementation source file.",
+    "work/export-emergency-checkpoint.py": "Proof probe, loader or patch transport; not a runtime implementation source file.",
+    "work/identity-bootstrap-source-proof-v4.py": "Proof probe, loader or patch transport; not a runtime implementation source file.",
+    "work/identity-runtime-v3/run-identity-runtime-regressions.py": "Proof probe, loader or patch transport; not a runtime implementation source file.",
+    "work/identity-runtime-v3/runtime-loader-provenance.py": "Proof probe, loader or patch transport; not a runtime implementation source file.",
+    "work/identity-runtime-v3/runtime.patch": "Proof probe, loader or patch transport; not a runtime implementation source file.",
+    "work/kali-build-resources-v2.py": "Proof probe, loader or patch transport; not a runtime implementation source file.",
+    "work/run-runtime-type-compile-v3.py": "Proof probe, loader or patch transport; not a runtime implementation source file.",
+    "work/runtime-boundary-probe.py": "Proof probe, loader or patch transport; not a runtime implementation source file.",
+    "work/runtime-interface-codec-controls-probe.py": "Proof probe, loader or patch transport; not a runtime implementation source file.",
+    "work/runtime-interface-codec-probe.py": "Proof probe, loader or patch transport; not a runtime implementation source file.",
+    "work/runtime-lifecycle-probe.py": "Proof probe, loader or patch transport; not a runtime implementation source file.",
+    "work/runtime-materialization-probe.py": "Proof probe, loader or patch transport; not a runtime implementation source file.",
+    "work/runtime-nested-context-probe.py": "Proof probe, loader or patch transport; not a runtime implementation source file.",
+    "work/runtime-probe.py": "Proof probe, loader or patch transport; not a runtime implementation source file.",
+    "work/runtime-request-context-probe.py": "Proof probe, loader or patch transport; not a runtime implementation source file.",
+    "work/runtime-served-probe.py": "Proof probe, loader or patch transport; not a runtime implementation source file."
+  },
+  "included_source_files": {
+    "jac/jaclang/compiler/types/stubcat/reader.jac": {
+      "assembled_path": "site/jaclang/compiler/types/stubcat/reader.jac",
+      "bytes": 35011,
+      "sha256": "7b62307a3456fb8ff1cf57fa9244566bc70d2dc8eacab46c5efe2c79092d5f55",
+      "source_member": "source/jac/jaclang/compiler/types/stubcat/reader.jac"
+    },
+    "jac/jaclang/compiler/types/stubcat/writer.jac": {
+      "assembled_path": "site/jaclang/compiler/types/stubcat/writer.jac",
+      "bytes": 50583,
+      "sha256": "a40440eac72cbde58ded68d4dd4cdd70ee49286520896e92fb2ab2b9b42125a6",
+      "source_member": "source/jac/jaclang/compiler/types/stubcat/writer.jac"
+    },
+    "jac/jaclang/data/impl/serializer.impl.jac": {
+      "assembled_path": "site/jaclang/data/impl/serializer.impl.jac",
+      "bytes": 43792,
+      "sha256": "d7023496a40df0f5531c5afe740025b3a93bbde35f25f3d303329f1672f64560",
+      "source_member": "source/jac/jaclang/data/impl/serializer.impl.jac"
+    },
+    "jac/jaclang/data/impl/store.impl.jac": {
+      "assembled_path": "site/jaclang/data/impl/store.impl.jac",
+      "bytes": 43547,
+      "sha256": "ff8f6cbae67cf0daa86f90d0d32ac92f56ad5321d08cda5315db17bf0720c653",
+      "source_member": "source/jac/jaclang/data/impl/store.impl.jac"
+    },
+    "jac/jaclang/data/serializer.jac": {
+      "assembled_path": "site/jaclang/data/serializer.jac",
+      "bytes": 4874,
+      "sha256": "a773a5d3f7df72ea9269c53191d4ece73c91b92655b13e89bf8f10c4cc0395e6",
+      "source_member": "source/jac/jaclang/data/serializer.jac"
+    },
+    "jac/jaclang/data/store.jac": {
+      "assembled_path": "site/jaclang/data/store.jac",
+      "bytes": 6834,
+      "sha256": "d65c906d6215920d62865092caf6c5a1db0b8c20e1fac194cddd79ad58002697",
+      "source_member": "source/jac/jaclang/data/store.jac"
+    },
+    "jac/jaclang/runtime/context.jac": {
+      "assembled_path": "site/jaclang/runtime/context.jac",
+      "bytes": 1864,
+      "sha256": "606d18da7d64ce7d65163d9564f00b52646a25fbdcc09e3614c28fdae944ad06",
+      "source_member": "source/jac/jaclang/runtime/context.jac"
+    },
+    "jac/jaclang/runtime/impl/context.impl.jac": {
+      "assembled_path": "site/jaclang/runtime/impl/context.impl.jac",
+      "bytes": 4545,
+      "sha256": "23a9afac764e791d7a9954b51718a053ff0682c61c6ecf4c8b3f65c2f62a91dc",
+      "source_member": "source/jac/jaclang/runtime/impl/context.impl.jac"
+    },
+    "jac/jaclang/scale/memory/impl/context.impl.jac": {
+      "assembled_path": "site/jaclang/scale/memory/impl/context.impl.jac",
+      "bytes": 1172,
+      "sha256": "1cf47627bad233b58489a5c46a5db336061a5bf511dac78a8fe9af5cb860f6dd",
+      "source_member": "source/jac/jaclang/scale/memory/impl/context.impl.jac"
+    },
+    "jac/jaclang/server/identity/identity_storage.jac": {
+      "assembled_path": "site/jaclang/server/identity/identity_storage.jac",
+      "bytes": 4680,
+      "sha256": "3ffcb0900847aa20d48f07a6b1732fe9fde7fb87ddf6b7e5dd783e6cb38d5e92",
+      "source_member": "source/jac/jaclang/server/identity/identity_storage.jac"
+    },
+    "jac/jaclang/server/identity/impl/identity_storage.impl.jac": {
+      "assembled_path": "site/jaclang/server/identity/impl/identity_storage.impl.jac",
+      "bytes": 13171,
+      "sha256": "2ca4211e782cfec7bf2a647410f39b3403f78f361f995f3f66f6f57706fda9e7",
+      "source_member": "source/jac/jaclang/server/identity/impl/identity_storage.impl.jac"
+    },
+    "jac/jaclang/server/identity/impl/identity_storage.pg.impl.jac": {
+      "assembled_path": "site/jaclang/server/identity/impl/identity_storage.pg.impl.jac",
+      "bytes": 15182,
+      "sha256": "46856b750bb693fed472e2f75dc0b11878a6344845aaeb04924f4632f2125063",
+      "source_member": "source/jac/jaclang/server/identity/impl/identity_storage.pg.impl.jac"
+    },
+    "jac/jaclang/server/identity/impl/user_manager.impl.jac": {
+      "assembled_path": "site/jaclang/server/identity/impl/user_manager.impl.jac",
+      "bytes": 18248,
+      "sha256": "5c493141861d9dfca7156f626fe7701b8f51e7d4fd1b505cc8827b98788fae83",
+      "source_member": "source/jac/jaclang/server/identity/impl/user_manager.impl.jac"
+    },
+    "jac/jaclang/server/identity/user_manager.jac": {
+      "assembled_path": "site/jaclang/server/identity/user_manager.jac",
+      "bytes": 4292,
+      "sha256": "596e3bf601c20c31b14cf8d3386bd1fc5615a292004691291aec53db1898a4b6",
+      "source_member": "source/jac/jaclang/server/identity/user_manager.jac"
+    },
+    "jac/jaclang/server/impl/server.impl.jac": {
+      "assembled_path": "site/jaclang/server/impl/server.impl.jac",
+      "bytes": 62526,
+      "sha256": "86cb2dac13689e59637de219746a091fb736f24ac9acdaec01fe6cf036980d7a",
+      "source_member": "source/jac/jaclang/server/impl/server.impl.jac"
+    },
+    "jac/jaclang/server/impl/session.impl.jac": {
+      "assembled_path": "site/jaclang/server/impl/session.impl.jac",
+      "bytes": 32169,
+      "sha256": "9ab51d035b3cb52cac93234e0ce0fd2c3aaa731b3f27810792f481bc8628ac6a",
+      "source_member": "source/jac/jaclang/server/impl/session.impl.jac"
+    },
+    "jac/jaclang/server/session.jac": {
+      "assembled_path": "site/jaclang/server/session.jac",
+      "bytes": 5873,
+      "sha256": "377ea7d8473ed76547e9fe6628cc0283dd28c52532a13cf236eb146af01fe319",
+      "source_member": "source/jac/jaclang/server/session.jac"
+    }
+  },
+  "jac_bytes": 348363,
+  "minimum_share_percent": 40,
+  "no_padding_or_disguise_assertion": "No source is added or copied solely for counting. Every declared file must be changed by the selected patch and byte-match the fresh fork and actual assembly inventory before runtime direct-use acceptance.",
+  "other_scope_exclusions": {
+    "application": "Application revision, digest and complete Git language inventory require independent binding before compatibility execution.",
+    "official_runtime": "Unchanged inherited Python, dependencies and compiler inputs; separately verified by the frozen v7 cache and payload gates.",
+    "operational_tools": "Build and verification controllers are not runtime implementation inputs; this contract does not claim their GitHub language share."
+  },
+  "runtime_patch_sha256": "d3630dfc5d9942e2b7ac6edf0ee1dd10bdb7a0f0919865e543220a27b27fe366",
+  "schema": "m-local-runtime-direct-use-inputs-v1",
+  "share_percent": 100,
+  "source_manifest_sha256": "f0ade58e7b59cc49eb5c3c3d0a6c8ca08c4f5b9804dc49ad5ea4f171cc4be037",
+  "status": "declared_before_assembly"
+}

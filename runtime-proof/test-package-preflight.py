@@ -89,6 +89,7 @@ class PackagePreflightTests(unittest.TestCase):
             'runtime-proof/verify-source-handoff-v9.py',
             'runtime-proof/verify-source-origin.py',
             'runtime-proof/download-source-handoff.py',
+            'runtime-proof/runtime-direct-use-inputs-v1.json',
             'runtime-proof/package-inputs/public-package-manifest-v7.json',
             'runtime-proof/package-inputs/public-policy-manifest-v7.json',
         }
@@ -134,7 +135,9 @@ class PackagePreflightTests(unittest.TestCase):
             self.assertEqual(result['package'], dict(
                 commit_sha=fixture['package_commit'],
                 manifest_sha256='681d3cc0713d196d29f0e335a3454ed34e9cc6fa860afc0dbd30713681b81888',
-                input_count=12, inventory_sha256=result['package']['inventory_sha256']))
+                input_count=13, inventory_sha256=result['package']['inventory_sha256']))
+            self.assertEqual(result['runtime_direct_use']['input_count'], 17)
+            self.assertFalse(result['runtime_direct_use']['direct_use_observed'])
         finally:
             fixture['temporary'].cleanup()
 
@@ -151,6 +154,51 @@ class PackagePreflightTests(unittest.TestCase):
             for name, overrides in cases.items():
                 with self.subTest(binding=name):
                     self.assert_rejected(fixture, **overrides)
+        finally:
+            fixture['temporary'].cleanup()
+
+    def test_direct_use_input_gate_binds_git_sources_and_commit(self):
+        fixture = self.fixture()
+        try:
+            preflight = fixture['preflight']
+            with self.assertRaises(OSError):
+                preflight.verify_direct_use_inputs(fixture['package'], fixture['package_commit'])
+            manifest_name = 'runtime-proof/inputs/public-source-manifest.json'
+            manifest = json.loads((fixture['source'] / manifest_name).read_bytes())
+            names = [manifest_name] + ['runtime-proof/inputs/' + name for name, item in manifest['files'].items()
+                                       if item['kind'] == 'used_runtime_jac_source']
+            for name in names:
+                target = fixture['package'] / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((fixture['source'] / name).read_bytes())
+            checker = fixture['package'] / 'runtime-proof/check-runtime-direct-use.py'
+            checker.write_bytes((ROOT / 'check-runtime-direct-use.py').read_bytes())
+            git(fixture['package'], 'add', '--all')
+            git(fixture['package'], 'commit', '--quiet', '-m', 'fixture direct-use sources')
+            commit = git(fixture['package'], 'rev-parse', 'HEAD').decode().strip()
+            result = preflight.verify_direct_use_inputs(fixture['package'], commit)
+            self.assertEqual(result['input_count'], 17)
+            self.assertEqual(result['commit_sha'], commit)
+            self.assertFalse(result['direct_use_observed'])
+            command = [sys.executable, '-I', '-B', str(checker), '--expected-commit', commit]
+            cli = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, check=False)
+            self.assertEqual(cli.returncode, 0)
+            self.assertEqual(json.loads(cli.stdout), result)
+            with self.assertRaises(preflight.PreflightError):
+                preflight.verify_direct_use_inputs(fixture['package'], fixture['package_commit'])
+            (fixture['package'] / names[1]).write_bytes(b'changed source')
+            with self.assertRaises(preflight.PreflightError):
+                preflight.verify_direct_use_inputs(fixture['package'], commit)
+            marker = fixture['root'] / 'helper-executed'
+            helper = fixture['package'] / 'runtime-proof/verify-package-preflight.py'
+            helper.write_bytes(helper.read_bytes() + b'\nopen(' + repr(str(marker)).encode() + b', "w").write("ran")\n')
+            cli = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, check=False)
+            self.assertEqual(cli.returncode, 1)
+            self.assertEqual(json.loads(cli.stdout), dict(status='failed', error='runtime direct-use input check failed'))
+            self.assertEqual(cli.stderr, b'')
+            self.assertFalse(marker.exists())
         finally:
             fixture['temporary'].cleanup()
 
@@ -176,6 +224,7 @@ class PackagePreflightTests(unittest.TestCase):
                  'runtime-proof/verify-source-handoff-v9.py',
                  'runtime-proof/verify-source-origin.py',
                  'runtime-proof/download-source-handoff.py',
+                 'runtime-proof/runtime-direct-use-inputs-v1.json',
                  'runtime-proof/package-inputs/public-package-manifest-v7.json',
                  'runtime-proof/package-inputs/package-runtime-candidate-v7.py')
         fixture = self.fixture()

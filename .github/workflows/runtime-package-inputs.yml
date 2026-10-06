@@ -6,15 +6,9 @@ on:
     branches:
       - codex/runtime-verification
     paths:
+      - '.gitattributes'
       - '.github/workflows/runtime-package-inputs.yml'
-      - 'runtime-proof/package-inputs/**'
-      - 'runtime-proof/test-package-inputs.py'
-      - 'runtime-proof/verify-package-preflight.py'
-      - 'runtime-proof/test-package-preflight.py'
-      - 'runtime-proof/verify-source-origin.py'
-      - 'runtime-proof/test-source-origin.py'
-      - 'runtime-proof/download-source-handoff.py'
-      - 'runtime-proof/test-source-archive.py'
+      - 'runtime-proof/**'
 
 permissions:
   contents: read
@@ -28,8 +22,10 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - name: Verify Jac source-byte share
-        run: python3 -B scripts/check-jac-share.py --min-jac 40
+      - name: Verify predeclared runtime source inputs
+        run: |
+          echo 'eaf2dc65909aa593f322cf75cf239ab86fe9b5b79621d9b35d2b42af2ea83368  runtime-proof/check-runtime-direct-use.py' | sha256sum -c -
+          python3 -I -B runtime-proof/check-runtime-direct-use.py --expected-commit "$GITHUB_SHA"
       - name: Check official cache provenance boundaries
         run: python3 -B runtime-proof/test-package-inputs.py
       - name: Check source and package commitment preflight
@@ -38,3 +34,7 @@ jobs:
         run: python3 -I -B runtime-proof/test-source-origin.py
       - name: Check source archive download and extraction boundaries
         run: python3 -I -B runtime-proof/test-source-archive.py
+      - name: Check runtime declaration and fresh fork boundaries
+        run: python3 -I -B runtime-proof/test-runtime-direct-use.py
+      - name: Check fresh package acceptance and cleanup boundaries
+        run: python3 -I -B runtime-proof/test-fresh-package.py

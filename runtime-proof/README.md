@@ -35,6 +35,37 @@ The source runner must preserve the cold compiler rejection/correction proof,
 native HTTP, sustained capacity and independent acceptance are later gates.
 Only a privacy-reviewed fresh proof handoff may cross to a later package job.
 
+`runtime-direct-use-inputs-v1.json` declares the complete 17-file runtime patch
+scope before assembly: 348,363 Jac bytes, with an explicit denominator and
+exclusions. Package input CI checks this predeclared runtime scope, replacing
+its inherited whole-Git language check, and exercises the offline boundaries.
+The application's whole-Git language gate remains unchanged. The operational
+proof branch's complete Git language share is not a runtime acceptance claim.
+The declaration does not claim that assembly ran.
+The package preflight binds this declaration as its thirteenth consumer input.
+`check-runtime-direct-use.py --expected-commit <reviewed-commit>` also checks
+all declared source files against their actual committed bytes.
+Fresh-fork checks require the exact base, unstaged patch and changed-file set.
+Unexpected untracked or ignored inputs are rejected; official shim and typeshed
+additions require their original hashes and exact typeshed inventory.
+Assembly inventory bindings require the hash from the executed v7 recipe's
+result. They remain insufficient without the frozen independent verifier and
+fresh loader/catalog evidence. `run-fresh-package.py` now connects the checks
+to a fresh fork, the frozen recipe and its independent verifier. It is prepared
+and has not established native package acceptance.
+
+The package parent requires a fresh root-provisioned Ubuntu 24.04 host with
+systemd, cgroup v2, at least four available CPUs and 16 GiB of raw MemTotal.
+It preserves the fresh 64 GiB storage proof and the recipe's 7/8 GiB memory,
+zero-swap and 4,200-second assembly limits. It authenticates the successful
+source job, then excludes repository credentials from worker environments.
+The bundled Python interpreter and official extracted cache are verified
+before patched compiler imports. After assembly, three classifier controls
+run on a disposable copy; the original stage stays unchanged. The immutable
+independent verifier then checks the packed bytes, inventories and catalog.
+The parent binds those actual outputs before reporting direct use observed.
+Its offline tests establish rejection behavior, not a native build or capacity.
+
 `verify-source-handoff-v9.py` checks the exact public source files, sanitized
 receipt commitments and required license sidecar against a trusted checkout.
 It requires external commit, run and contract-hash bindings and never executes
@@ -44,8 +75,11 @@ license sidecar and bootstrap cold hash, and verifies both the private bundle
 and the exported copy. CI uploads only that verified directory after success,
 retains it for seven days and exposes the contract hash and artifact identity
 for a later package gate. Logs, caches and application state stay private.
-Actual hosted source/producer/upload acceptance is still pending; synthetic
-tests do not establish native proof, package compatibility or adoption.
+Source run [37477834755](https://github.com/CosmonautJones/m-local/actions/runs/37477834755)
+completed successfully at commit `990c7b33c920e6a93431d34a01df7b8c87c432ba`.
+Its authenticated archive and 38 physical files passed independent verification,
+including the 36-member contract and all 34 public source bindings. This proves
+that source handoff, not package compatibility, capacity or runtime adoption.
 Failure context retains at most eight known operation labels across chained
 errors, including cleanup failures. It omits arbitrary messages and child logs.
 Failure diagnostics retain the operation underway, the last scoped command,

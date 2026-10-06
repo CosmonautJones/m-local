@@ -249,7 +249,7 @@ class SourceArchiveTests(unittest.TestCase):
             self.assertEqual(result['status'], 'passed')
             self.assertEqual(result['scope'], 'authenticated source bundle and package commitments only')
             self.assertEqual(result['origin'], identity)
-            self.assertEqual(result['preflight']['package']['input_count'], 12)
+            self.assertEqual(result['preflight']['package']['input_count'], 13)
             self.assertEqual(endpoints, [
                 ('repos/CosmonautJones/m-local/actions/artifacts/202/zip', len(raw))])
             self.assertEqual(

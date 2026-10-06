@@ -23,6 +23,8 @@ SOURCE_MANIFEST_SHA = 'f0ade58e7b59cc49eb5c3c3d0a6c8ca08c4f5b9804dc49ad5ea4f171c
 ADAPTER_MANIFEST_SHA = '91a9b2f303a57b0178f1ff0c3b876f4d13a84913ce7270b8eb883f144056a81e'
 PACKAGE_MANIFEST_SHA = '681d3cc0713d196d29f0e335a3454ed34e9cc6fa860afc0dbd30713681b81888'
 POLICY_MANIFEST_SHA = '9221e3af38924d04cc72f204512890dc3864697ac8ac40bf8eb9fa0843556ce0'
+DIRECT_USE_PATH = 'runtime-proof/runtime-direct-use-inputs-v1.json'
+DIRECT_USE_SHA = '83f74a2eaf358d25ee37c7772faae42463a89ca00b70cba1d1f5d1aa471722bd'
 SELF_PATH = 'runtime-proof/verify-package-preflight.py'
 BASE_VERIFIER_PATH = 'runtime-proof/verify-source-handoff-v8.py'
 CONSUMER_HELPERS = ('runtime-proof/verify-source-origin.py', 'runtime-proof/download-source-handoff.py', BASE_VERIFIER_PATH)
@@ -62,11 +64,11 @@ def no_links(path):
         fail('linked input path')
 
 
-def read_regular(path):
+def read_regular(path, *, maximum=MAX_FILE_BYTES, allow_empty=False):
     no_links(path)
     info = path.lstat()
     if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or
-            not 0 < info.st_size <= MAX_FILE_BYTES or
+            not (0 <= info.st_size if allow_empty else 0 < info.st_size) or info.st_size > maximum or
             (os.name == 'posix' and info.st_mode & 0o022)):
         fail('input file type or bounds')
     fields = ('st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_mode', 'st_nlink')
@@ -74,7 +76,7 @@ def read_regular(path):
         opened = os.fstat(stream.fileno())
         if any(getattr(opened, key) != getattr(info, key) for key in fields):
             fail('input descriptor identity')
-        raw = stream.read(MAX_FILE_BYTES + 1)
+        raw = stream.read(maximum + 1)
         after = os.fstat(stream.fileno())
         if len(raw) != info.st_size or any(getattr(after, key) != getattr(opened, key) for key in fields):
             fail('input changed during read')
@@ -82,10 +84,12 @@ def read_regular(path):
 
 
 def git(checkout, arguments):
+    no_links(Path(checkout))
     environment = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
     environment.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull,
                        GIT_NO_REPLACE_OBJECTS='1', GIT_OPTIONAL_LOCKS='0')
-    result = subprocess.run(['git', '--no-replace-objects', '-C', str(checkout), *arguments],
+    result = subprocess.run(['git', '--no-replace-objects', '-c', 'safe.directory=' + str(checkout),
+                             '-C', str(checkout), *arguments],
                             env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                             stderr=subprocess.DEVNULL, timeout=30)
     if result.returncode or len(result.stdout) > MAX_FILE_BYTES:
@@ -122,6 +126,119 @@ def committed_file(checkout, commit, relative):
 def inventory_hash(files):
     return sha(json.dumps({name: dict(bytes=len(raw), sha256=sha(raw)) for name, raw in files.items()},
                           sort_keys=True, separators=(',', ':')).encode('utf-8'))
+
+
+def verify_direct_use_declaration(raw, source_raw):
+    if sha(raw) != DIRECT_USE_SHA or sha(source_raw) != SOURCE_MANIFEST_SHA:
+        fail('runtime direct-use declaration pin')
+    declaration = json.loads(raw)
+    manifest = json.loads(source_raw)
+    if (declaration['schema'] != 'm-local-runtime-direct-use-inputs-v1' or
+            declaration['status'] != 'declared_before_assembly' or
+            declaration['source_manifest_sha256'] != SOURCE_MANIFEST_SHA or
+            type(declaration['minimum_share_percent']) is not int or declaration['minimum_share_percent'] != 40 or
+            declaration['direct_use_evidence']['status'] != 'required_not_observed' or
+            not declaration['denominator_definition'] or not declaration['no_padding_or_disguise_assertion']):
+        fail('runtime direct-use declaration scope')
+    included = {}
+    excluded = set()
+    for name, metadata in manifest['files'].items():
+        if metadata['kind'] == 'used_runtime_jac_source':
+            path = name.removeprefix('source/')
+            included[path] = dict(source_member=name, assembled_path='site/' + path.removeprefix('jac/'),
+                                  bytes=metadata['bytes'], sha256=metadata['sha256'])
+        else:
+            excluded.add(name)
+    total = sum(item['bytes'] for item in included.values())
+    jac = sum(item['bytes'] for name, item in included.items() if name.endswith('.jac'))
+    if (len(included) != 17 or declaration['included_source_files'] != included or
+            set(declaration['excluded_file_reasons']) != excluded or
+            declaration['base_revision'] != manifest['base'] or
+            declaration['runtime_patch_sha256'] != manifest['patch_sha256'] or
+            declaration['denominator_bytes'] != total or declaration['jac_bytes'] != jac or
+            declaration['share_percent'] != 100 * jac / total or 100 * jac < 40 * total):
+        fail('runtime direct-use inventory binding')
+    return dict(status='declaration_verified', declaration_sha256=sha(raw),
+                input_count=len(included), jac_bytes=jac, denominator_bytes=total,
+                share_percent=100 * jac / total, direct_use_observed=False)
+
+
+def verify_direct_use_fork(fork, raw, source_raw):
+    result = verify_direct_use_declaration(raw, source_raw)
+    declaration = json.loads(raw)
+    fork = checked_checkout(fork, declaration['base_revision'])
+    if (git(fork, ['diff', '--no-ext-diff', '--no-textconv', '--cached', '--binary']) or
+            sha(git(fork, ['diff', '--no-ext-diff', '--no-textconv', '--binary'])) != declaration['runtime_patch_sha256'] or
+            git(fork, ['diff', '--no-ext-diff', '--no-textconv', '--name-only', '-z']).split(b'\0')[:-1] !=
+            [name.encode('utf-8') for name in declaration['included_source_files']]):
+        fail('runtime direct-use fork patch binding')
+    for name, metadata in declaration['included_source_files'].items():
+        value = read_regular(fork / PurePosixPath(name))
+        if len(value) != metadata['bytes'] or sha(value) != metadata['sha256']:
+            fail('runtime direct-use fork source binding')
+    extras = git(fork, ['ls-files', '--others', '-z', '--', 'jac']).split(b'\0')[:-1]
+    inherited = {}
+    shim = 'jac/jaclang/compiler/backends/native/llvm/libjacllvm.so'
+    typeshed = 'jac/jaclang/vendor/typeshed/'
+    if any(name != shim.encode() and not name.startswith(typeshed.encode()) for name in extras):
+        fail('runtime direct-use unexpected fork input')
+    if shim.encode() in extras:
+        value = read_regular(fork / shim, maximum=64 * 1024 ** 2)
+        if sha(value) != '02f499e9becacf36161aa9f4b39a9f950f4dd8dbcb744acded0f04618652b4de':
+            fail('runtime direct-use inherited shim binding')
+        inherited[shim] = dict(bytes=len(value), sha256=sha(value))
+    if any(name.startswith(typeshed.encode()) for name in extras):
+        inventory = {}
+        for path in (fork / typeshed).rglob('*'):
+            no_links(path)
+            if path.is_dir():
+                continue
+            value = read_regular(path, allow_empty=True)
+            name = path.relative_to(fork / typeshed).as_posix()
+            inventory[name] = sha(value)
+            inherited[typeshed + name] = dict(bytes=len(value), sha256=sha(value))
+            if len(inventory) > 749:
+                fail('runtime direct-use inherited typeshed count')
+        if (len(inventory) != 749 or sha(json.dumps(inventory, sort_keys=True).encode()) !=
+                '1fd7fa02ccc83ad6a6a1fe7451231911a030a70d6f9d166c6d6b7d2715ce648a'):
+            fail('runtime direct-use inherited typeshed binding')
+    return dict(result, status='fresh_fork_verified', assembly_observed=False,
+                inherited_fork_inputs=inherited)
+
+
+def verify_direct_use_inputs(checkout, expected_commit):
+    require_pattern(expected_commit, r'[0-9a-f]{40}', 'direct-use commit format')
+    checkout = checked_checkout(checkout, expected_commit)
+    if Path(__file__).absolute() != checkout / SELF_PATH:
+        fail('direct-use checker checkout binding')
+    committed_file(checkout, expected_commit, SELF_PATH)
+    raw = committed_file(checkout, expected_commit, DIRECT_USE_PATH)
+    source_raw = committed_file(checkout, expected_commit, 'runtime-proof/inputs/public-source-manifest.json')
+    result = verify_direct_use_declaration(raw, source_raw)
+    sources = {}
+    for item in json.loads(raw)['included_source_files'].values():
+        name = 'runtime-proof/inputs/' + item['source_member']
+        value = committed_file(checkout, expected_commit, name)
+        if len(value) != item['bytes'] or sha(value) != item['sha256']:
+            fail('runtime direct-use committed source binding')
+        sources[name] = value
+    return dict(result, commit_sha=expected_commit, source_inventory_sha256=inventory_hash(sources))
+
+
+def verify_direct_use_assembly(fork, assembled_path, raw, source_raw, *, expected_assembled_sha256):
+    result = verify_direct_use_fork(fork, raw, source_raw)
+    assembled_raw = read_regular(Path(assembled_path).absolute())
+    require_pattern(expected_assembled_sha256, r'[0-9a-f]{64}', 'assembled inventory hash format')
+    if sha(assembled_raw) != expected_assembled_sha256:
+        fail('runtime direct-use assembly inventory commitment')
+    assembled = json.loads(assembled_raw)
+    declaration = json.loads(raw)
+    if any(assembled.get(item['assembled_path']) != item['sha256']
+           for item in declaration['included_source_files'].values()):
+        fail('runtime direct-use assembly source binding')
+    return dict(result, status='assembly_source_binding_verified', assembly_inventory_bound=True,
+                assembled_inventory_sha256=sha(assembled_raw),
+                scope='17 patch-source inventory commitments; requires frozen v7 recipe and independent verifier acceptance')
 
 
 def verify_preflight(bundle, source_checkout, package_checkout, *, expected_source_commit,
@@ -174,6 +291,9 @@ def verify_preflight(bundle, source_checkout, package_checkout, *, expected_sour
         if len(raw) != metadata['bytes'] or sha(raw) != metadata['sha256']:
             fail('package input commitment')
         consumer[name] = raw
+    consumer[DIRECT_USE_PATH] = committed_file(package, expected_package_commit, DIRECT_USE_PATH)
+    direct_use = verify_direct_use_declaration(consumer[DIRECT_USE_PATH],
+                                              producer['runtime-proof/inputs/public-source-manifest.json'])
     artifact = Path(bundle).absolute()
     no_links(artifact)
     verifier = {'__file__': str(package / VERIFIER_PATH), '__name__': 'trusted_package_source_verifier'}
@@ -185,7 +305,7 @@ def verify_preflight(bundle, source_checkout, package_checkout, *, expected_sour
     except (ValueError, OSError, subprocess.SubprocessError):
         fail('source handoff binding')
     return dict(status='passed', scope='source and package input commitment verification only',
-                source=verified, source_input_count=len(producer),
+                source=verified, runtime_direct_use=direct_use, source_input_count=len(producer),
                 source_inventory_sha256=inventory_hash(producer),
                 package=dict(commit_sha=expected_package_commit, manifest_sha256=PACKAGE_MANIFEST_SHA,
                              input_count=len(consumer), inventory_sha256=inventory_hash(consumer)))

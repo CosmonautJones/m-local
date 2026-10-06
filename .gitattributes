@@ -8,3 +8,4 @@
 # Reviewed proof inputs retain the exact hashed bytes and original line endings.
 runtime-proof/inputs/** -text
 runtime-proof/package-inputs/** -text
+runtime-proof/runtime-direct-use-inputs-v1.json -text
