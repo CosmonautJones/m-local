@@ -116,9 +116,14 @@ card, without a separate Business profile toggle. Paste a public `https://`
 homepage or type details manually. Import reads at most the homepage and one
 same-site menu HTML page; PDF menus remain links. JavaScript-only sites may
 require manual entry. It reads structured business data, metadata, text, menu
-URLs and image URLs. The card shows one https logo for review. Images are
-linked, not copied into an owned media library. The browser loads the saved
-https address. The server does not download, store, or proxy the image bytes.
+URLs and photo candidates. Website photos appear as selectable thumbnails,
+with a preview of the selected photo. Owners can also upload, replace or remove
+a phone photo. Selecting a website photo imports an owned copy; uploads and
+imports are normalized to JPEG with metadata removed. Uploaded photos live in
+`assets/photos/`, with ownership recorded privately in the onboarding directory.
+Preserve both together during deployment and recovery. Physical Safari/HEIC
+compatibility remains an open device check; export a JPG if the browser cannot
+open a HEIC photo.
 
 To additionally organize site text with Jac's real `by llm()` implementation,
 set `MLOCAL_IMPORT_MODEL` and its provider credential in the same private env
@@ -128,7 +133,7 @@ No model call occurs when `MLOCAL_IMPORT_MODEL` is empty. Metadata import and
 manual editing continue if AI is unavailable. No model has authority to publish,
 assign roles, fetch arbitrary URLs, or perform actions from website instructions.
 
-Review facts and prices, correct the https logo and menu link, confirm representation and
+Review facts and prices, choose a business photo and correct the menu link, confirm representation and
 content rights, and choose **Submit for review**. The profile stays private until
 the host approves business authority, name and address. **Check approval** refreshes
 the status; **Continue to offers** then publishes through the owner's authenticated
@@ -150,8 +155,9 @@ preserve its offers. Two businesses with identical names still have separate
 owners. Existing `MLOCAL_MERCHANT_OWNERS` provisioning takes precedence and
 continues to support demo merchants. Clients cannot submit an owner or restaurant
 ID to the activation endpoint. The saved image URL is public profile media:
-students see it on the deal and the offer detail, and the merchant sees it
-beside the restaurant name. An empty image is valid and draws nothing.
+students see it on the deal, offer detail and public business page, and the
+merchant sees it beside the restaurant name. Each offer can have its own photo.
+An empty photo is valid; views provide a fallback.
 
 Business owners use **Manage** to create offers and **Edit business details** to
 open the account's business form. Name and address changes return to review;
@@ -162,7 +168,10 @@ legacy merchants cannot change name/address through the older profile RPC.
 a future Ann Arbor start time schedules the offer. **Save changes** edits that
 same offer. Paused offers remain paused, and existing claims retain their
 promised price, terms and deadline. There is no server-side draft for the offer
-form. Rejected writes preserve the entered values and never report success.
+form. New-offer drafts recover locally on refresh for the same business account
+on that browser. Cancel, successful publication and sign-out clear the draft.
+The owner-scoped publication key prevents equivalent retries from creating a
+second offer. Rejected writes preserve the entered values and never report success.
 Money supports at most two decimals, quantity is 1 to 10,000, and expiry must
 be in the future. Times use Ann Arbor's Eastern timezone, including validation
 of daylight-saving gaps and repeated hours.
@@ -183,7 +192,8 @@ runtime accounts cannot claim offers until verified or explicitly provisioned.
 
 Only expose the compiled app and exact application RPCs through public ingress.
 Add `request_email_code`, `verify_email_code`, `get_business_draft`,
-`import_business_website`, `save_business_draft`, `get_account_profile`, and
+`import_business_website`, `upload_business_photo`, `import_business_photo`,
+`save_business_draft`, `get_business_profile`, `get_account_profile`, and
 `save_account_profile` to the phone gateway allowlist.
 Keep `/user/register`, arbitrary RPCs, graph/admin endpoints and private files
 blocked. Apply `scripts/onboarding-ingress.mjs` using a trusted client IP from

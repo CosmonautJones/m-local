@@ -183,16 +183,14 @@ def scrub_environment(jac, cache, onboarding):
 
 
 def postgres_identity(environment, cache, runtime=None):
+    print('RUN PostgreSQL distribution identity', flush=True)
     configured = Path(environment['JAC_PG_DIST']).resolve() if environment.get('JAC_PG_DIST') else None
     selected = []
     if runtime is not None:
-        for value in vars(runtime).values():
-            if isinstance(value, (str, Path)):
-                path = Path(value)
-                if path.name == 'postgres' and path.is_file():
-                    selected.append(path.resolve().parent.parent)
-                elif path.name == 'bin' and (path / 'postgres').is_file():
-                    selected.append(path.resolve().parent)
+        bin_dir = Path(runtime._bin_dir or runtime._resolve_binaries()).resolve()
+        if bin_dir.name != 'bin' or not (bin_dir / 'postgres').is_file():
+            raise RuntimeError('Selected PostgreSQL binary directory is unavailable')
+        selected.append(bin_dir.parent)
     selected = list(dict.fromkeys(selected))
     if configured is not None:
         if selected and any(path != configured for path in selected):
@@ -207,7 +205,7 @@ def postgres_identity(environment, cache, runtime=None):
     distribution = selected[0]
     binary = distribution / 'bin/postgres'
     if distribution.is_symlink() or not distribution.is_dir() or binary.is_symlink() or not binary.is_file():
-        raise RuntimeError('JAC_PG_DIST does not resolve to a private official PostgreSQL binary')
+        raise RuntimeError('Selected PostgreSQL distribution does not contain a regular binary')
     files = {}
     for path in sorted(distribution.rglob('*')):
         if path.is_symlink():
@@ -411,6 +409,7 @@ def main():
               Path(pg_identity_before['distribution_root']) != pg_path,
               'resolved PostgreSQL distribution is independent of source and data paths', checks)
         environment['JAC_PG_DIST'] = pg_identity_before['distribution_root']
+        os.environ['JAC_PG_DIST'] = environment['JAC_PG_DIST']
         approval_code = 'import runpy,sys; sys.path.insert(0,"tests/integration"); runpy.run_path("tests/integration/business_approval_http.py",run_name="__main__")'
         approval_restart_code = 'import runpy,sys; sys.path.insert(0,"tests/integration"); sys.argv=["business_approval_http.py","--verify-restart"]; runpy.run_path("tests/integration/business_approval_http.py",run_name="__main__")'
         run_logged('business approval/photo fixture', ['bash', str(candidate / 'scripts/python.sh'), '-c', approval_code],
@@ -695,8 +694,9 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, terminate)
     try:
         main()
-    except (OSError, RuntimeError, TimeoutError, subprocess.SubprocessError, ValueError, KeyError,
+    except (OSError, RuntimeError, TimeoutError, subprocess.SubprocessError, ValueError, KeyError, TypeError,
             AssertionError, sqlite3.Error) as error:
         # Keep failure output useful without exposing private logs, tokens or raw server output.
-        sys.stderr.write('FAIL; private recovery logs: ' + (PRIVATE_LOG_HINT or '/var/tmp/m-local-recovery.*') + '\n')
+        sys.stderr.write('FAIL recovery fixture: ' + type(error).__name__ + '; private recovery logs: ' +
+                         (PRIVATE_LOG_HINT or '/var/tmp/m-local-recovery.*') + '\n')
         raise SystemExit(1) from error
