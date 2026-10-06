@@ -7,6 +7,7 @@ import json
 import os
 import re
 import stat
+import subprocess
 import tempfile
 import time
 import unittest
@@ -26,6 +27,21 @@ def load_package():
 
 def sha(raw):
     return hashlib.sha256(raw).hexdigest()
+
+
+def committed_head_blob(relative):
+    checkout = ROOT.parent
+    environment = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+    environment.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull,
+                       GIT_NO_REPLACE_OBJECTS='1', GIT_OPTIONAL_LOCKS='0')
+    result = subprocess.run(
+        ['git', '--no-replace-objects', '-c', 'safe.directory=' + str(checkout), '-C', str(checkout),
+         'show', 'HEAD:' + relative],
+        env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        check=True, timeout=5)
+    if len(result.stdout) > 1024 ** 2:
+        raise AssertionError('committed test input exceeds bound')
+    return result.stdout
 
 
 def inherited():
@@ -238,6 +254,10 @@ class FreshPackageTests(unittest.TestCase):
                     item = fixture(Path(case_dir))
                     with self.subTest(binding=name), self.assertRaises((ValueError, OSError, KeyError, TypeError)):
                         action(item)
+
+    def test_runner_pin_matches_committed_head_blob(self):
+        raw = committed_head_blob('runtime-proof/run-fresh-source.py')
+        self.assertEqual(sha(raw), PACKAGE.RUNNER_SHA)
 
     def remove_candidate(self, f):
         (f['package'] / 'jac').unlink()
