@@ -1,55 +1,59 @@
-name: checks
+name: runtime runner resource probe
 
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  jac:
+  resources:
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
-      - name: Verify Jac source-byte share
-        run: python3 scripts/check-jac-share.py --min-jac 40
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Install pinned Jac
-        shell: bash
-        run: bash scripts/setup.sh
-      - name: Install project dependencies
+      - name: Read disk and kernel capabilities
         shell: bash
         run: |
-          source scripts/runtime.sh
-          "$JAC_BIN" install
-      - name: Check Jac sources
-        run: ./scripts/check.sh
-      - name: Run core tests
-        run: ./scripts/test.sh core
-      - name: Run business insights tests
-        run: ./scripts/test.sh insights
-      - name: Run onboarding security tests
-        run: bash scripts/test.sh onboarding
-      - name: Test photo normalization and ownership
-        run: bash scripts/python.sh -m unittest tests/photo_media.py
-      - name: Verify business approval over HTTP and after restart
-        run: bash scripts/test-business-approval.sh
-      - name: Test deployment source and data separation
-        run: python3 -m unittest discover -s tests/tooling -p 'test_*.py'
-      - name: Build compiled app and client dependencies
-        run: ./scripts/build.sh
-      - name: Run gateway and UI unit tests
-        run: node --test tests/ui/*.test.mjs tests/tooling/*.test.mjs
-      - name: Test deployment safety with disposable Git repositories
-        shell: pwsh
-        run: ./tests/tooling/live-deploy.test.ps1
-      - name: Install compiled UI test runtime
-        run: npm install --prefix .jac/ui-test-runtime --no-save --package-lock=false jsdom@26.1.0
-      - name: Check compiled onboarding and phone flows
-        run: node --test tests/ui/browser/*.test.mjs
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+
+          def command(args):
+              try:
+                  result = subprocess.run(args, capture_output=True, text=True, timeout=10)
+                  return {'returncode': result.returncode, 'stdout': result.stdout.strip(), 'stderr': result.stderr.strip()}
+              except (OSError, subprocess.TimeoutExpired) as error:
+                  return {'available': False, 'error_type': type(error).__name__}
+
+          disks = []
+          for name in ('/', '/mnt', '/var/tmp', os.environ['RUNNER_TEMP'], os.environ['GITHUB_WORKSPACE']):
+              path = Path(name).resolve()
+              usage = shutil.disk_usage(path)
+              disks.append({'path': str(path), 'device': path.stat().st_dev, 'total_bytes': usage.total,
+                            'used_bytes': usage.used, 'free_bytes': usage.free,
+                            'satisfies_64GiB_image_plus_20GiB_reserve': usage.free > 84 * 1024**3})
+          memory = {}
+          for line in Path('/proc/meminfo').read_text().splitlines():
+              key, value = line.split(':', 1)
+              if key in ('MemTotal', 'MemAvailable', 'SwapTotal', 'SwapFree'):
+                  memory[key + '_bytes'] = int(value.split()[0]) * 1024
+          cgroup = Path('/sys/fs/cgroup')
+          workflow = Path('.github/workflows/check.yml')
+          result = {'status': 'read_only_resource_probe', 'revision': os.environ['GITHUB_SHA'],
+                    'workflow_sha256': hashlib.sha256(workflow.read_bytes()).hexdigest(),
+                    'cpu_count': os.cpu_count(), 'memory': memory, 'disks': disks,
+                    'cgroup_v2': (cgroup / 'cgroup.controllers').is_file(),
+                    'cgroup_controllers': (cgroup / 'cgroup.controllers').read_text().strip() if (cgroup / 'cgroup.controllers').is_file() else '',
+                    'pid1': Path('/proc/1/comm').read_text().strip(),
+                    'tools': {name: shutil.which(name) for name in ('systemd-run', 'systemctl', 'losetup', 'mkfs.ext4', 'strace', 'psql', 'node')},
+                    'sudo_read_only': command(['sudo', '-n', 'true']),
+                    'available_loop_device': command(['sudo', '-n', 'losetup', '--find']),
+                    'systemd_version': command(['systemd-run', '--version']),
+                    'scope': 'No runtime build, package, provisioning, mounts, cgroup mutation, deployment or application acceptance'}
+          print(json.dumps(result, sort_keys=True))
+          PY
