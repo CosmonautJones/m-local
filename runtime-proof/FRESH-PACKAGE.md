@@ -40,6 +40,15 @@ The original extractor receipt and a separate dependency binding are sealed
 and rechecked before acceptance. This proves client setup only; database
 durability, backup/restore and sustained capacity require their own execution.
 
+The UI test tools also come from a fresh, private extraction of the fixed
+official Node.js 22.16.0 archive and its published checksum file. The control
+retains the original preparation assertions, checks the complete extracted
+file inventory and link targets, and runs Node.js, npm and a small JavaScript
+probe under UID/GID 65534. Scripts, receipts, binaries and resolved libraries
+are bound by hashes and rechecked after package assembly. This establishes
+the test-tool prerequisite; it does not run the application UI suite or prove
+browser compatibility, performance or production runtime adoption.
+
 The manual defaults bind the reviewed successful source commit
 `990c7b33c920e6a93431d34a01df7b8c87c432ba` and run `37477834755`.
 The parent authenticates their exact successful job and unexpired artifact,
@@ -58,3 +67,11 @@ sanitized acceptance summary is printed after successful independent byte
 verification and cleanup. A green package job proves package assembly only;
 application compatibility, native HTTP, sustained capacity, runtime adoption
 and full release acceptance still require separate current evidence.
+
+Connecting the full suite requires regenerating its ten transaction probes
+from the authenticated source inputs. The source artifact carries aggregate
+results, rather than the generated private probe files. Fresh script bindings
+must be recorded as prepared inputs and then executed against the package;
+they cannot be presented as the source run's executed probes. The two source
+interface checks remain separate from those ten phases. The UI dependency
+installation also needs fresh, bound inputs before full-suite acceptance.

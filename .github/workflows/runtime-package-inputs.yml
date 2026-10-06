@@ -44,3 +44,5 @@ jobs:
         run: sudo -n python3 -I -B runtime-proof/test-file-trace-control.py
       - name: Check private PostgreSQL client bindings on owned fixtures
         run: sudo -n python3 -I -B runtime-proof/test-pg-client-control.py
+      - name: Check private JavaScript test-tool bindings on owned fixtures
+        run: sudo -n python3 -I -B runtime-proof/test-node-client-control.py

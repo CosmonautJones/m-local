@@ -1,0 +1,20 @@
+{
+  "archive": {
+    "bytes": 30425588,
+    "file": "node-v22.16.0-linux-x64.tar.xz",
+    "sha256": "f4cb75bb036f0d0eddf6b79d9596df1aaab9ddccd6a20bf489be5abe9467e84e",
+    "url": "https://nodejs.org/dist/v22.16.0/node-v22.16.0-linux-x64.tar.xz"
+  },
+  "checksums": {
+    "bytes": 3777,
+    "file": "SHASUMS256.txt",
+    "sha256": "e1f5ad5e2a5654721e7b89d84d27f406e582c46ca0b5cde304c5dcdd7bab8b31",
+    "url": "https://nodejs.org/dist/v22.16.0/SHASUMS256.txt"
+  },
+  "release_documentation": "https://nodejs.org/en/blog/release/v22.16.0",
+  "schema": "m-local-node-client-download-pins-v1",
+  "scope": "Fixed official Node.js test-tool archive; private extraction only, with no application runtime or system installation change",
+  "status": "declared_before_extraction",
+  "version": "22.16.0",
+  "npm_version": "10.9.2"
+}

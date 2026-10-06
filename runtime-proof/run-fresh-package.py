@@ -27,6 +27,7 @@ CLASSIFIER_CONTROL_SHA = '242e1aefd09969e07fd557c5737cc6957fafd97920ba8e069f20b5
 SOURCE_ISOLATION_SHA = '5b47f940cb4d7e939f987cf07c7f84a5d4b7e8ce2764a9b12a7ae4a23c250f6d'
 FILE_TRACE_CONTROL_SHA = 'd0567f05d046da61c772e8ce20dbabbbcea7e0d6868307ac402448d4810f1c08'
 PG_CLIENT_CONTROL_SHA = 'bf1bbe1647b9fd1f577e0140452c085903847211111610c212e5da8291521de7'
+NODE_CLIENT_CONTROL_SHA = '79097e21e7f8f1647fa6984b85903d470824cb6f240bb0b82d1e8c435dfa15f5'
 RECIPE_SHA = 'ec820c414d5a83d498f894eddcee105d5eb3e287a030c2d6b87045fe7d32129f'
 VERIFIER_SHA = '9f7acdfd45c3a66913c8c3c9205f3afc8b00801147b1082e2af329a17f27d8de'
 CLASSIFIER_SHA = '33dd3dbe88aadb16317f60bd518430225a7a8ef466596c70271b16371006f363'
@@ -378,6 +379,14 @@ def main(argv=None):
         mount_identity(pg_directory, runner['E_ROOT'], 'm-local-pg-client-control-v1-', pg_identity)
         if pg_client.get('status') != 'passed':
             fail('PostgreSQL client fixture control')
+        node_client_control = load_committed(preflight, 'runtime-proof/run-fresh-node-client-control.py',
+                                             args.expected_package_commit, pin=NODE_CLIENT_CONTROL_SHA)
+        node_directory, node_identity = fresh_mount(runner, 'm-local-node-client-control-v1-')
+        node_client = node_client_control['run_control'](preflight, runner, node_directory,
+                                                        args.expected_package_commit, remaining_seconds(deadline, 180))
+        mount_identity(node_directory, runner['E_ROOT'], 'm-local-node-client-control-v1-', node_identity)
+        if node_client.get('status') != 'passed':
+            fail('JavaScript test-tool fixture control')
         runner['prepare_task'](runner['CANONICAL_TASK'], manifest, adapters, workspace / 'checkout.log')
         official, materialized = runner['materialize_runtime'](workspace, pins, workspace / 'runtime.log')
         old, fork = runner['prepare_forks'](workspace, manifest, workspace / 'forks.log')
@@ -502,6 +511,17 @@ def main(argv=None):
             for path, expected in dependencies.items():
                 if regular_hash(preflight, Path(path), maximum=1024 ** 3)[0] != expected:
                     fail('PostgreSQL client fixture dependency changed')
+        mount_identity(node_directory, runner['E_ROOT'], 'm-local-node-client-control-v1-', node_identity)
+        for name in ('frozen', 'binding'):
+            if regular_hash(preflight, node_client[name + '_receipt_path'], maximum=1024 ** 2)[0] != node_client[name + '_receipt_sha256']:
+                fail('JavaScript test-tool fixture receipt changed')
+        for relative, expected in node_client['tool_binary_sha256'].items():
+            if regular_hash(preflight, node_client['clients_directory'] / relative, maximum=1024 ** 3)[0] != expected:
+                fail('JavaScript test-tool fixture binary changed')
+        for path, expected in node_client['dependency_sha256'].items():
+            if regular_hash(preflight, Path(path), maximum=1024 ** 3)[0] != expected:
+                fail('JavaScript test-tool fixture dependency changed')
+        node_client_control['verify_inventory'](node_client['clients_directory'], node_client['extracted_inventory_sha256'])
         summary = dict(accepted, source=source_gate['source'], source_job_id=authenticated['job_id'],
                        source_artifact_id=authenticated['artifact_id'],
                        source_archive_sha256=authenticated['artifact_digest'],
@@ -523,6 +543,12 @@ def main(argv=None):
                        pg_client_fixture_binding_receipt_sha256=pg_client['binding_receipt_sha256'],
                        pg_client_fixture_extractor_sha256=pg_client['executed_extractor_sha256'],
                        pg_client_fixture_tool_binary_sha256=pg_client['tool_binary_sha256'],
+                       node_client_control_code_sha256=NODE_CLIENT_CONTROL_SHA,
+                       node_client_fixture_frozen_receipt_sha256=node_client['frozen_receipt_sha256'],
+                       node_client_fixture_binding_receipt_sha256=node_client['binding_receipt_sha256'],
+                       node_client_fixture_prepare_sha256=node_client['executed_prepare_sha256'],
+                       node_client_fixture_tool_binary_sha256=node_client['tool_binary_sha256'],
+                       node_client_fixture_extracted_inventory_sha256=node_client['extracted_inventory_sha256'],
                        host_cpu_count=host_cpus, minimum_host_memory_bytes=MIN_HOST_MEMORY,
                        controls_confirmed_before_workload=assembly['controls_confirmed_before_workload'],
                        assembly_elapsed_limit_seconds=ASSEMBLY_SECONDS,
