@@ -6,7 +6,10 @@ from io import StringIO
 from pathlib import Path
 import ast
 import json
+import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parent
@@ -64,6 +67,53 @@ class SourceFailureTests(unittest.TestCase):
                 exec(self.handler, namespace)
         return raised.exception.code, output.getvalue()
 
+    def execute_actual_main_failure(self):
+        temporary = tempfile.TemporaryDirectory(dir=ROOT)
+        root = Path(temporary.name) / 'e-root'
+        root.mkdir()
+        workspace = Path(temporary.name) / 'runner-workspace'
+        workspace.mkdir()
+
+        def fake_run(command, *args, **kwargs):
+            if command[:2] == ['/usr/sbin/losetup', '--detach']:
+                return SimpleNamespace(returncode=1, stdout='')
+            if command[:2] == ['/usr/sbin/losetup', '--associated']:
+                return SimpleNamespace(returncode=1, stdout='')
+            return SimpleNamespace(returncode=0, stdout='')
+
+        diagnostics = dict(operation='setup', last_scoped_command=None, body_completed=False,
+                           body_failure_type=None, cleanup_failures=[])
+        stubs = {
+            'producer_binding': lambda: {},
+            'host_guard': lambda: None,
+            'manifest_inputs': lambda: ({}, {}, {}),
+            'run_probe': lambda ignored: (Path(temporary.name) / 'probe.json', {}),
+            'mount_image': lambda: None,
+            'prepare_task': lambda *args: 'app',
+            'materialize_runtime': lambda *args: (_ for _ in ()).throw(
+                RuntimeError('PRIVATE_MATERIALIZE_SENTINEL /private/path')),
+            'E_ROOT': root,
+            'IMAGE_LOOP': root / 'loop-device',
+            'OWNED_MOUNTS': set(),
+            'FAILURE_DIAGNOSTICS': diagnostics,
+        }
+        original_name = self.namespace['__name__']
+        try:
+            with patch.dict(self.namespace, stubs), \
+                    patch.object(self.namespace['tempfile'], 'mkdtemp', return_value=str(workspace)), \
+                    patch.object(self.namespace['signal'], 'signal', return_value=None), \
+                    patch.object(self.namespace['subprocess'], 'run', side_effect=fake_run), \
+                    patch.dict(self.namespace['os'].environ, {}, clear=False):
+                self.namespace['__name__'] = '__main__'
+                output = StringIO()
+                with redirect_stdout(output):
+                    with self.assertRaises(SystemExit) as raised:
+                        exec(self.handler, self.namespace)
+                return raised.exception.code, json.loads(output.getvalue()), diagnostics
+        finally:
+            self.namespace['__name__'] = original_name
+            temporary.cleanup()
+
     def test_main_handler_preserves_known_failure_chain(self):
         code, output = self.execute_handler(known_failure_chain())
         self.assertEqual(code, 1)
@@ -97,6 +147,108 @@ class SourceFailureTests(unittest.TestCase):
         self.assertEqual(self.helper()(DerivedRuntimeError('source matrix failed')), [])
         self.assertEqual(self.helper()(RuntimeError(PrivateText())), [])
         self.assertEqual(self.helper()(RuntimeError('source matrix failed', 'private detail')), [])
+
+    def test_actual_main_failure_diagnostics_survive_cleanup_masking(self):
+        code, payload, diagnostics = self.execute_actual_main_failure()
+        self.assertEqual(code, 1)
+        self.assertEqual(payload['error'], 'owned mount cleanup guard')
+        self.assertEqual(payload['failure_diagnostics']['operation'], 'runtime-materialization')
+        self.assertIsNone(payload['failure_diagnostics']['last_scoped_command'])
+        self.assertFalse(payload['failure_diagnostics']['body_completed'])
+        self.assertEqual(payload['failure_diagnostics']['body_failure_type'], 'RuntimeError')
+        self.assertEqual(payload['failure_diagnostics']['cleanup_failures'],
+                         ['loop detach', 'loop detach confirmation'])
+        self.assertNotIn('PRIVATE_MATERIALIZE_SENTINEL', json.dumps(payload))
+
+    def test_actual_cleanup_sanitizes_finite_categories(self):
+        temporary = tempfile.TemporaryDirectory(dir=ROOT)
+        root = Path(temporary.name) / 'e-root'
+        root.mkdir()
+        (root / 'busy').write_text('busy', encoding='utf-8')
+        bind_mount = Path(temporary.name) / 'bind-mount'
+        bind_mount.mkdir()
+        bind_target = Path(temporary.name) / 'bind-target'
+        bind_target.mkdir()
+        (bind_target / 'busy').write_text('busy', encoding='utf-8')
+        diagnostics = dict(operation='setup', last_scoped_command=None, body_completed=False,
+                           body_failure_type=None, cleanup_failures=[])
+        root_unmounted = [False]
+
+        def fake_run(command, *args, **kwargs):
+            if command[:2] == ['/usr/bin/umount', str(root)]:
+                root_unmounted[0] = True
+            return SimpleNamespace(returncode=1, stdout='PRIVATE_CLEANUP_SENTINEL')
+
+        def fake_is_mount(path):
+            return (Path(path) == root and not root_unmounted[0]) or Path(path) == bind_mount
+
+        try:
+            with patch.dict(self.namespace, {'E_ROOT': root, 'IMAGE_LOOP': root / 'loop-device',
+                                             'OWNED_MOUNTS': {bind_mount, bind_target},
+                                             'FAILURE_DIAGNOSTICS': diagnostics}), \
+                    patch.object(self.namespace['subprocess'], 'run', side_effect=fake_run), \
+                    patch.dict(self.namespace, {'is_mount': fake_is_mount}):
+                with self.assertRaisesRegex(RuntimeError, '^owned mount cleanup guard$'):
+                    self.namespace['cleanup_mounts']()
+                diagnostics['cleanup_failures'].append('loop detach')
+                diagnostics['cleanup_failures'].append('PRIVATE_CLEANUP_SENTINEL')
+                result = self.namespace['sanitized_failure_diagnostics']()
+            self.assertEqual(set(result['cleanup_failures']), {
+                'owned bind unmount', 'owned bind target cleanup', 'image unmount',
+                'loop detach', 'loop detach confirmation', 'image target cleanup',
+            })
+            self.assertEqual(len(result['cleanup_failures']), 6)
+            self.assertNotIn('PRIVATE_CLEANUP_SENTINEL', json.dumps(result))
+        finally:
+            temporary.cleanup()
+
+    def test_diagnostics_sanitizer_rejects_invalid_private_fields(self):
+        state = dict(operation={'private': 'OPERATION_SENTINEL'},
+                     last_scoped_command='PRIVATE_COMMAND_SENTINEL', body_completed='yes',
+                     body_failure_type=object(),
+                     cleanup_failures=['loop detach', {'private': 'CLEANUP_SENTINEL'}, 'unknown'])
+        with patch.dict(self.namespace, {'FAILURE_DIAGNOSTICS': state}):
+            result = self.namespace['sanitized_failure_diagnostics']()
+        self.assertEqual(result, dict(operation=None, last_scoped_command=None,
+                                      body_completed=False, body_failure_type=None,
+                                      cleanup_failures=['loop detach']))
+        self.assertNotIn('SENTINEL', json.dumps(result))
+
+    def test_scoped_command_records_entered_finite_label(self):
+        temporary = tempfile.TemporaryDirectory(dir=ROOT)
+        root = Path(temporary.name)
+        mountpoint = root / 'mountpoint'
+        mountpoint.mkdir()
+        process = SimpleNamespace(returncode=0, poll=lambda: 0, wait=lambda *args, **kwargs: None)
+        state = dict(controls_confirmed_before_workload=True, requested_limits={}, cleanup={})
+        helper = {
+            'mounted_empty': lambda ignored: mountpoint,
+            'launch_scope': lambda *args, **kwargs: (process, state),
+            'sample_scope': lambda ignored: 0,
+            'scope_guard': lambda *args, **kwargs: None,
+            'stop_scope': lambda *args, **kwargs: {'cgroup_empty': True, 'launcher_stopped': True},
+        }
+        diagnostics = dict(operation='setup', last_scoped_command=None, body_completed=False,
+                           body_failure_type=None, cleanup_failures=[])
+        try:
+            with patch.dict(self.namespace, {'E_ROOT': root, 'OWNED_MOUNTS': set(),
+                                             'FAILURE_DIAGNOSTICS': diagnostics,
+                                             'resource_helper': lambda: helper}):
+                result = self.namespace['scoped_command']('Pillow dependency guard', ['fake-command'],
+                                                          cwd=root, environment={}, workspace=root)
+                sanitized = self.namespace['sanitized_failure_diagnostics']()
+            self.assertEqual(result['controls_confirmed_before_workload'], True)
+            self.assertEqual(sanitized['last_scoped_command'], 'Pillow dependency guard')
+        finally:
+            temporary.cleanup()
+
+    def test_stage_validation_context_survives_cleanup_masking(self):
+        error = RuntimeError('owned mount cleanup guard')
+        error.__cause__ = RuntimeError('source cold-compile unidentified mounts')
+        code, output = self.execute_handler(error)
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(output)['failure_context'], [
+            'owned mount cleanup guard', 'source cold-compile unidentified mounts'])
 
     def test_explicit_cause_precedes_context(self):
         error = RuntimeError('owned mount cleanup guard')

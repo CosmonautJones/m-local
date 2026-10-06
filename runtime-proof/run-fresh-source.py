@@ -82,6 +82,18 @@ IMAGE_LOOP = None
 MOUNT_BASELINE = set()
 OWNED_MOUNTS = set()
 RESOURCE_HELPER = None
+SCOPED_COMMAND_LABELS = {
+    'public application checkout', 'public application revision', 'application revision read',
+    'public Jac clone', 'public Jac base checkout', 'Jac base revision read',
+    'old source fork clone', 'current source fork clone', 'old source diff format',
+    'current source diff format', 'old patch apply', 'current patch apply',
+    'source fork diff identity-type-source-old-v7', 'source fork diff identity-type-source-v3-v7',
+    'official Jac version', 'official Jac help', 'official Jac cache materialization',
+    'pinned download jac', 'pinned download jacpython', 'pinned download postgres',
+    'PostgreSQL version', 'declared dependency priming', 'Pillow dependency guard',
+}
+FAILURE_DIAGNOSTICS = dict(operation='setup', last_scoped_command=None, body_completed=False,
+                           body_failure_type=None, cleanup_failures=[])
 
 
 def digest(path):
@@ -93,10 +105,23 @@ def fail(label):
 
 
 def sanitized_failure_context(error):
-    allowed = {'owned mount cleanup guard'} | {
+    allowed = {
+        'owned mount cleanup guard', 'cold stage mount receipt', 'cold stage mount identity',
+        'source stage mount parent', 'source stage mount path', 'source stage mount backing identity',
+        'source stage receipt missing', 'source stage wrapper binding', 'source stage child path guard',
+        'source stage child binding', 'source stage child status', 'source leaf phase receipt',
+        'source leaf kernel control receipt', 'source job global deadline', 'cold phase patch order',
+        'bootstrap leaf gate', 'matrix leaf gate', 'matrix result path gate',
+        'matrix storage receipt', 'matrix storage mount gate',
+    } | {
         'source ' + stage + ' ' + reason
         for stage in ('cold-compile', 'bootstrap', 'matrix')
-        for reason in ('failed', 'timeout', 'unavailable', 'unidentified mount cleanup')
+        for reason in ('failed', 'timeout', 'unavailable', 'unidentified mount cleanup',
+                       'unidentified mounts', 'retained receipt binding')
+    } | {
+        command + ' ' + reason for command in SCOPED_COMMAND_LABELS
+        for reason in ('failed', 'scope kernel_memory_limit', 'scope kernel_control_mismatch',
+                       'scope disk', 'scope timeout', 'scope cleanup', 'scope bind cleanup')
     }
     labels = []
     seen = set()
@@ -109,6 +134,32 @@ def sanitized_failure_context(error):
         error = error.__cause__ if error.__cause__ is not None else (
             None if error.__suppress_context__ else error.__context__)
     return labels
+
+
+def sanitized_failure_diagnostics():
+    state = FAILURE_DIAGNOSTICS if type(FAILURE_DIAGNOSTICS) is dict else {}
+    operations = {
+        'setup', 'producer-binding', 'host-controls', 'manifest-inputs', 'runner-controls',
+        'storage-mount', 'application-checkout', 'runtime-materialization', 'source-forks',
+        'shim-typeshed', 'dependency-priming', 'cold-compile', 'bootstrap', 'matrix',
+        'handoff-build', 'handoff-export', 'summary',
+    }
+    families = {'RuntimeError', 'OSError', 'SubprocessError', 'AssertionError', 'ValueError',
+                'KeyError', 'TypeError', 'IndexError', 'SystemExit', 'other'}
+    cleanup_labels = {'owned bind unmount', 'owned bind target cleanup', 'image unmount',
+                      'loop detach', 'loop detach confirmation', 'image target cleanup'}
+
+    def finite(value, allowed):
+        return value if type(value) is str and value in allowed else None
+
+    failures = state.get('cleanup_failures', [])
+    failures = failures[:64] if type(failures) is list else []
+    return dict(operation=finite(state.get('operation'), operations),
+                last_scoped_command=finite(state.get('last_scoped_command'), SCOPED_COMMAND_LABELS),
+                body_completed=state.get('body_completed') is True,
+                body_failure_type=finite(state.get('body_failure_type'), families),
+                cleanup_failures=list(dict.fromkeys(label for label in failures
+                                                   if finite(label, cleanup_labels) is not None)))
 
 
 def minimal_environment(extra=None):
@@ -397,6 +448,7 @@ def resource_helper():
 
 def scoped_command(label, command, *, cwd, environment, workspace, timeout=900):
     global ACTIVE
+    FAILURE_DIAGNOSTICS['last_scoped_command'] = label
     helper = resource_helper()
     mountpoint = helper['mounted_empty']('m-local-runtime-materialize-v7-')
     OWNED_MOUNTS.add(mountpoint)
@@ -972,6 +1024,7 @@ def mount_image():
 
 
 def cleanup_mounts():
+    FAILURE_DIAGNOSTICS['cleanup_failures'] = []
     if IMAGE_LOOP is None and not is_mount(E_ROOT) and not E_ROOT.exists():
         return
     errors = []
@@ -1023,6 +1076,7 @@ def cleanup_mounts():
         except OSError:
             errors.append('image target cleanup')
     if errors:
+        FAILURE_DIAGNOSTICS['cleanup_failures'] = list(dict.fromkeys(errors))
         fail('owned mount cleanup guard')
     OWNED_MOUNTS.clear()
 
@@ -1249,8 +1303,12 @@ def export_handoff(workspace, summary, producer):
 
 def main():
     global PRIVATE_LOG_DIR
+    FAILURE_DIAGNOSTICS.update(operation='producer-binding', last_scoped_command=None,
+                               body_completed=False, body_failure_type=None, cleanup_failures=[])
     producer = producer_binding()
+    FAILURE_DIAGNOSTICS['operation'] = 'host-controls'
     host_guard()
+    FAILURE_DIAGNOSTICS['operation'] = 'manifest-inputs'
     pins, manifest, adapters = manifest_inputs()
     workspace = set_private(Path(tempfile.mkdtemp(prefix='m-local-fresh-source-v7-', dir='/var/tmp')))
     PRIVATE_LOG_DIR = workspace / 'logs'
@@ -1260,20 +1318,29 @@ def main():
     deadline = time.monotonic() + SOURCE_JOB_SECONDS
     summary = None
     try:
+        FAILURE_DIAGNOSTICS.update(operation='runner-controls', last_scoped_command=None)
         probe_path, probe = run_probe(workspace)
+        FAILURE_DIAGNOSTICS.update(operation='storage-mount', last_scoped_command=None)
         mount_image()
         task = CANONICAL_TASK
+        FAILURE_DIAGNOSTICS.update(operation='application-checkout', last_scoped_command=None)
         app = prepare_task(task, manifest, adapters, workspace / 'checkout.log')
+        FAILURE_DIAGNOSTICS.update(operation='runtime-materialization', last_scoped_command=None)
         official, runtime = materialize_runtime(workspace, pins, workspace / 'runtime.log')
+        FAILURE_DIAGNOSTICS.update(operation='source-forks', last_scoped_command=None)
         old_fork, current_fork = prepare_forks(workspace, manifest, workspace / 'forks.log')
+        FAILURE_DIAGNOSTICS.update(operation='shim-typeshed', last_scoped_command=None)
         type_inventory = materialize_shim_typeshed(current_fork, old_fork, official, workspace)
+        FAILURE_DIAGNOSTICS.update(operation='dependency-priming', last_scoped_command=None)
         dependency = dependency_priming(app, official, workspace, workspace / 'dependencies.log')
+        FAILURE_DIAGNOSTICS.update(operation='cold-compile', last_scoped_command=None)
         cold_stage, cold, cold_path = run_stage(task, workspace, 'cold-compile', current_fork, official,
                                                 old_fork=old_fork, deadline=deadline)
         cold_phases = cold.get('phases', [])
         if len(cold_phases) != 2 or cold_phases[0].get('runtime_patch_sha256') != PATCH_BEFORE or \
                 cold_phases[1].get('runtime_patch_sha256') != PATCH_AFTER:
             fail('cold phase patch order')
+        FAILURE_DIAGNOSTICS.update(operation='bootstrap', last_scoped_command=None)
         bootstrap_stage, bootstrap, bootstrap_path = run_stage(task, workspace, 'bootstrap', current_fork, official,
                                                                cold=cold_path, deadline=deadline)
         if bootstrap.get('checks') != 53 or bootstrap.get('cold_compile_receipt_sha256') != digest(cold_path) or \
@@ -1282,6 +1349,7 @@ def main():
             fail('bootstrap leaf gate')
         verify_leaf_controls(cold, phases_key='phases')
         verify_leaf_controls(bootstrap, phases_key=None)
+        FAILURE_DIAGNOSTICS.update(operation='matrix', last_scoped_command=None)
         matrix_stage, matrix, matrix_path = run_stage(task, workspace, 'matrix', current_fork, official,
                                                      gate=bootstrap_path, deadline=deadline)
         if matrix.get('phase_count') != 10 or matrix.get('interface_count') != 2 or \
@@ -1304,8 +1372,11 @@ def main():
             fail('matrix storage mount gate')
         verify_leaf_controls(matrix_inner, phases_key='phases')
         verify_leaf_controls(matrix_inner, phases_key='interface_proofs')
+        FAILURE_DIAGNOSTICS.update(operation='handoff-build', last_scoped_command=None)
         handoff = build_handoff(workspace, manifest, cold_stage, bootstrap_stage, matrix_stage, cold, bootstrap, matrix, producer=producer)
+        FAILURE_DIAGNOSTICS.update(operation='handoff-export', last_scoped_command=None)
         handoff['verification'] = export_handoff(workspace, handoff, producer)
+        FAILURE_DIAGNOSTICS.update(operation='summary', last_scoped_command=None)
         summary = dict(status='passed', checks=['host-controls', 'fresh-64Gi-storage', 'public-app-revision',
             'public-pinned-downloads', 'postgres-distribution', 'dependency-priming-pillow', 'fresh-forks-80fd-d363',
             'cold-compile-before-after', 'bootstrap-53', 'matrix-10-plus-2', 'scrubbed-36-file-contract'],
@@ -1320,6 +1391,12 @@ def main():
             cold_receipt_sha256=digest(cold_path), bootstrap_receipt_sha256=digest(bootstrap_path), matrix_receipt_sha256=digest(matrix_path),
             handoff=handoff, external_jac_db_url=False, source_override='leaf receipts only',
             status_scope='prepared source proof; no package/adoption/deployment')
+        FAILURE_DIAGNOSTICS['body_completed'] = True
+    except BaseException as error:
+        FAILURE_DIAGNOSTICS['body_failure_type'] = next((family.__name__ for family in
+            (RuntimeError, OSError, subprocess.SubprocessError, AssertionError, ValueError,
+             KeyError, TypeError, IndexError, SystemExit) if isinstance(error, family)), 'other')
+        raise
     finally:
         cleanup_mounts()
     print(json.dumps(summary, sort_keys=True, separators=(',', ':')), flush=True)
@@ -1331,6 +1408,7 @@ if __name__ == '__main__':
     except RuntimeError as error:
         label = str(error).splitlines()[0][:120] or 'source runner aborted'
         print(json.dumps(dict(status='failed', error=label, failure_context=sanitized_failure_context(error),
+                             failure_diagnostics=sanitized_failure_diagnostics(),
                              private_logs=str(PRIVATE_LOG_DIR or '/var/tmp/m-local-fresh-source-v7.*')),
                           sort_keys=True, separators=(',', ':')), flush=True)
         raise SystemExit(1)
@@ -1338,6 +1416,7 @@ if __name__ == '__main__':
             IndexError, SystemExit) as error:
         print(json.dumps(dict(status='failed', error='source runner aborted',
                               failure_context=sanitized_failure_context(error),
+                              failure_diagnostics=sanitized_failure_diagnostics(),
                               private_logs=str(PRIVATE_LOG_DIR or '/var/tmp/m-local-fresh-source-v7.*')),
                          sort_keys=True, separators=(',', ':')), flush=True)
         raise SystemExit(1)

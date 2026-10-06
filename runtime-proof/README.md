@@ -39,5 +39,9 @@ retains it for seven days and exposes the contract hash and artifact identity
 for a later package gate. Logs, caches and application state stay private.
 Actual hosted source/producer/upload acceptance is still pending; synthetic
 tests do not establish native proof, package compatibility or adoption.
-Failure context retains at most eight known stage labels across chained
+Failure context retains at most eight known operation labels across chained
 errors, including cleanup failures. It omits arbitrary messages and child logs.
+Failure diagnostics retain the operation underway, the last scoped command,
+whether the source body completed, its error family and finite cleanup actions.
+These fields use fixed label lists and never establish acceptance when cleanup
+fails; the last command identifies progress and does not imply that it failed.
