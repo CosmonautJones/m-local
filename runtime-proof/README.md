@@ -7,10 +7,14 @@ itself. The application stays pinned to official Jac 0.37.23.
 `inputs/public-source-manifest.json` binds the reviewed proof sources, patches
 and 17 modified Jac implementation files. These are the actual files the fresh
 fork must byte-match before compile, bootstrap and matrix execution.
-`inputs/v8-adapter-manifest.json` binds the four current finite source adapters.
+`inputs/v9-adapter-manifest.json` binds the current adapters and their frozen
+v8 predecessors. The v9 matrix persists the source-only email scope already
+declared on stdout, so the strict receipt verifier can accept the saved result.
+The thin v9 adapters and verifier hash-check their v8 predecessors before
+applying exactly counted substitutions. All prior validation remains active.
 The v8 matrix binds the frozen loader to the fresh fork after checking its
 original hash; every implementation and module containment assertion remains.
-The original v3 sources, v7 adapters and v7 manifest remain unchanged.
+The original v3 sources, v7/v8 adapters, manifests and v8 verifier remain unchanged.
 No historical caches, accounts, graph state, private photos or logs are inputs.
 The input directory preserves its original bytes in Git, including line endings
 and patch context whitespace; its manifests verify the staged blobs before push.
@@ -31,7 +35,7 @@ The source runner must preserve the cold compiler rejection/correction proof,
 native HTTP, sustained capacity and independent acceptance are later gates.
 Only a privacy-reviewed fresh proof handoff may cross to a later package job.
 
-`verify-source-handoff.py` checks the exact public source files, sanitized
+`verify-source-handoff-v9.py` checks the exact public source files, sanitized
 receipt commitments and required license sidecar against a trusted checkout.
 It requires external commit, run and contract-hash bindings and never executes
 bundle contents. Synthetic producer/export tests run before native proof.

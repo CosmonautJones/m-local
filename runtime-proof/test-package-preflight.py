@@ -67,15 +67,16 @@ class PackagePreflightTests(unittest.TestCase):
         source = root / 'producer'
         package = root / 'consumer'
         source_manifest = json.loads((REPO / 'runtime-proof/inputs/public-source-manifest.json').read_text())
-        adapter_manifest = json.loads((REPO / 'runtime-proof/inputs/v8-adapter-manifest.json').read_text())
+        adapter_manifest = json.loads((REPO / 'runtime-proof/inputs/v9-adapter-manifest.json').read_text())
         source_files = {
             'runtime-proof/run-fresh-source.py',
             'runtime-proof/kali-build-resources-v2.py',
             'runtime-proof/verify-source-handoff-v8.py',
+            'runtime-proof/verify-source-handoff-v9.py',
             'runtime-proof/public-download-pins.json',
             'runtime-proof/JAC-LICENSE.txt',
             'runtime-proof/inputs/public-source-manifest.json',
-            'runtime-proof/inputs/v8-adapter-manifest.json',
+            'runtime-proof/inputs/v9-adapter-manifest.json',
         }
         source_files.update('runtime-proof/inputs/' + relative for relative in source_manifest['files'])
         source_files.update('runtime-proof/inputs/' + relative for relative in adapter_manifest['files'])
@@ -85,6 +86,7 @@ class PackagePreflightTests(unittest.TestCase):
         package_files = {
             'runtime-proof/verify-package-preflight.py',
             'runtime-proof/verify-source-handoff-v8.py',
+            'runtime-proof/verify-source-handoff-v9.py',
             'runtime-proof/verify-source-origin.py',
             'runtime-proof/download-source-handoff.py',
             'runtime-proof/package-inputs/public-package-manifest-v7.json',
@@ -96,7 +98,7 @@ class PackagePreflightTests(unittest.TestCase):
         handoff = object.__new__(self.handoff.SourceHandoffTests)
         handoff.checkout = source
         handoff.manifest = self.handoff.VERIFY._read_json(source / 'runtime-proof/inputs/public-source-manifest.json')
-        handoff.adapters = self.handoff.VERIFY._read_json(source / 'runtime-proof/inputs/v8-adapter-manifest.json')
+        handoff.adapters = self.handoff.VERIFY._read_json(source / 'runtime-proof/inputs/v9-adapter-manifest.json')
         handoff.commit = source_commit
         handoff.bundle = root / 'bundle'
         handoff._make_bundle()
@@ -127,12 +129,12 @@ class PackagePreflightTests(unittest.TestCase):
             result = self.verify(fixture)
             self.assertEqual(result['status'], 'passed')
             self.assertEqual(result['scope'], 'source and package input commitment verification only')
-            self.assertEqual(result['source_input_count'], 45)
+            self.assertEqual(result['source_input_count'], 48)
             self.assertEqual(len(result['source_inventory_sha256']), 64)
             self.assertEqual(result['package'], dict(
                 commit_sha=fixture['package_commit'],
                 manifest_sha256='681d3cc0713d196d29f0e335a3454ed34e9cc6fa860afc0dbd30713681b81888',
-                input_count=11, inventory_sha256=result['package']['inventory_sha256']))
+                input_count=12, inventory_sha256=result['package']['inventory_sha256']))
         finally:
             fixture['temporary'].cleanup()
 
@@ -156,8 +158,10 @@ class PackagePreflightTests(unittest.TestCase):
         fixture = self.fixture()
         try:
             for relative in ('runtime-proof/run-fresh-source.py',
+                             'runtime-proof/verify-source-handoff-v8.py',
+                             'runtime-proof/verify-source-handoff-v9.py',
                              'runtime-proof/inputs/public-source-manifest.json',
-                             'runtime-proof/inputs/v8-adapter-manifest.json'):
+                             'runtime-proof/inputs/v9-adapter-manifest.json'):
                 path = fixture['source'] / relative
                 original = path.read_bytes()
                 path.write_bytes(path.read_bytes() + b'\nfixture tamper')
@@ -169,6 +173,7 @@ class PackagePreflightTests(unittest.TestCase):
     def test_consumer_self_verifier_manifest_and_package_tampering_is_rejected(self):
         cases = ('runtime-proof/verify-package-preflight.py',
                  'runtime-proof/verify-source-handoff-v8.py',
+                 'runtime-proof/verify-source-handoff-v9.py',
                  'runtime-proof/verify-source-origin.py',
                  'runtime-proof/download-source-handoff.py',
                  'runtime-proof/package-inputs/public-package-manifest-v7.json',

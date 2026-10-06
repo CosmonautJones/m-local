@@ -17,23 +17,26 @@ import sys
 
 
 MAX_FILE_BYTES = 1024 ** 2
-VERIFIER_SHA = 'b8c92532e99a095f40b718a4a068330def7b47b31a78f00b8c09ff981b0a04fe'
+VERIFIER_SHA = '6829da3ab0a6897e168c8c7efc2384330a04a5a036e53da02653f6ff07b317f3'
+BASE_VERIFIER_SHA = 'b8c92532e99a095f40b718a4a068330def7b47b31a78f00b8c09ff981b0a04fe'
 SOURCE_MANIFEST_SHA = 'f0ade58e7b59cc49eb5c3c3d0a6c8ca08c4f5b9804dc49ad5ea4f171cc4be037'
-ADAPTER_MANIFEST_SHA = 'dc8a0e3f50f01d43d0e1654e94648d581c54b064b1a9b18ce204c467a7ccb7a8'
+ADAPTER_MANIFEST_SHA = '91a9b2f303a57b0178f1ff0c3b876f4d13a84913ce7270b8eb883f144056a81e'
 PACKAGE_MANIFEST_SHA = '681d3cc0713d196d29f0e335a3454ed34e9cc6fa860afc0dbd30713681b81888'
 POLICY_MANIFEST_SHA = '9221e3af38924d04cc72f204512890dc3864697ac8ac40bf8eb9fa0843556ce0'
 SELF_PATH = 'runtime-proof/verify-package-preflight.py'
-CONSUMER_HELPERS = ('runtime-proof/verify-source-origin.py', 'runtime-proof/download-source-handoff.py')
-VERIFIER_PATH = 'runtime-proof/verify-source-handoff-v8.py'
+BASE_VERIFIER_PATH = 'runtime-proof/verify-source-handoff-v8.py'
+CONSUMER_HELPERS = ('runtime-proof/verify-source-origin.py', 'runtime-proof/download-source-handoff.py', BASE_VERIFIER_PATH)
+VERIFIER_PATH = 'runtime-proof/verify-source-handoff-v9.py'
 PACKAGE_PATH = 'runtime-proof/package-inputs/'
 SOURCE_CRITICAL = (
     'runtime-proof/run-fresh-source.py',
     'runtime-proof/kali-build-resources-v2.py',
     VERIFIER_PATH,
+    BASE_VERIFIER_PATH,
     'runtime-proof/public-download-pins.json',
     'runtime-proof/JAC-LICENSE.txt',
     'runtime-proof/inputs/public-source-manifest.json',
-    'runtime-proof/inputs/v8-adapter-manifest.json',
+    'runtime-proof/inputs/v9-adapter-manifest.json',
 )
 
 
@@ -134,14 +137,15 @@ def verify_preflight(bundle, source_checkout, package_checkout, *, expected_sour
     consumer = {SELF_PATH: committed_file(package, expected_package_commit, SELF_PATH),
                 VERIFIER_PATH: committed_file(package, expected_package_commit, VERIFIER_PATH)}
     consumer.update({name: committed_file(package, expected_package_commit, name) for name in CONSUMER_HELPERS})
-    if sha(consumer[VERIFIER_PATH]) != VERIFIER_SHA:
+    if sha(consumer[VERIFIER_PATH]) != VERIFIER_SHA or sha(consumer[BASE_VERIFIER_PATH]) != BASE_VERIFIER_SHA:
         fail('trusted verifier pin')
     producer = {name: committed_file(source, expected_source_commit, name) for name in SOURCE_CRITICAL}
     if (sha(producer[VERIFIER_PATH]) != VERIFIER_SHA or
+            sha(producer[BASE_VERIFIER_PATH]) != BASE_VERIFIER_SHA or
             sha(producer['runtime-proof/inputs/public-source-manifest.json']) != SOURCE_MANIFEST_SHA or
-            sha(producer['runtime-proof/inputs/v8-adapter-manifest.json']) != ADAPTER_MANIFEST_SHA):
+            sha(producer['runtime-proof/inputs/v9-adapter-manifest.json']) != ADAPTER_MANIFEST_SHA):
         fail('trusted source pins')
-    for manifest_name in ('public-source-manifest.json', 'v8-adapter-manifest.json'):
+    for manifest_name in ('public-source-manifest.json', 'v9-adapter-manifest.json'):
         manifest = json.loads(producer['runtime-proof/inputs/' + manifest_name])
         for relative, metadata in manifest['files'].items():
             name = 'runtime-proof/inputs/' + relative

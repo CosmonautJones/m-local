@@ -27,14 +27,23 @@ ROOT = Path(__file__).resolve().parents[1]
 INPUTS = ROOT / 'runtime-proof' / 'inputs'
 PINS_PATH = ROOT / 'runtime-proof' / 'public-download-pins.json'
 SOURCE_MANIFEST_PATH = INPUTS / 'public-source-manifest.json'
-ADAPTER_MANIFEST_PATH = INPUTS / 'v8-adapter-manifest.json'
+ADAPTER_MANIFEST_PATH = INPUTS / 'v9-adapter-manifest.json'
 DOWNLOAD_HELPER = ROOT / 'runtime-proof' / 'download-pinned-inputs.py'
 PROBE = ROOT / 'runtime-proof' / 'probe-runner-controls.py'
 HELPER = ROOT / 'runtime-proof' / 'kali-build-resources-v2.py'
-HANDOFF_VERIFIER = ROOT / 'runtime-proof' / 'verify-source-handoff-v8.py'
+HANDOFF_VERIFIER = ROOT / 'runtime-proof' / 'verify-source-handoff-v9.py'
+HANDOFF_VERIFIER_BASE = ROOT / 'runtime-proof' / 'verify-source-handoff-v8.py'
 SOURCE_EXPORT = ROOT / 'runtime-proof' / 'source-handoff-export'
 SOURCE_MANIFEST_SHA = 'f0ade58e7b59cc49eb5c3c3d0a6c8ca08c4f5b9804dc49ad5ea4f171cc4be037'
-ADAPTER_MANIFEST_SHA = 'dc8a0e3f50f01d43d0e1654e94648d581c54b064b1a9b18ce204c467a7ccb7a8'
+ADAPTER_MANIFEST_SHA = '91a9b2f303a57b0178f1ff0c3b876f4d13a84913ce7270b8eb883f144056a81e'
+ADAPTER_PATHS = (
+    'work/identity-runtime-v7/run-source-cold-compile-v7.py',
+    'work/identity-runtime-v7/run-source-bootstrap-v7.py',
+    'work/identity-runtime-v9/run-source-matrix-v9.py',
+    'work/identity-runtime-v9/run-source-stage-v9.py',
+    'work/identity-runtime-v8/run-source-matrix-v8.py',
+    'work/identity-runtime-v8/run-source-stage-v8.py',
+)
 SOURCE_JAC_PATHS = (
     'source/jac/jaclang/compiler/types/stubcat/reader.jac',
     'source/jac/jaclang/compiler/types/stubcat/writer.jac',
@@ -320,8 +329,8 @@ def manifest_inputs():
         fail('public input manifest format')
     if manifest.get('status') != 'staged_not_executed' or len(manifest.get('files', {})) != 34:
         fail('public source manifest identity')
-    if adapters.get('status') != 'staged_not_executed' or len(adapters.get('files', {})) != 4:
-        fail('v8 adapter manifest identity')
+    if adapters.get('status') != 'staged_not_executed' or set(adapters.get('files', {})) != set(ADAPTER_PATHS):
+        fail('v9 adapter manifest identity')
     if {relative for relative in manifest.get('files', {}) if relative.startswith('source/jac/')} != set(SOURCE_JAC_PATHS):
         fail('public Jac source path inventory')
     if manifest.get('base') != JAC_BASE or manifest.get('patch_sha256') != PATCH_AFTER:
@@ -1195,7 +1204,7 @@ def run_stage(task, workspace, stage, fork, official, *, old_fork=None, cold=Non
     if deadline is not None and time.monotonic() >= deadline:
         fail('source job global deadline')
     output = workspace / (stage + '-stage.json')
-    command = [sys.executable, '-B', str(task / 'work/identity-runtime-v8/run-source-stage-v8.py'),
+    command = [sys.executable, '-B', str(task / 'work/identity-runtime-v9/run-source-stage-v9.py'),
                '--stage', stage, '--task-root', str(task), '--fork', str(fork), '--official-root', str(official),
                '--output', str(output)]
     if old_fork is not None:
@@ -1220,7 +1229,7 @@ def run_stage(task, workspace, stage, fork, official, *, old_fork=None, cold=Non
     leaf = task / {
         'cold-compile': 'work/identity-runtime-v7/run-source-cold-compile-v7.py',
         'bootstrap': 'work/identity-runtime-v7/run-source-bootstrap-v7.py',
-        'matrix': 'work/identity-runtime-v8/run-source-matrix-v8.py',
+        'matrix': 'work/identity-runtime-v9/run-source-matrix-v9.py',
     }[stage]
     if outer.get('wrapper_sha256') != digest(leaf):
         fail('source stage wrapper binding')
@@ -1272,7 +1281,7 @@ def producer_binding():
     if head != commit:
         fail('source producer HEAD binding')
     runner = ROOT / 'runtime-proof' / 'run-fresh-source.py'
-    for source in (runner, HELPER, HANDOFF_VERIFIER):
+    for source in (runner, HELPER, HANDOFF_VERIFIER, HANDOFF_VERIFIER_BASE):
         if source.is_symlink() or not source.is_file():
             fail('source producer code type')
         committed = subprocess.check_output(command + ['show', 'HEAD:' + source.relative_to(ROOT).as_posix()], stderr=subprocess.DEVNULL)
