@@ -25,6 +25,7 @@ DOWNLOAD_SHA = '8860ccc2b05ce5e21a4f1dc18ce885de25e6e537a88de608b373b791304a37ed
 CACHE_CHECK_SHA = '4aefeb54a64577594b2408548c7a6a2e3843e6184440bc56947e7e54651427a2'
 CLASSIFIER_CONTROL_SHA = '242e1aefd09969e07fd557c5737cc6957fafd97920ba8e069f20b5c517bdf518'
 SOURCE_ISOLATION_SHA = '5b47f940cb4d7e939f987cf07c7f84a5d4b7e8ce2764a9b12a7ae4a23c250f6d'
+FILE_TRACE_CONTROL_SHA = 'd0567f05d046da61c772e8ce20dbabbbcea7e0d6868307ac402448d4810f1c08'
 RECIPE_SHA = 'ec820c414d5a83d498f894eddcee105d5eb3e287a030c2d6b87045fe7d32129f'
 VERIFIER_SHA = '9f7acdfd45c3a66913c8c3c9205f3afc8b00801147b1082e2af329a17f27d8de'
 CLASSIFIER_SHA = '33dd3dbe88aadb16317f60bd518430225a7a8ef466596c70271b16371006f363'
@@ -360,6 +361,14 @@ def main(argv=None):
         mount_identity(isolation_directory, runner['E_ROOT'], 'm-local-source-isolation-control-v1-', isolation_identity)
         if isolation.get('status') != 'passed':
             fail('source isolation fixture control')
+        trace_control = load_committed(preflight, 'runtime-proof/run-fresh-file-trace-control.py',
+                                       args.expected_package_commit, pin=FILE_TRACE_CONTROL_SHA)
+        trace_directory, trace_identity = fresh_mount(runner, 'm-local-file-trace-control-v1-')
+        trace = trace_control['run_control'](preflight, runner, trace_directory,
+                                             args.expected_package_commit, remaining_seconds(deadline, 180))
+        mount_identity(trace_directory, runner['E_ROOT'], 'm-local-file-trace-control-v1-', trace_identity)
+        if trace.get('status') != 'passed':
+            fail('file trace fixture control')
         runner['prepare_task'](runner['CANONICAL_TASK'], manifest, adapters, workspace / 'checkout.log')
         official, materialized = runner['materialize_runtime'](workspace, pins, workspace / 'runtime.log')
         old, fork = runner['prepare_forks'](workspace, manifest, workspace / 'forks.log')
@@ -468,6 +477,10 @@ def main(argv=None):
         mount_identity(isolation_directory, runner['E_ROOT'], 'm-local-source-isolation-control-v1-', isolation_identity)
         if regular_hash(preflight, isolation['receipt_path'], maximum=1024 ** 2)[0] != isolation['receipt_sha256']:
             fail('source isolation fixture receipt changed')
+        mount_identity(trace_directory, runner['E_ROOT'], 'm-local-file-trace-control-v1-', trace_identity)
+        for name in ('tracing_client', 'tracee_environment'):
+            if regular_hash(preflight, trace[name + '_receipt_path'], maximum=1024 ** 2)[0] != trace[name + '_receipt_sha256']:
+                fail('file trace fixture receipt changed')
         summary = dict(accepted, source=source_gate['source'], source_job_id=authenticated['job_id'],
                        source_artifact_id=authenticated['artifact_id'],
                        source_archive_sha256=authenticated['artifact_digest'],
@@ -478,6 +491,12 @@ def main(argv=None):
                        source_isolation_fixture_receipt_sha256=isolation['receipt_sha256'],
                        source_isolation_fixture_helper_sha256=isolation['helper_sha256'],
                        source_isolation_fixture_probe_sha256=isolation['probe_sha256'],
+                       file_trace_control_code_sha256=FILE_TRACE_CONTROL_SHA,
+                       file_trace_fixture_client_receipt_sha256=trace['tracing_client_receipt_sha256'],
+                       file_trace_fixture_environment_receipt_sha256=trace['tracee_environment_receipt_sha256'],
+                       file_trace_fixture_client_binary_sha256=trace['client_binary_sha256'],
+                       file_trace_fixture_prepare_sha256=trace['executed_prepare_sha256'],
+                       file_trace_fixture_environment_probe_sha256=trace['executed_environment_probe_sha256'],
                        host_cpu_count=host_cpus, minimum_host_memory_bytes=MIN_HOST_MEMORY,
                        controls_confirmed_before_workload=assembly['controls_confirmed_before_workload'],
                        assembly_elapsed_limit_seconds=ASSEMBLY_SECONDS,

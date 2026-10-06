@@ -21,6 +21,17 @@ workflow exercises this control on a small disposable Linux filesystem.
 This fixture result does not prove candidate/source isolation throughout
 application compatibility or native execution; those remain separate gates.
 
+The parent also downloads two fixed official tracing-client archives, checks
+their declared sizes and hashes, and extracts them only inside a fresh owned
+private mount. The declared rolling repository index pin is provenance; execution
+does not require that mutable index to retain its historical bytes. Frozen
+controls prove a real file read under UID/GID 65534 and removal of the client's
+library environment from the traced program. Scripts and receipts are bound
+by hashes, and both receipts are rechecked before the acceptance summary.
+The package-input workflow exercises these controls on a disposable Linux
+filesystem. This verifies the tracing fixture; tracing the fresh candidate
+through compatibility, native HTTP and capacity still requires execution.
+
 The manual defaults bind the reviewed successful source commit
 `990c7b33c920e6a93431d34a01df7b8c87c432ba` and run `37477834755`.
 The parent authenticates their exact successful job and unexpired artifact,

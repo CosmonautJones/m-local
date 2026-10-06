@@ -1,0 +1,30 @@
+{
+  "packages": [
+    {
+      "architecture": "amd64",
+      "bytes": 54024,
+      "file": "libunwind8_1.8.1-0.4_amd64.deb",
+      "package": "libunwind8",
+      "sha256": "aee9cb6fd8e298d52c398eabea640e0a49b198d77c0e6df34e69ed97e255b9b3",
+      "url": "https://kali.download/kali/pool/main/libu/libunwind/libunwind8_1.8.1-0.4_amd64.deb",
+      "version": "1.8.1-0.4"
+    },
+    {
+      "architecture": "amd64",
+      "bytes": 1859716,
+      "file": "strace_7.0+ds-1_amd64.deb",
+      "package": "strace",
+      "sha256": "3fccef3e6092284d8a065dce98fe6397f9dc1d97a6d81b050135f5ad489bf6f2",
+      "url": "https://kali.download/kali/pool/main/s/strace/strace_7.0+ds-1_amd64.deb",
+      "version": "7.0+ds-1"
+    }
+  ],
+  "repository_index": {
+    "bytes": 21574122,
+    "sha256": "4544587e00a9feb8bfa6e8f82be700718264bff872cdb798dc332ac50dfa759e",
+    "url": "https://kali.download/kali/dists/kali-rolling/main/binary-amd64/Packages.gz"
+  },
+  "schema": "m-local-file-trace-download-pins-v1",
+  "scope": "Fixed official HTTPS archive bytes; extracted privately with no OS installation or global ptrace changes",
+  "status": "declared_before_extraction"
+}
