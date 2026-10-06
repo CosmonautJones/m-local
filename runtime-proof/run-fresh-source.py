@@ -555,10 +555,11 @@ def materialize_shim_typeshed(current, old, official, workspace):
             shutil.copyfile(shim, shim_destination)
         destination = target / 'jac/jaclang/vendor/typeshed'
         if destination.exists() or destination.is_symlink():
-            if destination.is_symlink() or not destination.is_dir() or inventory(destination) != type_inventory:
+            if destination.is_symlink() or not destination.is_dir():
                 fail('fork typeshed identity guard')
-        else:
-            shutil.copytree(official_typeshed, destination, symlinks=False)
+            if any(type_inventory.get(name) != value for name, value in inventory(destination).items()):
+                fail('fork typeshed identity guard')
+        shutil.copytree(official_typeshed, destination, symlinks=False, dirs_exist_ok=True)
     if (digest(shim) != SHIM_SHA or inventory(official_typeshed) != type_inventory or
             digest(current / 'jac/jaclang/compiler/backends/native/llvm/libjacllvm.so') != SHIM_SHA or
             digest(old / 'jac/jaclang/compiler/backends/native/llvm/libjacllvm.so') != SHIM_SHA or

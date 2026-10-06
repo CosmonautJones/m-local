@@ -250,6 +250,61 @@ class FreshSourceTests(unittest.TestCase):
                 git('config', 'core.abbrev', '7')
                 self.assertEqual(git('diff', '--binary'), source.read_bytes())
 
+    def test_fresh_typeshed_completes_matching_metadata_without_replacing_conflicts(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            workspace = Path(directory).resolve()
+            self.assertTrue(workspace.is_relative_to(ROOT.resolve()))
+            official = workspace / 'official'
+            site = official / 'cache/test/site'
+            typeshed = site / 'jaclang/vendor/typeshed'
+            typeshed.mkdir(parents=True)
+            metadata = ['LICENSE', 'PIN', 'PROVENANCE.md', 'TARBALL_SHA256']
+            for name in metadata:
+                (typeshed / name).write_bytes(('fixture ' + name).encode())
+            (typeshed / 'stdlib').mkdir()
+            for index in range(745):
+                (typeshed / 'stdlib' / ('stub' + str(index) + '.pyi')).write_bytes(b'fixture')
+            shim = site / 'jaclang/compiler/backends/native/llvm/libjacllvm.so'
+            shim.parent.mkdir(parents=True)
+            shim.write_bytes(b'fixture shim')
+            current, old = workspace / 'current', workspace / 'old'
+            for fork in [current, old]:
+                destination = fork / 'jac/jaclang/vendor/typeshed'
+                destination.mkdir(parents=True)
+                for name in metadata:
+                    shutil.copyfile(typeshed / name, destination / name)
+
+            def fail(label):
+                raise RuntimeError(label)
+
+            namespace = {'Path': Path, 'os': SimpleNamespace(chown=lambda *args: None),
+                'shutil': shutil, 'json': json, 'hashlib': hashlib, 'fail': fail,
+                'scoped_command': lambda *args, **kwargs: None,
+                'digest': lambda path: hashlib.sha256(Path(path).read_bytes()).hexdigest(),
+                'SHIM_SHA': hashlib.sha256(shim.read_bytes()).hexdigest()}
+            inspect = runner_function('inventory', namespace)
+            expected = inspect(typeshed)
+            self.assertEqual(len(expected), 749)
+            namespace['TYPESHED_SHA'] = hashlib.sha256(json.dumps(expected, sort_keys=True).encode()).hexdigest()
+            materialize = runner_function('materialize_shim_typeshed', namespace)
+            result = materialize(current, old, official, workspace)
+            self.assertEqual(result['typeshed_files'], 749)
+            for fork in [current, old]:
+                self.assertEqual(inspect(fork / 'jac/jaclang/vendor/typeshed'), expected)
+            destination = current / 'jac/jaclang/vendor/typeshed'
+            for name in metadata:
+                self.assertEqual((destination / name).read_bytes(), (typeshed / name).read_bytes())
+            for name in ['PIN', 'extra-private-input']:
+                with self.subTest(fault=name):
+                    (official / 'cache/source-materialize.jac').unlink()
+                    target = destination / name
+                    target.write_bytes(b'conflicting fixture')
+                    with self.assertRaisesRegex(RuntimeError, 'fork typeshed identity guard'):
+                        materialize(current, old, official, workspace)
+                    self.assertEqual(target.read_bytes(), b'conflicting fixture')
+                    if name == 'PIN':
+                        target.write_bytes((typeshed / name).read_bytes())
+
 
 if __name__ == '__main__':
     unittest.main()
