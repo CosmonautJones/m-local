@@ -168,6 +168,7 @@ class FreshSourceTests(unittest.TestCase):
                 path.parent.mkdir(parents=True)
                 path.write_bytes(value)
             applied = []
+            configured = []
             stop_after_apply = True
 
             class AppliedBoth(Exception):
@@ -180,7 +181,12 @@ class FreshSourceTests(unittest.TestCase):
                     log = workspace / 'revision.log'
                     log.write_text('base\n')
                     return {'log_path': str(log)}
+                if 'config' in command:
+                    configured.append((Path(command[2]).name, command[4:]))
                 if 'apply' in command:
+                    self.assertEqual(configured, [
+                        ('identity-type-source-old-v7', ['core.abbrev', '7']),
+                        ('identity-type-source-v3-v7', ['core.abbrev', '7'])])
                     self.assertEqual(Path(command[-1]), copies[len(applied)])
                     applied.append(Path(command[-1]))
                     if len(applied) == 2 and stop_after_apply:
@@ -199,6 +205,7 @@ class FreshSourceTests(unittest.TestCase):
             self.assertEqual(applied, copies)
             stop_after_apply = False
             applied.clear()
+            configured.clear()
             namespace.update(chown_tree=lambda path: None,
                 git_diff_bytes=lambda *args: b'index 123456789..abcdefghi 100644\nprivate fixture body\n',
                 hashlib=hashlib, fail=lambda label: self.fail(label))
@@ -207,6 +214,41 @@ class FreshSourceTests(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError, r'source fork patch diff guard old .* index_widths=9$') as error:
                 prepare(workspace, {}, workspace / 'private.log')
             self.assertNotIn('private fixture body', str(error.exception))
+
+    def test_pinned_patch_fingerprints_require_seven_digit_git_format(self):
+        inputs = ROOT / 'inputs'
+        manifest = json.loads((inputs / 'public-source-manifest.json').read_text())
+        current = inputs / 'work/identity-runtime-v3/runtime.patch'
+        old = inputs / 'outputs/identity-bootstrap-source-v2/source-inputs/runtime.patch'
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            workspace = Path(directory).resolve()
+            self.assertTrue(workspace.is_relative_to(ROOT.resolve()))
+
+            def git(*args):
+                return subprocess.check_output(['git', '-c', 'core.autocrlf=false', '-c', 'core.safecrlf=false',
+                    '-c', 'commit.gpgsign=false', '-c', 'user.name=Runtime proof fixture',
+                    '-c', 'user.email=fixture@example.invalid', *args], cwd=workspace, stderr=subprocess.PIPE)
+
+            git('init', '--quiet')
+            for relative in manifest['files']:
+                if relative.startswith('source/jac/'):
+                    destination = workspace / relative[len('source/'):]
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(inputs / relative, destination)
+            git('apply', '-R', '--binary', str(current))
+            git('add', '--all')
+            git('commit', '--quiet', '-m', 'Tiny public-source base fixture')
+            for source in [old, current]:
+                git('reset', '--hard', '--quiet', 'HEAD')
+                git('apply', '--binary', str(source))
+                git('config', 'core.abbrev', '9')
+                longer = git('diff', '--binary')
+                self.assertNotEqual(longer, source.read_bytes())
+                if source == old:
+                    self.assertEqual(hashlib.sha256(longer).hexdigest(),
+                        '89065f64af2e6489f4ed957ea68cb6606d9c29d845af05c6e38bf8b82afdbf7d')
+                git('config', 'core.abbrev', '7')
+                self.assertEqual(git('diff', '--binary'), source.read_bytes())
 
 
 if __name__ == '__main__':
