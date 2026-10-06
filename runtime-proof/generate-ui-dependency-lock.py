@@ -602,6 +602,7 @@ def generate(output, expected_commit):
         total = [0]
         tarballs = []
         for index, row in enumerate(rows):
+            print(json.dumps(dict(stage='dependency_tarball_verification', package=row['name'], version=row['version'])), flush=True)
             destination = downloads / ('package-' + str(index) + '.tgz')
             bytes_count, digest, _ = _download(row['url'], row['integrity'], destination, deadline, total)
             tarballs.append(dict(row, bytes=bytes_count, sha256=digest))
