@@ -1,4 +1,4 @@
-name: runtime runner resource probe
+name: runtime runner control proof
 
 on:
   workflow_dispatch:
@@ -7,53 +7,13 @@ permissions:
   contents: read
 
 jobs:
-  resources:
-    runs-on: ubuntu-latest
-    timeout-minutes: 3
+  controls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Read disk and kernel capabilities
+      - name: Verify Jac source-byte share
+        run: python3 scripts/check-jac-share.py --min-jac 40
+      - name: Verify disposable ext4 and kernel workload controls
         shell: bash
-        run: |
-          python3 - <<'PY'
-          import hashlib
-          import json
-          import os
-          from pathlib import Path
-          import shutil
-          import subprocess
-
-          def command(args):
-              try:
-                  result = subprocess.run(args, capture_output=True, text=True, timeout=10)
-                  return {'returncode': result.returncode, 'stdout': result.stdout.strip(), 'stderr': result.stderr.strip()}
-              except (OSError, subprocess.TimeoutExpired) as error:
-                  return {'available': False, 'error_type': type(error).__name__}
-
-          disks = []
-          for name in ('/', '/mnt', '/var/tmp', os.environ['RUNNER_TEMP'], os.environ['GITHUB_WORKSPACE']):
-              path = Path(name).resolve()
-              usage = shutil.disk_usage(path)
-              disks.append({'path': str(path), 'device': path.stat().st_dev, 'total_bytes': usage.total,
-                            'used_bytes': usage.used, 'free_bytes': usage.free,
-                            'satisfies_64GiB_image_plus_20GiB_reserve': usage.free > 84 * 1024**3})
-          memory = {}
-          for line in Path('/proc/meminfo').read_text().splitlines():
-              key, value = line.split(':', 1)
-              if key in ('MemTotal', 'MemAvailable', 'SwapTotal', 'SwapFree'):
-                  memory[key + '_bytes'] = int(value.split()[0]) * 1024
-          cgroup = Path('/sys/fs/cgroup')
-          workflow = Path('.github/workflows/check.yml')
-          result = {'status': 'read_only_resource_probe', 'revision': os.environ['GITHUB_SHA'],
-                    'workflow_sha256': hashlib.sha256(workflow.read_bytes()).hexdigest(),
-                    'cpu_count': os.cpu_count(), 'memory': memory, 'disks': disks,
-                    'cgroup_v2': (cgroup / 'cgroup.controllers').is_file(),
-                    'cgroup_controllers': (cgroup / 'cgroup.controllers').read_text().strip() if (cgroup / 'cgroup.controllers').is_file() else '',
-                    'pid1': Path('/proc/1/comm').read_text().strip(),
-                    'tools': {name: shutil.which(name) for name in ('systemd-run', 'systemctl', 'losetup', 'mkfs.ext4', 'strace', 'psql', 'node')},
-                    'sudo_read_only': command(['sudo', '-n', 'true']),
-                    'available_loop_device': command(['sudo', '-n', 'losetup', '--find']),
-                    'systemd_version': command(['systemd-run', '--version']),
-                    'scope': 'No runtime build, package, provisioning, mounts, cgroup mutation, deployment or application acceptance'}
-          print(json.dumps(result, sort_keys=True))
-          PY
+        run: sudo -n timeout --signal=TERM --kill-after=45s 480s python3 -B runtime-proof/probe-runner-controls.py
