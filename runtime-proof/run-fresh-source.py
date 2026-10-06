@@ -953,7 +953,7 @@ def dependency_priming(app, runtime, workspace, log):
 
 def mounts():
     try:
-        output = subprocess.check_output(['/usr/bin/findmnt', '--noheadings', '--output', 'TARGET'], text=True,
+        output = subprocess.check_output(['/usr/bin/findmnt', '--list', '--noheadings', '--output', 'TARGET'], text=True,
                                          stderr=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
         fail('mount inventory probe')

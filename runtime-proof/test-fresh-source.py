@@ -77,6 +77,32 @@ class FreshSourceTests(unittest.TestCase):
             register('cold-compile', set(), {'workspace': str(workspace), 'phases': phases})
         self.assertEqual(owned, expected)
 
+    def test_mount_inventory_registers_cold_receipts_without_tree_formatting(self):
+        workspace = Path('/var/tmp/m-local-identity-type-compile-v7-123')
+        phases = [{'name': name, 'workspace': '/var/tmp/m-local-identity-type-' + name + '-v7-123'}
+                  for name in ['before', 'after']]
+        expected = {workspace, *(Path(row['workspace']) for row in phases)}
+        root, owned, register, patches = self.mount_register(expected)
+        targets = ['/', '/proc', root.as_posix()]
+
+        def findmnt(command, **kwargs):
+            if '--list' in command:
+                return '\n'.join(targets) + '\n'
+            return '/\n' + '\n'.join('\u251c\u2500' + target for target in targets[1:]) + '\n'
+
+        inventory = runner_function('mounts', {'Path': Path, 'subprocess': subprocess,
+                                              'fail': register.__globals__['fail']})
+        register.__globals__['mounts'] = inventory
+        with patch.object(subprocess, 'check_output', findmnt), patches[0], patches[1], patches[2], patches[3]:
+            before = inventory()
+            targets.extend(sorted(path.as_posix() for path in expected))
+            register('cold-compile', before, {'workspace': workspace.as_posix(), 'phases': phases})
+            self.assertEqual(inventory() - before, expected)
+            targets.append('/var/tmp/unreported-mount')
+            with self.assertRaisesRegex(RuntimeError, 'unidentified mounts'):
+                register('cold-compile', before, {'workspace': workspace.as_posix(), 'phases': phases})
+        self.assertEqual(owned, expected)
+
     def test_unknown_mount_is_never_adopted(self):
         workspace = Path('/var/tmp/m-local-identity-bootstrap-proof-v4-123')
         unknown = Path('/var/tmp/m-local-identity-bootstrap-proof-v4-unreported')
