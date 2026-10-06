@@ -168,6 +168,7 @@ class FreshSourceTests(unittest.TestCase):
                 path.parent.mkdir(parents=True)
                 path.write_bytes(value)
             applied = []
+            stop_after_apply = True
 
             class AppliedBoth(Exception):
                 pass
@@ -182,19 +183,30 @@ class FreshSourceTests(unittest.TestCase):
                 if 'apply' in command:
                     self.assertEqual(Path(command[-1]), copies[len(applied)])
                     applied.append(Path(command[-1]))
-                    if len(applied) == 2:
+                    if len(applied) == 2 and stop_after_apply:
                         raise AppliedBoth()
 
-            prepare = runner_function('prepare_forks', {'Path': Path, 'E_ROOT': image, 'CANONICAL_TASK': task,
+            namespace = {'Path': Path, 'E_ROOT': image, 'CANONICAL_TASK': task,
                 'INPUTS': workspace / 'unavailable-checkout', 'os': SimpleNamespace(chown=lambda *args: None),
                 'minimal_environment': lambda: {}, 'scoped_command': scoped_command,
                 'JAC_REPOSITORY': 'public-fixture', 'JAC_BASE': 'base',
                 'PATCH_BEFORE': hashlib.sha256(copies[0].read_bytes()).hexdigest(),
                 'PATCH_AFTER': hashlib.sha256(copies[1].read_bytes()).hexdigest(),
-                'digest': lambda path: hashlib.sha256(path.read_bytes()).hexdigest()})
+                'digest': lambda path: hashlib.sha256(path.read_bytes()).hexdigest()}
+            prepare = runner_function('prepare_forks', namespace)
             with self.assertRaises(AppliedBoth):
                 prepare(workspace, {}, workspace / 'private.log')
             self.assertEqual(applied, copies)
+            stop_after_apply = False
+            applied.clear()
+            namespace.update(chown_tree=lambda path: None,
+                git_diff_bytes=lambda *args: b'index 123456789..abcdefghi 100644\nprivate fixture body\n',
+                hashlib=hashlib, fail=lambda label: self.fail(label))
+            namespace['E_ROOT'] = image / 'second'
+            namespace['E_ROOT'].mkdir()
+            with self.assertRaisesRegex(AssertionError, r'source fork patch diff guard old .* index_widths=9$') as error:
+                prepare(workspace, {}, workspace / 'private.log')
+            self.assertNotIn('private fixture body', str(error.exception))
 
 
 if __name__ == '__main__':

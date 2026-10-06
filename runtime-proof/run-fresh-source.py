@@ -465,9 +465,14 @@ def prepare_forks(workspace, manifest, log):
                    cwd=parent, environment=environment, workspace=workspace, timeout=180)
     chown_tree(old)
     chown_tree(current)
-    if hashlib.sha256(git_diff_bytes(old, workspace)).hexdigest() != PATCH_BEFORE or \
-            hashlib.sha256(git_diff_bytes(current, workspace)).hexdigest() != PATCH_AFTER:
-        fail('source fork patch diff guard')
+    for label, fork, expected in [('old', old, PATCH_BEFORE), ('current', current, PATCH_AFTER)]:
+        patch = git_diff_bytes(fork, workspace)
+        actual = hashlib.sha256(patch).hexdigest()
+        if actual != expected:
+            widths = sorted({len(value) for line in patch.splitlines() if line.startswith(b'index ')
+                             for value in line.split()[1].split(b'..')})
+            fail('source fork patch diff guard ' + label + ' sha256=' + actual + ' bytes=' + str(len(patch)) +
+                 ' index_widths=' + ','.join(str(value) for value in widths))
     for relative, metadata in manifest['files'].items():
         if not relative.startswith('source/jac/'):
             continue
