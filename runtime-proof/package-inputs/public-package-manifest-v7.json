@@ -1,0 +1,53 @@
+{
+  "added_gate": "official extracted cache inventory matches hash-verified official payload before compiler imports",
+  "evidence_scope": "versioned recipe/verifier/catalog inputs only; no fresh package or native acceptance",
+  "files": {
+    "classify-runtime-build-paths-v7.py": {
+      "bytes": 15455,
+      "sha256": "33dd3dbe88aadb16317f60bd518430225a7a8ef466596c70271b16371006f363"
+    },
+    "diagnostic-policy-v7.json": {
+      "bytes": 211799,
+      "sha256": "6d08330483ae7569153701c4eb5d211c838bb7ab6909452aa54bd5ad9e401e5d"
+    },
+    "package-runtime-candidate-v7.py": {
+      "bytes": 20065,
+      "sha256": "ec820c414d5a83d498f894eddcee105d5eb3e287a030c2d6b87045fe7d32129f"
+    },
+    "runtime-catalog-relocation-probe-v7.py": {
+      "bytes": 5000,
+      "sha256": "8849263964617d4fda67bfbab436402440dbb12755cf5ce534100c94d8421f03"
+    },
+    "verify-runtime-package-inputs-v7.py": {
+      "bytes": 7354,
+      "sha256": "9f7acdfd45c3a66913c8c3c9205f3afc8b00801147b1082e2af329a17f27d8de"
+    }
+  },
+  "original_inputs": {
+    "catalog": "8849263964617d4fda67bfbab436402440dbb12755cf5ce534100c94d8421f03",
+    "recipe": "f564830f07af1131306c8d65b7f1182047864816572eda46cc7b52b0db40120c",
+    "verifier": "4d826770ae926f68cd9ad7e674c2cf2d2722c773917d34a2d0e0fc1e775288a7"
+  },
+  "parent_requirements_still_open": [
+    "authenticate exact successful source handoff from trusted producer checkout",
+    "fresh host storage/control/loader provenance, fresh empty cache/scratch before launching official runtime, and three-case classifier controls",
+    "predeclare and bind genuine direct-use input inventory and 40-percent Jac denominator before assembly",
+    "versioned bounded package wrapper",
+    "fresh package execution and independent verifier acceptance",
+    "strict compatibility/native HTTP/capacity and release acceptance"
+  ],
+  "preserved_gates": [
+    "owned private mounts and cgroup 7GiB/8GiB/zero-swap",
+    "base and exact patch",
+    "no resume",
+    "inherited Python and dependency bytes",
+    "no source override or private state in payload",
+    "stage/final classifier equality and byte commitments",
+    "catalog relocation and codecs",
+    "packed launcher/catalog/payload byte equality",
+    "independent unpack and frozen inventory"
+  ],
+  "schema": "m-local-public-package-inputs-v7",
+  "source_manifest_sha256": "f0ade58e7b59cc49eb5c3c3d0a6c8ca08c4f5b9804dc49ad5ea4f171cc4be037",
+  "status": "prepared_not_executed"
+}
