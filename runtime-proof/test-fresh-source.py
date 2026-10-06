@@ -107,7 +107,8 @@ class FreshSourceTests(unittest.TestCase):
                 return {'log_path': str(output)}
 
             download = runner_function('pinned_download', {'Path': Path, 'json': json, 'sys': sys,
-                'DOWNLOAD_HELPER': helper, 'scoped_command': scoped_command, 'minimal_environment': lambda: {},
+                'DOWNLOAD_HELPER': workspace / 'unavailable-checkout' / helper.name,
+                'scoped_command': scoped_command, 'minimal_environment': lambda: {},
                 'fail': fail})
             with self.assertRaisesRegex(RuntimeError, '^pinned download jac PermissionError$'):
                 download('jac', {}, workspace / 'jac.bin', workspace)

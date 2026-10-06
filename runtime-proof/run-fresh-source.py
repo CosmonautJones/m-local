@@ -694,7 +694,7 @@ def pinned_download(name, entry, destination, workspace):
     )
     try:
         result = scoped_command('pinned download ' + name,
-                                [sys.executable, '-B', '-c', code, str(DOWNLOAD_HELPER),
+                                [sys.executable, '-B', '-c', code, str(destination.parent / DOWNLOAD_HELPER.name),
                                  json.dumps(entry, separators=(',', ':')), str(destination)],
                                 cwd=destination.parent, environment=minimal_environment(),
                                 workspace=workspace, timeout=180)
@@ -732,6 +732,12 @@ def materialize_runtime(workspace, pins, log):
         fail('fresh pinned download directory guard')
     downloads.mkdir(mode=0o700)
     os.chown(downloads, 65534, 65534)
+    helper = downloads / DOWNLOAD_HELPER.name
+    shutil.copyfile(DOWNLOAD_HELPER, helper)
+    os.chown(helper, 65534, 65534)
+    helper.chmod(0o400)
+    if digest(helper) != digest(DOWNLOAD_HELPER):
+        fail('private download helper byte identity')
     fetched = {}
     for name in ('jac', 'jacpython', 'postgres'):
         destination = downloads / (name + ('.jar' if name == 'postgres' else '.bin'))
