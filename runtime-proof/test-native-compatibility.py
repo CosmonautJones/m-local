@@ -189,7 +189,7 @@ class PureTests(unittest.TestCase):
             'isolation', 'isolation_directory', 'trace', 'node_client', 'prepared_ui',
             'ui_control', 'ui_runner', 'ui_directory', 'matrix_directory',
             'prepared_matrix', 'matrix_control', 'run_bounded')}
-        with self.assertRaisesRegex(TypeError, 'expected str'):
+        with self.assertRaisesRegex(TypeError, 'expected str|argument should be a str'):
             self.control._context_paths(incomplete)
         absolute = str(Path('/var/tmp').resolve())
         for key in ('package', 'application', 'fork', 'official', 'probe_path',
@@ -619,8 +619,18 @@ class LinuxRootTests(unittest.TestCase):
         pure.setUpClass()
         for modules_mode, accepted in ((0o755, True), (0o775, False)):
             fixture = owner.fixture()
-            _base, _image, e_root, _backing, alias, _loop = fixture
+            _base, _image, e_root, _backing, _original_alias, _loop = fixture
+            token = hashlib.sha256(os.urandom(32)).hexdigest()[:8]
+            alias = Path('/var/tmp') / (self.control.PREFIX + token)
+            native_backing = e_root / alias.name
             try:
+                native_backing.mkdir(mode=0o700)
+                os.chown(native_backing, 65534, 65534)
+                alias.mkdir(mode=0o700)
+                os.chown(alias, 65534, 65534)
+                owner.command(['/usr/bin/mount', '--bind', str(native_backing), str(alias)])
+                self.assertEqual(self.control._mount_identity({'E_ROOT': e_root}, alias),
+                                 (alias.stat().st_dev, alias.stat().st_ino))
                 with tempfile.TemporaryDirectory(dir='/var/tmp') as temporary:
                     result, labels, _timeouts, _matrix, _ui, _restored, output = pure._mocked_suite(
                         temporary, real_ui_identity=True, ui_modules_mode=modules_mode,
@@ -634,15 +644,24 @@ class LinuxRootTests(unittest.TestCase):
                                      (65534, 65534, modules_mode))
                     if accepted:
                         self.assertIsInstance(result, dict)
+                        self.assertEqual(result['status'], 'passed')
                         self.assertIn('ui-dependencies', labels)
                     else:
                         self.assertIsInstance(result, ValueError)
+                        self.assertIn('native compatibility UI dependency ownership', str(result))
                         self.assertNotIn('ui-dependencies', labels)
                         receipt = json.loads((output / 'result.json').read_bytes())
                         self.assertEqual(receipt['status'], 'failed')
                         self.assertEqual(receipt['failure_type'], 'ValueError')
             finally:
-                owner.cleanup_fixture(*fixture)
+                try:
+                    if alias.is_mount():
+                        owner.command(['/usr/bin/umount', str(alias)])
+                    if alias.exists():
+                        self.assertFalse(alias.is_symlink())
+                        alias.rmdir()
+                finally:
+                    owner.cleanup_fixture(*fixture)
 
 
 if __name__ == '__main__':
