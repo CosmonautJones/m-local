@@ -1,0 +1,37 @@
+{
+  "classifier_changes": [
+    "bind public policy hash",
+    "use declared historical origin length"
+  ],
+  "evidence_scope": "expected_oracle_only; no fresh package or native acceptance",
+  "files": {
+    "classify-runtime-build-paths-v7.py": {
+      "bytes": 15455,
+      "sha256": "33dd3dbe88aadb16317f60bd518430225a7a8ef466596c70271b16371006f363"
+    },
+    "diagnostic-policy-v7.json": {
+      "bytes": 211799,
+      "sha256": "6d08330483ae7569153701c4eb5d211c838bb7ab6909452aa54bd5ad9e401e5d"
+    }
+  },
+  "origin_stage_length": 47,
+  "original_classifier": {
+    "bytes": 15453,
+    "sha256": "01c2ab9b21dd3fa0346fc942ed91ea23752c12e1c5fa98064068bbc462daa4f3"
+  },
+  "original_policy": {
+    "bytes": 212608,
+    "sha256": "c97e84665780ff35e387177a2cd2fc9afe1c3bc72a6398c0eaf6acaa17c19b72"
+  },
+  "preserved_policy_fields": [
+    "helper_codes",
+    "helper_marshal_version",
+    "normalized_native_sha256",
+    "native_assertions",
+    "unit_ids",
+    "unit_sources",
+    "unit_input_files"
+  ],
+  "schema": "m-local-public-package-policy-v7",
+  "status": "prepared_not_executed"
+}
