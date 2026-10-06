@@ -38,6 +38,9 @@ jobs:
         run: ./scripts/test.sh insights
       - name: Run onboarding security tests
         run: bash scripts/test.sh onboarding
+      - name: Verify shared onboarding across processes
+        timeout-minutes: 10
+        run: bash scripts/python.sh -m unittest discover -s tests/integration -p test_onboarding_shared.py
       - name: Test photo normalization and ownership
         run: bash scripts/python.sh -m unittest tests/photo_media.py
       - name: Verify business approval over HTTP and after restart

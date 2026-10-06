@@ -217,6 +217,7 @@ and obey robots restrictions. The model sees source text as untrusted data.
 
 ```bash
 bash scripts/test.sh onboarding
+bash scripts/python.sh -m unittest discover -s tests/integration -p test_onboarding_shared.py
 bash scripts/check.sh
 bash scripts/test.sh core
 bash scripts/build.sh
@@ -224,6 +225,14 @@ node --test tests/ui/*.test.mjs tests/tooling/*.test.mjs
 # Requires the existing jsdom test runtime and a compiled .jac/client/dist:
 MLOCAL_UI_TEST_MODULES=/path/to/ui-test-runtime/node_modules node --test tests/ui/browser/*.test.mjs
 ```
+
+`test_onboarding_shared.py` uses separate Linux processes against a fresh shared
+local directory. It checks cold key/schema creation, single-use consumption,
+resend and hourly sending budgets, and account/draft visibility after replacing
+a process. A separate-directory negative control demonstrates why copying state
+does not share new writes. Sender callbacks are disposable sinks: the fixture
+does not prove SMTP, native HTTP/session behavior, or independent-host replication.
+Its new CI execution is pending until the actual run passes.
 
 `tests/integration/onboarding_http.py` exercises actual Jac identities/sessions
 using locally injected test challenges. Run it only in a disposable workspace
