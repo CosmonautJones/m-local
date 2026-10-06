@@ -232,7 +232,19 @@ resend and hourly sending budgets, and account/draft visibility after replacing
 a process. A separate-directory negative control demonstrates why copying state
 does not share new writes. Sender callbacks are disposable sinks: the fixture
 does not prove SMTP, native HTTP/session behavior, or independent-host replication.
-Its new CI execution is pending until the actual run passes.
+All seven checks passed in [CI at 634eb70](https://github.com/CosmonautJones/m-local/actions/runs/37415914169)
+with no skips. The full run also passed the existing approval, recovery, build and
+compiled UI checks; independent-host and actual inbox delivery gates remain open.
+
+`bash scripts/test-shared-onboarding.sh` adds a disposable Linux proof with two
+native Jac APIs, one private graph database and a common onboarding directory.
+It delivers codes through a local TLS SMTP sink, then checks cross-API sign-in,
+single-use codes, shared sending budgets, business approval/activation and draft
+visibility after replacing an idle crashed API. The dedicated workflow runs this
+fixture; its first native execution is pending. The sink accepts only explicitly
+allowed fictional recipients and never forwards email. This does not establish
+real inbox delivery, public ingress, independent-host replication, cold seed
+deduplication, browser capacity or safety during an in-flight crash.
 
 `tests/integration/onboarding_http.py` exercises actual Jac identities/sessions
 using locally injected test challenges. Run it only in a disposable workspace
