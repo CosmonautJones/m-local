@@ -10,6 +10,8 @@ on:
       - '.github/workflows/runtime-source-proof.yml'
       - 'runtime-proof/run-fresh-source.py'
       - 'runtime-proof/test-fresh-source.py'
+      - 'runtime-proof/verify-source-handoff.py'
+      - 'runtime-proof/test-source-handoff.py'
       - 'runtime-proof/inputs/**'
       - 'runtime-proof/public-download-pins.json'
       - 'runtime-proof/download-pinned-inputs.py'
@@ -37,6 +39,9 @@ jobs:
 
       - name: Check source runner output and mount binding
         run: python3 -B runtime-proof/test-fresh-source.py
+
+      - name: Check sanitized source handoff verifier
+        run: python3 -B runtime-proof/test-source-handoff.py
 
       - name: Run fresh source/bootstrap/matrix proof
         env:

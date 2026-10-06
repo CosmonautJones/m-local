@@ -27,3 +27,9 @@ The source runner must preserve the cold compiler rejection/correction proof,
 53-check bootstrap gate and 10+2 matrix. Package assembly, strict compatibility,
 native HTTP, sustained capacity and independent acceptance are later gates.
 Only a privacy-reviewed fresh proof handoff may cross to a later package job.
+
+`verify-source-handoff.py` checks the exact public source files, sanitized
+receipt commitments and required license sidecar against a trusted checkout.
+It requires external commit, run and contract-hash bindings and never executes
+bundle contents. Its synthetic tests run in CI; producer integration and
+artifact transfer are still pending. No real handoff has passed this verifier.

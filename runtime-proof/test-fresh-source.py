@@ -356,6 +356,118 @@ class FreshSourceTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, '^declared dependency target outside-approved-roots$'):
                     prime(workspace / 'app', runtime, workspace, workspace / 'private.log')
 
+    def test_bundled_dependency_interpreter_requires_pinned_payload_and_target(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            workspace = Path(directory).resolve()
+            image, runtime = workspace / 'image', workspace / 'official'
+            image.mkdir()
+            cache = image / 'dependency-cache-v7'
+            payload = b'fixture runtime payload'
+            payload_hash = hashlib.sha256(payload).hexdigest()
+            trailer = b'JACBIN01' + len(payload).to_bytes(8, 'little') + payload_hash.encode()
+            binary = b'fixture launcher' + payload + trailer
+            jac = runtime / 'runtime/jac'
+            jac.parent.mkdir(parents=True)
+            jac.write_bytes(binary)
+            target = cache / 'rt' / payload_hash[:16] / 'python/bin/python3.14'
+            marker = target.parents[2] / '.ok'
+            python = image / 'dependency-candidate-v7/.jac/venv/bin/python'
+            pillow_calls = []
+
+            def scoped_command(label, command, **kwargs):
+                if label == 'declared dependency priming':
+                    target.parent.mkdir(parents=True)
+                    target.write_bytes(b'fixture bundled interpreter')
+                    target.chmod(0o755)
+                    marker.write_bytes(b'')
+                    python.parent.mkdir(parents=True)
+                    (python.parent.parent / 'pyvenv.cfg').write_text('fixture')
+                    if os.name == 'posix':
+                        python.symlink_to(target)
+                    else:
+                        python.write_bytes(b'fixture symlink')
+                else:
+                    self.assertEqual(label, 'Pillow dependency guard')
+                    pillow_calls.append(command)
+                return {'log_path': str(workspace / 'private.log')}
+
+            def fail(label):
+                raise RuntimeError(label)
+
+            original_stat, original_resolve, original_symlink = Path.stat, Path.resolve, Path.is_symlink
+            metadata_overrides, symlink_paths = {}, set()
+
+            def metadata(path, *args, **kwargs):
+                result = original_stat(path, *args, **kwargs)
+                if path == python or path.is_relative_to(cache):
+                    mode = (0o40700 if path == cache else 0o40755 if stat.S_ISDIR(result.st_mode)
+                            else 0o100755 if path in (python, target) else 0o100644)
+                    values = dict(st_mode=mode, st_uid=65534, st_size=result.st_size)
+                    values.update(metadata_overrides.get(path, {}))
+                    return SimpleNamespace(**values)
+                return result
+
+            namespace = {'Path': Path, 'E_ROOT': image, 'os': SimpleNamespace(chown=lambda *args: None),
+                'copy_app_tree': lambda *args: None, 'chown_tree': lambda path: None,
+                'scoped_command': scoped_command, 'fail': fail, 'stat': stat,
+                'digest': lambda path: hashlib.sha256(Path(path).read_bytes()).hexdigest(),
+                'JAC_SHA': hashlib.sha256(binary).hexdigest(),
+                'BUNDLED_PYTHON_SHA': hashlib.sha256(b'fixture bundled interpreter').hexdigest()}
+            namespace['dependency_interpreter_provenance'] = lambda *args: runner_function('dependency_interpreter_provenance', namespace)(*args)
+            prime = runner_function('dependency_priming', namespace)
+            with patch.object(Path, 'stat', metadata), \
+                    patch.object(Path, 'resolve', lambda path, *args, **kwargs: target if path == python else original_resolve(path, *args, **kwargs)), \
+                    patch.object(Path, 'is_symlink', lambda path: path == python or path in symlink_paths or original_symlink(path)):
+                result = prime(workspace / 'app', runtime, workspace, workspace / 'private.log')
+                self.assertEqual(result['interpreter']['interpreter_target_class'], 'bundled_runtime_cache')
+                self.assertEqual(result['interpreter']['interpreter_target_relative'], target.relative_to(cache).as_posix())
+                self.assertEqual(len(pillow_calls), 1)
+                check = runner_function('dependency_interpreter_provenance', namespace)
+                target.write_bytes(b'tampered interpreter')
+                with self.assertRaisesRegex(RuntimeError, 'bundled dependency interpreter'):
+                    check(runtime, cache, target)
+                target.write_bytes(b'fixture bundled interpreter')
+                marker.unlink()
+                with self.assertRaisesRegex(RuntimeError, 'bundled dependency interpreter'):
+                    check(runtime, cache, target)
+                marker.write_bytes(b'')
+                with self.assertRaisesRegex(RuntimeError, 'bundled dependency interpreter'):
+                    check(runtime, cache, workspace / 'outside-interpreter')
+                jac.write_bytes(b'tampered launcher')
+                with self.assertRaisesRegex(RuntimeError, 'bundled dependency interpreter'):
+                    check(runtime, cache, target)
+                jac.write_bytes(binary)
+                for path, fields in [(cache, {'st_mode': 0o40755}), (target.parent, {'st_mode': 0o40777}),
+                                     (target, {'st_mode': 0o100644}), (target, {'st_uid': 0}),
+                                     (marker, {'st_mode': 0o100666}), (marker, {'st_mode': 0o100755}),
+                                     (marker, {'st_uid': 0})]:
+                    with self.subTest(path=path.name, fields=fields):
+                        metadata_overrides[path] = fields
+                        with self.assertRaisesRegex(RuntimeError, 'bundled dependency interpreter'):
+                            check(runtime, cache, target)
+                        metadata_overrides.clear()
+                for path in [cache / 'rt', target, marker]:
+                    with self.subTest(symlink=path.name):
+                        symlink_paths.add(path)
+                        with self.assertRaisesRegex(RuntimeError, 'bundled dependency interpreter'):
+                            check(runtime, cache, target)
+                        symlink_paths.clear()
+                overlay = b'fixture overlay'
+                overlay_binary = binary + overlay + b'JABOVL01' + len(overlay).to_bytes(8, 'little') + hashlib.sha256(overlay).hexdigest().encode()
+                jac.write_bytes(overlay_binary)
+                namespace['JAC_SHA'] = hashlib.sha256(overlay_binary).hexdigest()
+                self.assertEqual(check(runtime, cache, target)['runtime_payload_sha256'], payload_hash)
+                for malformed in [b'short', b'UNKNOWN1' + trailer[8:],
+                                  b'JACBIN01' + (0).to_bytes(8, 'little') + trailer[16:],
+                                  b'JACBIN01' + (9999).to_bytes(8, 'little') + trailer[16:],
+                                  b'JACBIN01' + trailer[8:16] + b'z' * 64,
+                                  b'JABOVL01' + (1).to_bytes(8, 'little') + trailer[16:]]:
+                    with self.subTest(trailer=malformed[:8]):
+                        jac.write_bytes(malformed)
+                        namespace['JAC_SHA'] = hashlib.sha256(malformed).hexdigest()
+                        with self.assertRaisesRegex(RuntimeError, 'bundled dependency interpreter trailer'):
+                            check(runtime, cache, target)
+
 
 if __name__ == '__main__':
     unittest.main()

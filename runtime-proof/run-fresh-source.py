@@ -63,6 +63,7 @@ PATCH_BEFORE = '80fd38c7555e31ad60cb36f4e7af904e848d584c98da76f9066bcee950acd0b7
 PATCH_AFTER = 'd3630dfc5d9942e2b7ac6edf0ee1dd10bdb7a0f0919865e543220a27b27fe366'
 JAC_SHA = '2c3c697616b08516caf01704571e7e7020f4b294cd2bef7f04e8ef1ceec9d6ad'
 JACPYTHON_SHA = '198225fb91707f48461f3fec1684d444ab0fd7b5a1e0913f0a0a8f11c9d02542'
+BUNDLED_PYTHON_SHA = '7056deaf70cc1b593bf7378abcd4c04d22a9f9510a88655fcd6d45951473afc3'
 SHIM_SHA = '02f499e9becacf36161aa9f4b39a9f950f4dd8dbcb744acded0f04618652b4de'
 TYPESHED_SHA = '1fd7fa02ccc83ad6a6a1fe7451231911a030a70d6f9d166c6d6b7d2715ce648a'
 JAC_LICENSE_PATH = ROOT / 'runtime-proof' / 'JAC-LICENSE.txt'
@@ -781,6 +782,53 @@ def materialize_runtime(workspace, pins, log):
     return runtime, {'downloads': fetched, 'postgres_version': version, 'postgres_inventory_sha256': hashlib.sha256(json.dumps(pg_files, sort_keys=True).encode()).hexdigest()}
 
 
+def dependency_interpreter_provenance(runtime, cache, resolved):
+    jac = runtime / 'runtime/jac'
+    if jac.is_symlink() or not jac.is_file() or digest(jac) != JAC_SHA:
+        fail('bundled dependency interpreter binary')
+    end = jac.stat().st_size
+    with jac.open('rb') as stream:
+        def trailer_at(offset):
+            if offset < 80:
+                fail('bundled dependency interpreter trailer')
+            stream.seek(offset - 80)
+            raw = stream.read(80)
+            if len(raw) != 80 or any(value not in b'0123456789abcdef' for value in raw[16:]):
+                fail('bundled dependency interpreter trailer')
+            length = int.from_bytes(raw[8:16], 'little')
+            if not 0 < length <= offset - 80:
+                fail('bundled dependency interpreter trailer')
+            return raw, length
+
+        trailer, length = trailer_at(end)
+        if trailer[:8] == b'JABOVL01':
+            end -= 80 + length
+            trailer, length = trailer_at(end)
+        if trailer[:8] != b'JACBIN01':
+            fail('bundled dependency interpreter trailer')
+    payload_hash = trailer[16:].decode('ascii')
+    extracted = cache / 'rt' / payload_hash[:16]
+    expected = extracted / 'python/bin/python3.14'
+    if resolved != expected:
+        fail('bundled dependency interpreter target')
+    for directory in [cache, cache / 'rt', extracted, extracted / 'python', expected.parent]:
+        if (directory.is_symlink() or not directory.is_dir() or directory.resolve() != directory or
+                directory.stat().st_uid != 65534 or directory.stat().st_mode & 0o022 or
+                (directory == cache and directory.stat().st_mode & 0o777 != 0o700)):
+            fail('bundled dependency interpreter directories')
+    marker = extracted / '.ok'
+    if (marker.is_symlink() or not marker.is_file() or marker.stat().st_size != 0 or
+            marker.stat().st_uid != 65534 or marker.stat().st_mode & 0o133):
+        fail('bundled dependency interpreter marker')
+    if (expected.is_symlink() or not expected.is_file() or not expected.stat().st_mode & 0o111 or
+            expected.stat().st_uid != 65534 or expected.stat().st_mode & 0o022 or
+            expected.stat().st_size > 128 * 1024 ** 2 or digest(expected) != BUNDLED_PYTHON_SHA):
+        fail('bundled dependency interpreter fingerprint')
+    return dict(interpreter_target_class='bundled_runtime_cache', interpreter_target_relative=expected.relative_to(cache).as_posix(),
+                interpreter_target_sha256=BUNDLED_PYTHON_SHA, runtime_payload_sha256=payload_hash,
+                runtime_binary_sha256=JAC_SHA, completion_marker=True)
+
+
 def dependency_priming(app, runtime, workspace, log):
     candidate = E_ROOT / 'dependency-candidate-v7'
     if candidate.exists() or candidate.is_symlink():
@@ -812,20 +860,21 @@ def dependency_priming(app, runtime, workspace, log):
     resolved = python.resolve()
     if not resolved.is_file() or not (resolved.stat().st_mode & 0o111):
         fail('declared dependency interpreter target guard')
-    if python.is_symlink() and resolved.parent != Path('/usr/bin') and not resolved.is_relative_to(venv.resolve()):
+    if not resolved.is_relative_to(cache.resolve()):
         origin = next((name for name, root in [('official-runtime', runtime), ('dependency-cache', cache)]
                        if resolved.is_relative_to(root.resolve())), 'outside-approved-roots')
         label = 'declared dependency target ' + origin
         if origin != 'outside-approved-roots':
             label += ' sha256=' + digest(resolved)
         fail(label)
+    interpreter = dependency_interpreter_provenance(runtime, cache, resolved)
     pillow = scoped_command('Pillow dependency guard', [str(python), '-c',
                             'from PIL import Image; Image.new("RGB", (1, 1))'], cwd=candidate,
                             environment=environment, workspace=Path(log).parent, timeout=60)
     pillow.pop('log_path', None)
     return dict(status='passed', install='jac install --no-npm', pillow_import=True, cache_private=True,
                 venv_layout='candidate/.jac/venv with pyvenv.cfg and discovered executable',
-                interpreter_relative=python.relative_to(candidate).as_posix(), pillow_scope=pillow)
+                interpreter_relative=python.relative_to(candidate).as_posix(), interpreter=interpreter, pillow_scope=pillow)
 
 
 def mounts():
