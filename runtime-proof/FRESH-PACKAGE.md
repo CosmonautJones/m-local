@@ -95,6 +95,13 @@ The DOM probe reads the running Node process's kernel supplementary group list
 from `/proc/self/status`; it must be empty. Node's `process.getgroups()` includes
 the effective group, so that API does not represent this empty-list control.
 
+The reviewed 39-package graph is frozen in `ui-dependency-inputs/v1/`, with
+exact file hashes and inventory checked by the package-input workflow. Its
+preparation evidence is the successful [dependency job at `0b82936`](https://github.com/CosmonautJones/m-local/actions/runs/37535107874).
+Fresh full-suite installation must consume these committed inputs and verify
+every downloaded tarball before populating an empty offline cache. The frozen
+receipt proves the preparation fixture, not application test execution.
+
 The nine original compatibility, catalog, loader and native-gate sources are
 also frozen byte-for-byte in `native-inputs/native-suite-v5/`. Their manifest
 retains all 24 compatibility phases, both separate source interfaces, the six

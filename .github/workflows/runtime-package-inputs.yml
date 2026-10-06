@@ -50,6 +50,52 @@ jobs:
         run: sudo -n python3 -I -B runtime-proof/test-prepared-runtime-matrix.py
       - name: Check browser-test dependency lock and integrity boundaries
         run: python3 -I -B runtime-proof/test-ui-dependency-lock.py
+      - name: Verify frozen browser-test dependency inputs without installing them
+        run: |
+          echo 'd47b342bea74d64fa3575673a07b90d5595fdabe0e87a93f714cc6d7caa7c635  runtime-proof/verify-package-preflight.py' | sha256sum -c -
+          python3 -I -B - <<'PY'
+          from pathlib import Path
+          import importlib.util
+          import json
+          import os
+          root = Path.cwd()
+          spec = importlib.util.spec_from_file_location('ui_input_preflight', root / 'runtime-proof/verify-package-preflight.py')
+          preflight = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(preflight)
+          commit = os.environ['GITHUB_SHA']
+          preflight.checked_checkout(root, commit)
+          helper = 'runtime-proof/generate-ui-dependency-lock.py'
+          assert preflight.sha(preflight.committed_file(root, commit, helper)) == 'ca736a8bdf433efd8e5c49bad022c7da5d6598b87beabfd9e42e1c2215f649be'
+          spec = importlib.util.spec_from_file_location('frozen_ui_lock', root / helper)
+          lock = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(lock)
+          relative = 'runtime-proof/ui-dependency-inputs/v1/'
+          expected = {
+              'package.json': (128, 'f1e64f1c622aecd2ef34d348bb871f272c5ad8688e22a43c52d01bb339b2429c'),
+              'package-lock.json': (17873, '0c775bf70def454618101b2d18ac8818beb6fbbf8245867adf5e38a65630567d'),
+              'dependency-inputs.json': (17424, '03ff15b78906b2271a8dabc25a2c1a0cab40374ce0d7914b7f843811c95b37b5'),
+          }
+          files = {}
+          for name, (length, digest) in expected.items():
+              raw = preflight.committed_file(root, commit, relative + name)
+              assert len(raw) == length and preflight.sha(raw) == digest
+              files[name] = raw
+          assert sorted(path.name for path in (root / relative).iterdir()) == sorted(expected)
+          assert files['package.json'] == lock.PACKAGE_RAW
+          rows = lock.parse_lock(files['package-lock.json'])
+          receipt = lock._json(files['dependency-inputs.json'], 'dependency receipt')
+          assert receipt['schema'] == 'm-local-ui-dependency-inputs-v1'
+          assert receipt['status'] == 'generated_and_offline_verified' and receipt['evidence_scope'] == 'dependency_preparation_only'
+          assert receipt['source_commit'] == '0b82936f2a8c408532eef98c29f234cb90f646a5'
+          assert receipt['node_version'] == '22.16.0' and receipt['npm_version'] == '10.9.2'
+          assert receipt['package_sha256'] == preflight.sha(files['package.json']) and receipt['lock_sha256'] == preflight.sha(files['package-lock.json'])
+          assert type(receipt['uid']) is int and receipt['uid'] == 65534 and type(receipt['gid']) is int and receipt['gid'] == 65534
+          assert receipt['supplementary_groups'] == [] and receipt['smoke'] == {'status': 'passed', 'ok': 1}
+          assert len(rows) == len(receipt['tarballs']) == 39
+          for row, tarball in zip(rows, receipt['tarballs']):
+              assert {key: tarball[key] for key in row} == row
+          print(json.dumps(dict(status='frozen_preparation_inputs', dependencies=39, application_tests_executed=False)))
+          PY
       - name: Verify immutable native suite sources without executing them
         run: |
           echo 'd47b342bea74d64fa3575673a07b90d5595fdabe0e87a93f714cc6d7caa7c635  runtime-proof/verify-package-preflight.py' | sha256sum -c -
