@@ -75,11 +75,16 @@ license sidecar and bootstrap cold hash, and verifies both the private bundle
 and the exported copy. CI uploads only that verified directory after success,
 retains it for seven days and exposes the contract hash and artifact identity
 for a later package gate. Logs, caches and application state stay private.
-Source run [37477834755](https://github.com/CosmonautJones/m-local/actions/runs/37477834755)
+Earlier source run [37477834755](https://github.com/CosmonautJones/m-local/actions/runs/37477834755)
 completed successfully at commit `990c7b33c920e6a93431d34a01df7b8c87c432ba`.
 Its authenticated archive and 38 physical files passed independent verification,
 including the 36-member contract and all 34 public source bindings. This proves
 that source handoff, not package compatibility, capacity or runtime adoption.
+Current package defaults use source run
+[37532312763](https://github.com/CosmonautJones/m-local/actions/runs/37532312763)
+at commit `82d2789dcbbfea32d3362ee4008104b7e52b193a`, as recorded in
+[fresh package execution plan](FRESH-PACKAGE.md). Keep each source run paired with
+its exact commit; the earlier run does not substitute for these current inputs.
 Failure context retains at most eight known operation labels across chained
 errors, including cleanup failures. It omits arbitrary messages and child logs.
 Failure diagnostics retain the operation underway, the last scoped command,
