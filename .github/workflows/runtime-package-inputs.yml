@@ -37,7 +37,7 @@ jobs:
       - name: Check runtime declaration and fresh fork boundaries
         run: python3 -I -B runtime-proof/test-runtime-direct-use.py
       - name: Check fresh package acceptance and cleanup boundaries
-        run: python3 -I -B runtime-proof/test-fresh-package.py
+        run: sudo -n python3 -I -B runtime-proof/test-fresh-package.py
       - name: Check workload launcher binding and dropped identity
         run: sudo -n python3 -I -B runtime-proof/test-workload-launcher.py
       - name: Check source isolation and restoration on owned fixtures

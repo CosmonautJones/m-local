@@ -279,7 +279,9 @@ class PureTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'graph counters'):
                 self.control._assert_graph(path, 'core')
 
-    def _mocked_suite(self, temporary, failure_label=None, restoration_failure=False):
+    def _mocked_suite(self, temporary, failure_label=None, restoration_failure=False,
+                      *, real_ui_identity=False, ui_modules_mode=0o755,
+                      directory_override=None, mount_root=None):
         control = self.control
         root = Path(temporary)
         package = root / 'package'
@@ -298,6 +300,11 @@ class PureTests(unittest.TestCase):
         ui_modules = root / 'ui-modules'
         ui_install.mkdir()
         ui_modules.mkdir()
+        if real_ui_identity:
+            os.chown(ui_install, 65534, 65534)
+            os.chmod(ui_install, 0o700)
+            os.chown(ui_modules, 65534, 65534)
+            os.chmod(ui_modules, ui_modules_mode)
         matrix_names = list(control.MATRIX_PHASES) + list(control.INTERFACES)
         matrix_raws = {name: b'probe-source' for name in matrix_names}
         matrix_raws['runtime-served-probe'] = (
@@ -434,11 +441,15 @@ class PureTests(unittest.TestCase):
         context['matrix_control']['verify_prepared'] = lambda *args: matrix_checks.append(args)
         context['ui_control']['verify_prepared'] = lambda *args: ui_checks.append(args)
         context['accepted'] = {'status': 'passed'}
-        matrix_path = root / 'm-local-native-compatibility-v1-12345678' / 'runtime-matrix'
+        directory = (Path(directory_override) if directory_override is not None
+                     else root / 'm-local-native-compatibility-v1-12345678')
+        matrix_path = directory / 'runtime-matrix'
         real_path_stat = Path.stat
 
         def synthetic_matrix_stat(path, *args, **kwargs):
             info = real_path_stat(path, *args, **kwargs)
+            if real_ui_identity and Path(path) in (ui_install, ui_modules):
+                return info
             if Path(path).name not in (matrix_path.name, ui_install.name, ui_modules.name):
                 return info
             values = list(info)
@@ -448,7 +459,8 @@ class PureTests(unittest.TestCase):
 
         with ExitStack() as stack:
             stack.enter_context(patch.object(control, '_context_paths', return_value=values))
-            stack.enter_context(patch.object(control, '_mount_identity', return_value=(1, 2)))
+            if not mount_root:
+                stack.enter_context(patch.object(control, '_mount_identity', return_value=(1, 2)))
             stack.enter_context(patch.object(control, '_read_committed', side_effect=read_committed))
             stack.enter_context(patch.object(control, '_validate_original_inputs'))
             stack.enter_context(patch.object(control, '_verify_package', return_value=(
@@ -467,7 +479,7 @@ class PureTests(unittest.TestCase):
                 if expected is not None:
                     return expected
                 path = Path(path)
-                app_output = root / 'm-local-native-compatibility-v1-12345678' / 'app'
+                app_output = directory / 'app'
                 if allow_empty and path.is_relative_to(app_output):
                     return real_hash_checked(path, maximum=maximum, allow_empty=True)
                 name = Path(path).name
@@ -491,9 +503,11 @@ class PureTests(unittest.TestCase):
             exec(compile(isolation_source, control.ISOLATION_RELATIVE, 'exec'), isolation_globals)
             isolation_globals['restore_sources'] = restore_sources
             context['isolation'].update(isolation_globals)
+            runner = {'minimal_environment': lambda extra: dict(extra, PATH='/bin')}
+            if mount_root is not None:
+                runner['E_ROOT'] = Path(mount_root)
             try:
-                result = control.run_suite({}, {'minimal_environment': lambda extra: dict(extra, PATH='/bin')},
-                                          root / 'm-local-native-compatibility-v1-12345678',
+                result = control.run_suite({}, runner, directory,
                                           'commit', context, 8400)
             except BaseException as error:
                 result = error
@@ -501,7 +515,7 @@ class PureTests(unittest.TestCase):
             if marker.exists():
                 restored.append(int(marker.read_text()))
         return (result, labels, phase_timeouts, matrix_checks, ui_checks, restored,
-                root / 'm-local-native-compatibility-v1-12345678')
+                directory)
 
     def test_mocked_suite_runs_all_phases_interfaces_and_catalog_cases(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as temporary:
@@ -597,6 +611,38 @@ class LinuxRootTests(unittest.TestCase):
             if fresh_backing.exists() and not fresh_backing.is_symlink():
                 fresh_backing.rmdir()
             owner.cleanup_fixture(*fixture)
+
+    def test_real_ui_directory_modes_on_owned_mount(self):
+        owner = self.source_tests.LinuxRootTests('runTest')
+        owner.setUpClass()
+        pure = PureTests('runTest')
+        pure.setUpClass()
+        for modules_mode, accepted in ((0o755, True), (0o775, False)):
+            fixture = owner.fixture()
+            _base, _image, e_root, _backing, alias, _loop = fixture
+            try:
+                with tempfile.TemporaryDirectory(dir='/var/tmp') as temporary:
+                    result, labels, _timeouts, _matrix, _ui, _restored, output = pure._mocked_suite(
+                        temporary, real_ui_identity=True, ui_modules_mode=modules_mode,
+                        directory_override=alias, mount_root=e_root)
+                    install = Path(temporary) / 'ui-install'
+                    modules = Path(temporary) / 'ui-modules'
+                    self.assertEqual((install.stat().st_uid, install.stat().st_gid,
+                                      stat.S_IMODE(install.stat().st_mode)), (65534, 65534, 0o700))
+                    self.assertEqual((modules.stat().st_uid, modules.stat().st_gid,
+                                      stat.S_IMODE(modules.stat().st_mode)),
+                                     (65534, 65534, modules_mode))
+                    if accepted:
+                        self.assertIsInstance(result, dict)
+                        self.assertIn('ui-dependencies', labels)
+                    else:
+                        self.assertIsInstance(result, ValueError)
+                        self.assertNotIn('ui-dependencies', labels)
+                        receipt = json.loads((output / 'result.json').read_bytes())
+                        self.assertEqual(receipt['status'], 'failed')
+                        self.assertEqual(receipt['failure_type'], 'ValueError')
+            finally:
+                owner.cleanup_fixture(*fixture)
 
 
 if __name__ == '__main__':

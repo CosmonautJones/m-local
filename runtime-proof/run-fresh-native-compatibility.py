@@ -1045,8 +1045,11 @@ def run_suite(preflight, runner, directory, expected_commit, context, timeout):
         ui_modules = Path(context['prepared_ui']['modules_directory'])
         for path in (ui_install, ui_modules):
             info = path.stat()
+            mode = info.st_mode & 0o777
             if (path.resolve() != path or path.is_symlink() or not path.is_dir() or
-                    info.st_uid != 65534 or info.st_gid != 65534 or info.st_mode & 0o777 != 0o700):
+                    info.st_uid != 65534 or info.st_gid != 65534 or
+                    (path == ui_install and mode != 0o700) or
+                    (path == ui_modules and mode & 0o022)):
                 _fail('native compatibility UI dependency ownership')
         row = _run_phase(context, directory, app, 'ui-dependencies', ui_smoke,
                          ui_install, ui_env, remaining(120), context['trace'],

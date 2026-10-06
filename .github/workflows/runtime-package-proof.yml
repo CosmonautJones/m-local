@@ -58,7 +58,7 @@ jobs:
       - name: Verify package entry point before execution
         working-directory: package
         run: |
-          echo 'e5585e9645f7a441e5bc470d73bf005bdfde276a4de0738bd1f8f1582b35b173  runtime-proof/run-fresh-package.py' | sha256sum -c -
+          echo 'ad05aaccb2718ec6429d18382148bec25568ef2f16f34dd31eaa3a2c468ee380  runtime-proof/run-fresh-package.py' | sha256sum -c -
           echo 'eaf2dc65909aa593f322cf75cf239ab86fe9b5b79621d9b35d2b42af2ea83368  runtime-proof/check-runtime-direct-use.py' | sha256sum -c -
           python3 -I -B runtime-proof/check-runtime-direct-use.py --expected-commit "$GITHUB_SHA"
 
