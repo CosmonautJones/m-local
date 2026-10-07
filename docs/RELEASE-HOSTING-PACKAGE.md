@@ -108,8 +108,10 @@ sha256sum /var/tmp/m-local-tested-libraries.tar
 This includes only tested Python libraries, npm modules and generated client
 metadata. It rejects private state, unsafe links and archive traversal. Generated
 compiler caches carrying a source namespace are not copied. Source switching
-installs the libraries without overwriting `.jac/data`; startup performs no
-dependency downloads. Archive generation does not prove that a different source
+creates local virtualenv metadata using the exact packaged bundled CPython with
+`--without-pip`, then installs the tested libraries without overwriting
+`.jac/data`; this operation performs no dependency downloads. Copying a build
+workspace's absolute interpreter links is deliberately avoided. Archive generation does not prove that a different source
 or platform was tested; its build receipt must bind the same tested candidate.
 
 The coordinator records `build-receipt.json` with `source_sha`, `source_tree`,
@@ -199,7 +201,8 @@ deployment lock and refuses an active package launcher. Quiescence is required
 so graph, approval, signing and media state share one recovery point.
 
 ```bash
-python3 deploy/release/package.py inventory --config /etc/m-local/release.json
+python3 deploy/release/package.py inventory --config /etc/m-local/release.json \
+  --output /protected-backups/pre-cutover-inventory.json
 bash scripts/release-backup.sh --package /var/tmp/m-local-rc-package \
   --config /etc/m-local/release.json --output /protected-backups/rc-snapshot \
   --acknowledge-quiesced
@@ -234,6 +237,25 @@ account isolation, then another restart and readback. Run
 its matching-runtime cold-copy scope remains distinct from logical dump,
 fresh-host, off-host, scheduled-backup and public cutover acceptance. Bind the
 new candidate receipts separately; preserve the old receipts.
+
+The package tooling's separate native drill uses official Ubuntu PostgreSQL
+16.15 clients/server extracted into private disposable Linux storage. It proves
+logical dump and empty-database restore of synthetic identity, graph and outbox
+tables, both SQLite stores, original keys, photo bytes and source binding; original
+components remain preserved. It also proves offline metadata creation using the
+official Jac bundled CPython, followed by `ensure_venv` retaining the restored
+library. This is procedure evidence, not authenticated Jac application recovery,
+runtime transaction safety, remote durability or hosted acceptance. Run it with
+`MLOCAL_RELEASE_PG_TOOLS` pointing to the extracted official tools root:
+
+```bash
+python3 -m unittest discover -s tests/tooling -p test_release_package.py
+```
+
+Independent review also required, and the regressions verify: refusing a live
+listener even after the local lock is free; never labeling a backup with an
+uninstalled proposed package; redacting malformed PostgreSQL port inputs; and
+writing private inventory receipts exclusively without overwriting prior evidence.
 
 ## Prepared rollout and source rollback commands
 

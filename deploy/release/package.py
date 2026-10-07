@@ -32,6 +32,10 @@ REQUIRED_CASES = {"all_rpc_serialized", "readiness_serialized", "exclusive_backe
 DEPENDENCY_ROOTS = (".jac/venv/lib", ".jac/client/node_modules", ".jac/client/package.json")
 
 
+class ReleaseError(ValueError):
+    """Fixed, public diagnostic written by this tool; never a raw input error."""
+
+
 def digest(path):
     value = hashlib.sha256()
     with Path(path).open("rb") as stream:
@@ -59,11 +63,11 @@ def reject_links(path, tree=False):
     path = Path(os.path.abspath(path))
     for current in (path, *path.parents):
         if current.is_symlink():
-            raise ValueError("Paths must not contain a symlink")
+            raise ReleaseError("Paths must not contain a symlink")
     if tree and path.exists():
         for current in path.rglob("*"):
             if current.is_symlink() or not (current.is_dir() or current.is_file()):
-                raise ValueError("Tree must contain only regular files and directories, without symlinks")
+                raise ReleaseError("Tree must contain only regular files and directories, without symlinks")
 
 
 def reject_app_links(app):
@@ -73,12 +77,19 @@ def reject_app_links(app):
     for path in app.rglob("*"):
         if not path.is_symlink():
             if not (path.is_dir() or path.is_file()):
-                raise ValueError("Application tree contains a nonregular file")
+                raise ReleaseError("Application tree contains a nonregular file")
             continue
         relative = str(path.relative_to(app))
+        # The runtime creates interpreter links in its disposable venv metadata.
+        # They are never copied from the dependency artifact or followed during
+        # source/data removal. Library links must still stay inside that cache.
+        if relative.startswith(".jac/venv/bin/") and not path.is_dir():
+            continue
+        if relative == ".jac/venv/lib64" and path.resolve() == (app / ".jac/venv/lib").resolve():
+            continue
         allowed = next((root for root in DEPENDENCY_ROOTS if relative.startswith(root + "/")), None)
         if allowed is None or not path.resolve().is_relative_to((app / allowed).resolve()):
-            raise ValueError("Application or private data paths must not contain a symlink")
+            raise ReleaseError("Application or private data paths must not contain a symlink")
 
 
 def private_path(relative):
@@ -91,13 +102,13 @@ def private_path(relative):
 def git(root, *args):
     result = subprocess.run(["git", "-C", str(root), *args], capture_output=True, check=False)
     if result.returncode:
-        raise ValueError("Git source inspection failed")
+        raise ReleaseError("Git source inspection failed")
     return result.stdout
 
 
 def clean_checkout(root):
     if (root / ".git").exists() and git(root, "status", "--porcelain", "--untracked-files=normal").strip():
-        raise ValueError("Source has uncommitted changes; preserve and commit the intended candidate first")
+        raise ReleaseError("Source has uncommitted changes; preserve and commit the intended candidate first")
 
 
 def inventory(root):
@@ -109,13 +120,13 @@ def dependency_member_safe(member):
     name = Path(member.name)
     allowed = any(member.name == root or member.name.startswith(root + "/") for root in DEPENDENCY_ROOTS)
     if not allowed or name.is_absolute() or ".." in name.parts or not (member.isfile() or member.isdir() or member.issym()):
-        raise ValueError("Dependency archive contains an unsupported path or file type")
+        raise ReleaseError("Dependency archive contains an unsupported path or file type")
     if any(part in PRIVATE_NAMES or part.startswith(".env") or part.endswith((".pem", ".p12", ".key")) for part in name.parts):
-        raise ValueError("Dependency archive contains a private filename requiring review")
+        raise ReleaseError("Dependency archive contains a private filename requiring review")
     if member.issym():
         resolved = posixpath.normpath(posixpath.join(posixpath.dirname(member.name), member.linkname))
         if member.linkname.startswith("/") or not any(resolved == root or resolved.startswith(root + "/") for root in DEPENDENCY_ROOTS):
-            raise ValueError("Dependency symlink escapes the installed library tree")
+            raise ReleaseError("Dependency symlink escapes the installed library tree")
 
 
 def verify_dependencies(archive):
@@ -124,20 +135,20 @@ def verify_dependencies(archive):
         for member in stream.getmembers():
             dependency_member_safe(member)
             if member.name in seen:
-                raise ValueError("Dependency archive has duplicate paths")
+                raise ReleaseError("Dependency archive has duplicate paths")
             seen.add(member.name)
         if not all(any(name == root or name.startswith(root + "/") for name in seen) for root in DEPENDENCY_ROOTS):
-            raise ValueError("Dependency archive lacks tested Python, npm or generated client metadata")
+            raise ReleaseError("Dependency archive lacks tested Python, npm or generated client metadata")
 
 
 def create_dependencies(source, output):
     source, output = Path(source), Path(output)
     reject_links(output)
     if output.exists():
-        raise ValueError("Dependency artifact already exists")
+        raise ReleaseError("Dependency artifact already exists")
     for name in DEPENDENCY_ROOTS:
         if not (source / name).exists():
-            raise ValueError("Install/test dependencies with the pinned runtime before packaging")
+            raise ReleaseError("Install/test dependencies with the pinned runtime before packaging")
     with tarfile.open(output, "w") as stream:
         def validate(member):
             dependency_member_safe(member)
@@ -156,7 +167,7 @@ def create_source_package(source, destination, *, runtime=None, artifact=None, b
     reject_links(destination)
     clean_checkout(source)
     if destination.exists():
-        raise ValueError("Package destination already exists; never replace an evidence artifact")
+        raise ReleaseError("Package destination already exists; never replace an evidence artifact")
     sha = git(source, "rev-parse", "HEAD").decode().strip()
     tree = git(source, "rev-parse", "HEAD^{tree}").decode().strip()
     archive = git(source, "archive", "--format=tar", sha)
@@ -165,12 +176,12 @@ def create_source_package(source, destination, *, runtime=None, artifact=None, b
         for member in members:
             path = Path(member.name)
             if path.is_absolute() or ".." in path.parts or not (member.isfile() or member.isdir()):
-                raise ValueError("Source archive contains unsafe paths or symlinks")
+                raise ReleaseError("Source archive contains unsafe paths or symlinks")
             if private_path(path):
-                raise ValueError("Tracked private data must not enter a source release")
+                raise ReleaseError("Tracked private data must not enter a source release")
         version = source_tar.extractfile(".jac-version").read().decode().strip()
         if version != PIN:
-            raise ValueError("Release requires official Jac 0.37.23")
+            raise ReleaseError("Release requires official Jac 0.37.23")
         destination.mkdir(mode=0o755)
         (destination / "source").mkdir()
         for member in members:
@@ -192,10 +203,10 @@ def create_source_package(source, destination, *, runtime=None, artifact=None, b
             reject_links(original)
             expected = (official_checksums or {}).get(name)
             if not expected or digest(original) != expected:
-                raise ValueError("Official runtime checksum evidence is missing or differs")
+                raise ReleaseError("Official runtime checksum evidence is missing or differs")
         version = subprocess.run([str(runtime / "jac"), "--version"], capture_output=True, text=True, timeout=30)
         if version.returncode or version.stdout.split()[:2] != ["jac", PIN]:
-            raise ValueError("Runtime version differs from official pinned Jac")
+            raise ReleaseError("Runtime version differs from official pinned Jac")
         (destination / "runtime").mkdir()
         for name in ("jac", "jacpython"):
             shutil.copy2(runtime / name, destination / "runtime" / name)
@@ -206,7 +217,7 @@ def create_source_package(source, destination, *, runtime=None, artifact=None, b
         reject_links(artifact)
         artifact_sha = digest(artifact)
         if receipt.get("source_sha") != sha or receipt.get("source_tree") != tree or receipt.get("artifact_sha256") != artifact_sha:
-            raise ValueError("Build receipt does not bind the artifact to this exact source")
+            raise ReleaseError("Build receipt does not bind the artifact to this exact source")
         (destination / "artifact").mkdir()
         shutil.copy2(artifact, destination / "artifact" / artifact.name)
         write_json(destination / "artifact/build-receipt.json", {"source_sha": sha, "source_tree": tree,
@@ -219,7 +230,7 @@ def create_source_package(source, destination, *, runtime=None, artifact=None, b
         verify_dependencies(dependency_archive)
         expected = digest(dependency_archive)
         if receipt.get("source_sha") != sha or receipt.get("source_tree") != tree or receipt.get("dependency_archive_sha256") != expected:
-            raise ValueError("Dependency receipt does not bind installed libraries to this exact source")
+            raise ReleaseError("Dependency receipt does not bind installed libraries to this exact source")
         (destination / "dependencies").mkdir()
         shutil.copyfile(dependency_archive, destination / "dependencies/libraries.tar")
         manifest["dependencies"] = {"archive": "dependencies/libraries.tar", "sha256": expected}
@@ -238,13 +249,13 @@ def verify_package(package):
     actual.pop("manifest.json", None)
     expected = manifest.get("files", {})
     if actual.keys() != expected.keys():
-        raise ValueError("Package inventory differs")
+        raise ReleaseError("Package inventory differs")
     if actual != expected:
-        raise ValueError("Package file digest differs")
+        raise ReleaseError("Package file digest differs")
     if manifest.get("schema") != 1 or manifest.get("jac_version") != PIN:
-        raise ValueError("Unsupported release manifest or runtime")
+        raise ReleaseError("Unsupported release manifest or runtime")
     if any(private_path(Path(name).relative_to("source")) for name in expected if name.startswith("source/")):
-        raise ValueError("Source package contains private data")
+        raise ReleaseError("Source package contains private data")
     return manifest
 
 
@@ -256,7 +267,7 @@ def install_source(package, app, *, dry_run=False):
     if app.exists():
         clean_checkout(app)
     if app.resolve() == package.resolve() or app.resolve() in package.resolve().parents or package.resolve() in app.resolve().parents:
-        raise ValueError("Canonical application and release package must not overlap")
+        raise ReleaseError("Canonical application and release package must not overlap")
     source = package / "source"
     if manifest.get("dependencies"):
         verify_dependencies(package / manifest["dependencies"]["archive"])
@@ -268,7 +279,7 @@ def install_source(package, app, *, dry_run=False):
             for path in target.rglob("*"):
                 relative = path.relative_to(app)
                 if private_path(relative) and relative.parts[:2] != ("assets", "photos"):
-                    raise ValueError("Private files inside managed source require operator migration before source switching")
+                    raise ReleaseError("Private files inside managed source require operator migration before source switching")
     if dry_run:
         return
     app.mkdir(mode=0o755, parents=True, exist_ok=True)
@@ -313,30 +324,45 @@ def install_source(package, app, *, dry_run=False):
                 shutil.rmtree(path)
             elif path.is_file():
                 path.unlink()
+        if manifest.get("runtime", {}).get("jacpython"):
+            prepare_venv(package, app)
         with tarfile.open(archive) as stream:
             stream.extractall(app, filter="data")
+
+
+def prepare_venv(package, app):
+    # Build metadata with the exact packaged runtime's unpacked CPython. Copying
+    # the build workspace's bin links/pyvenv.cfg would retain foreign paths.
+    # --without-pip performs no dependency fetch. The archive supplies the
+    # tested libraries, including any build-installed pip metadata afterward.
+    code = ("import subprocess,sys; from pathlib import Path; "
+            "python=Path(sys.prefix)/'bin'/('python'+str(sys.version_info.major)+'.'+str(sys.version_info.minor)); "
+            "raise SystemExit(subprocess.run([str(python),'-m','venv','--without-pip',str(Path.cwd()/'.jac/venv')]).returncode)")
+    result = subprocess.run([str(Path(package) / "runtime/jacpython"), "-c", code], cwd=app, capture_output=True, timeout=60)
+    if result.returncode:
+        raise ReleaseError("Offline dependency environment initialization failed; candidate remains stopped")
 
 
 def validate_config(config):
     entry = Path(config.get("canonical_entry", ""))
     if not entry.is_absolute() or entry.name != "main.jac" or str(entry) != str(entry.resolve()):
-        raise ValueError("Record the exact resolved canonical main.jac entry path")
+        raise ReleaseError("Record the exact resolved canonical main.jac entry path")
     for name in ("canonical_entry", "durable_root", "onboarding_dir", "native_signing_file", "photos_dir"):
         path = Path(config.get(name, ""))
         if not path.is_absolute():
-            raise ValueError("Deployment paths must be absolute")
+            raise ReleaseError("Deployment paths must be absolute")
         reject_links(path)
     native_data = Path(config.get("native_data_dir", str(entry.parent / ".jac/data")))
     if not native_data.is_absolute():
-        raise ValueError("Record the existing absolute native data directory")
+        raise ReleaseError("Record the existing absolute native data directory")
     reject_links(native_data)
     if Path(config["native_signing_file"]) != native_data / "jwt_secret" or Path(config["photos_dir"]) != entry.parent / "assets/photos":
-        raise ValueError("Native signing state and photos must retain their existing canonical paths")
+        raise ReleaseError("Native signing state and photos must retain their existing canonical paths")
     if config.get("topology") != "single-instance-serialized" or config.get("replicas") != 1:
-        raise ValueError("Only the proposed exclusive single-instance serialized topology is supported")
+        raise ReleaseError("Only the proposed exclusive single-instance serialized topology is supported")
     ports = [config.get("backend_port"), config.get("gateway_port")]
     if any(type(port) is not int or not 1024 <= port <= 65535 for port in ports) or ports[0] == ports[1]:
-        raise ValueError("Use distinct unprivileged backend and gateway ports")
+        raise ReleaseError("Use distinct unprivileged backend and gateway ports")
     return entry.parent
 
 
@@ -344,7 +370,7 @@ def sqlite_inventory(path):
     reject_links(path)
     with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as db:
         if db.execute("PRAGMA quick_check").fetchone() != ("ok",):
-            raise ValueError("Private SQLite integrity check failed")
+            raise ReleaseError("Private SQLite integrity check failed")
         tables = [row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'") if not row[0].startswith("sqlite_")]
         return {table: db.execute('SELECT COUNT(*) FROM "' + table.replace('"', '""') + '"').fetchone()[0] for table in tables}
 
@@ -359,7 +385,7 @@ def state_inventory(config, require_complete=True):
         reject_links(path)
         if not path.is_file():
             if require_complete:
-                raise ValueError("Existing private state is incomplete; use an audited migration, never create replacement keys")
+                raise ReleaseError("Existing private state is incomplete; use an audited migration, never create replacement keys")
             continue
         result["files"][name] = {"sha256": digest(path), "bytes": path.stat().st_size}
         if name.endswith(".sqlite3"):
@@ -367,7 +393,7 @@ def state_inventory(config, require_complete=True):
     photos = Path(config["photos_dir"])
     reject_links(photos, tree=True)
     if require_complete and not photos.is_dir():
-        raise ValueError("Existing photo volume is missing")
+        raise ReleaseError("Existing photo volume is missing")
     if photos.exists():
         result["photos"] = inventory(photos)
     return result
@@ -378,7 +404,7 @@ def backup_private_state(config, destination):
     destination = Path(destination)
     reject_links(destination)
     if destination.exists():
-        raise ValueError("Backup destination already exists")
+        raise ReleaseError("Backup destination already exists")
     destination.mkdir(mode=0o700)
     sqlite_counts = {}
     for name in ("onboarding.sqlite3", "photo-ownership.sqlite3"):
@@ -408,10 +434,10 @@ def verify_backup(backup):
     actual = inventory(backup)
     actual.pop("backup-manifest.json", None)
     if actual != receipt.get("files"):
-        raise ValueError("Recovery set checksum or inventory differs")
+        raise ReleaseError("Recovery set checksum or inventory differs")
     for name in ("onboarding.sqlite3", "photo-ownership.sqlite3"):
         if sqlite_inventory(backup / name) != receipt["sqlite"][name]:
-            raise ValueError("Recovery SQLite row inventory differs")
+            raise ReleaseError("Recovery SQLite row inventory differs")
     return receipt
 
 
@@ -421,7 +447,7 @@ def restore_private_state(backup, config):
     for path in targets:
         reject_links(path, tree=True)
         if path.exists() and (not path.is_dir() or any(path.iterdir())):
-            raise ValueError("Refusing to overwrite existing private state or identity; restore into empty isolated storage")
+            raise ReleaseError("Refusing to overwrite existing private state or identity; restore into empty isolated storage")
     receipt = verify_backup(backup)
     backup = Path(backup)
     onboarding, signing, photos = targets
@@ -439,11 +465,15 @@ def restore_private_state(backup, config):
 
 
 def pg_environment(url):
-    parsed = urlsplit(url)
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port or 5432
+    except (ValueError, TypeError):
+        raise ReleaseError("PostgreSQL URL format or port is invalid; no connection settings were logged") from None
     if parsed.scheme not in {"postgres", "postgresql"} or not parsed.hostname or not parsed.path.strip("/") or parsed.query or parsed.fragment:
-        raise ValueError("Use an explicit PostgreSQL URL without query options; configure TLS through PostgreSQL environment settings")
+        raise ReleaseError("Use an explicit PostgreSQL URL without query options; configure TLS through PostgreSQL environment settings")
     env = os.environ.copy()
-    env.update(PGHOST=parsed.hostname, PGPORT=str(parsed.port or 5432), PGDATABASE=unquote(parsed.path[1:]),
+    env.update(PGHOST=parsed.hostname, PGPORT=str(port), PGDATABASE=unquote(parsed.path[1:]),
                PGUSER=unquote(parsed.username or ""), PGPASSWORD=unquote(parsed.password or ""), PGCONNECT_TIMEOUT="10")
     return env
 
@@ -453,7 +483,7 @@ def pg_command(args, env, timeout=300):
     # in public receipts. PostgreSQL stderr may include private connection data.
     result = subprocess.run(args, env=env, capture_output=True, timeout=timeout)
     if result.returncode:
-        raise ValueError("PostgreSQL backup/recovery command failed; preserve its protected operator diagnostics")
+        raise ReleaseError("PostgreSQL backup/recovery command failed; preserve its protected operator diagnostics")
     return result.stdout.decode().strip()
 
 
@@ -461,8 +491,9 @@ def coordinated_backup(config, destination, package):
     destination = Path(destination)
     reject_links(destination)
     if destination.exists():
-        raise ValueError("Backup destination already exists")
+        raise ReleaseError("Backup destination already exists")
     manifest = verify_package(package)
+    installed = verify_installed_source(package, config)
     environment = pg_environment(os.environ.get("JAC_DB_URL", ""))
     destination.mkdir(mode=0o700)
     backup_private_state(config, destination / "private")
@@ -474,6 +505,7 @@ def coordinated_backup(config, destination, package):
                "canonical_entry": config["canonical_entry"], "source_sha": manifest["source_sha"],
                "source_tree": manifest["source_tree"], "runtime": manifest["runtime"],
                "package_manifest_sha256": digest(Path(package) / "manifest.json"), "pg_client_version": pg_version,
+               "installed_source_verified": installed,
                "files": inventory(destination), "scope": "complete logical PostgreSQL dump plus quiesced SQLite, code.key, native JWT, photo ownership and JPEGs"}
     write_json(destination / "recovery-manifest.json", receipt, private=True)
     return receipt
@@ -486,7 +518,7 @@ def verify_recovery_set(backup):
     actual = inventory(backup)
     actual.pop("recovery-manifest.json", None)
     if actual != receipt.get("files"):
-        raise ValueError("Coordinated recovery set checksum or inventory differs")
+        raise ReleaseError("Coordinated recovery set checksum or inventory differs")
     verify_backup(backup / "private")
     return receipt
 
@@ -496,21 +528,21 @@ def coordinated_restore(backup, config, package):
     manifest = verify_package(package)
     if receipt.get("canonical_entry") != config["canonical_entry"] or receipt.get("source_sha") != manifest["source_sha"] or \
             receipt.get("runtime") != manifest["runtime"]:
-        raise ValueError("Recovery requires the original canonical entry, matching source and official runtime")
+        raise ReleaseError("Recovery requires the original canonical entry, matching source and official runtime")
     # Validate file destinations before any PostgreSQL write. Recovery does not
     # repair collisions or overwrite an existing native account store.
     for name in ("onboarding_dir", "native_signing_file", "photos_dir"):
         target = Path(config[name])
         reject_links(target, tree=True)
         if target.exists() and (not target.is_dir() or any(target.iterdir())):
-            raise ValueError("Recovery refuses existing identity, private state or photos")
+            raise ReleaseError("Recovery refuses existing identity, private state or photos")
     environment = pg_environment(os.environ.get("MLOCAL_RECOVERY_DB_URL", ""))
     if environment.get("PGDATABASE") == pg_environment(os.environ.get("JAC_DB_URL", ""))["PGDATABASE"]:
-        raise ValueError("Recovery database must differ from the serving database")
+        raise ReleaseError("Recovery database must differ from the serving database")
     count = pg_command(["psql", "--no-psqlrc", "--tuples-only", "--no-align", "--command",
                         "SELECT COUNT(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema')"], environment, timeout=30)
     if count != "0":
-        raise ValueError("Recovery target database contains application tables; never overwrite existing accounts")
+        raise ReleaseError("Recovery target database contains application tables; never overwrite existing accounts")
     pg_command(["pg_restore", "--exit-on-error", "--single-transaction", "--no-owner", "--dbname", environment["PGDATABASE"],
                 str(Path(backup) / "postgresql.dump")], environment)
     restore_private_state(Path(backup) / "private", config)
@@ -524,20 +556,51 @@ def require_launch_evidence(config, manifest, evidence):
     if runtime.get("verdict") != "PASS" or runtime.get("jac_version") != PIN or runtime.get("topology") != config["topology"] or \
             runtime.get("source_sha") != manifest["source_sha"] or runtime.get("jac_sha256") != manifest.get("runtime", {}).get("jac") or \
             not REQUIRED_CASES.issubset({name for name, passed in runtime.get("cases", {}).items() if passed is True}):
-        raise ValueError("Launch blocked: independent official-runtime safety evidence is incomplete or does not match the candidate")
+        raise ReleaseError("Launch blocked: independent official-runtime safety evidence is incomplete or does not match the candidate")
     host = evidence.get("host_acceptance", {})
     if host.get("canonical_entry") != config["canonical_entry"] or host.get("durable_storage") is not True or \
             host.get("private_backend") is not True or host.get("exclusive_ingress") is not True or host.get("nonoverlapping_rollout") is not True:
-        raise ValueError("Launch blocked: canonical host, storage and exclusive ingress acceptance is incomplete")
+        raise ReleaseError("Launch blocked: canonical host, storage and exclusive ingress acceptance is incomplete")
     if evidence.get("operator_rollout_approved") is not True:
-        raise ValueError("Launch blocked: Travis's explicit rollout approval has not been recorded")
+        raise ReleaseError("Launch blocked: Travis's explicit rollout approval has not been recorded")
+
+
+def verify_installed_source(package, config, require_marker=False):
+    package = Path(package)
+    manifest = verify_package(package)
+    app = validate_config(config)
+    reject_app_links(app)
+    marker_path = app / ".jac/release-installed.json"
+    if marker_path.exists():
+        marker = read_json(marker_path)
+        if marker.get("source_sha") != manifest["source_sha"] or marker.get("source_tree") != manifest["source_tree"] or \
+                marker.get("package_manifest_sha256") != digest(package / "manifest.json") or marker.get("canonical_entry") != config["canonical_entry"]:
+            raise ReleaseError("Installed source marker does not match the recovery package or canonical entry")
+    elif require_marker:
+        raise ReleaseError("Installed source marker is missing; verify and install the intended candidate before launch")
+    expected = {name[7:]: value for name, value in manifest["files"].items()
+                if name.startswith("source/") and Path(name).parts[1] in MANAGED}
+    actual = {}
+    for name in MANAGED:
+        root = app / name
+        if root.is_file():
+            actual[name] = digest(root)
+        elif root.is_dir():
+            for path in root.rglob("*"):
+                relative = str(path.relative_to(app))
+                if path.is_file() and Path(relative).parts[:2] != ("assets", "photos") and "__pycache__" not in path.parts and path.suffix not in {".pyc", ".pyo"}:
+                    actual[relative] = digest(path)
+    if actual != expected:
+        raise ReleaseError("Installed source inventory or digest differs from the supplied package; backup cannot label a proposed candidate as the serving source")
+    return {"source_sha": manifest["source_sha"], "source_tree": manifest["source_tree"], "canonical_entry": config["canonical_entry"],
+            "marker_present": marker_path.exists(), "source_inventory_verified": True}
 
 
 def acquire_lock(config):
     root = Path(config["durable_root"])
     reject_links(root)
     if not root.is_dir():
-        raise ValueError("Durable root must already be provisioned")
+        raise ReleaseError("Durable root must already be provisioned")
     lock = root / "deployment.lock"
     reject_links(lock)
     fd = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
@@ -545,7 +608,7 @@ def acquire_lock(config):
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         os.close(fd)
-        raise ValueError("Backend or deployment operation is still running; stop it before switching source") from None
+        raise ReleaseError("Backend or deployment operation is still running; stop it before switching source") from None
     return fd
 
 
@@ -581,7 +644,7 @@ def require_free_ports(config):
             try:
                 probe.bind(("127.0.0.1", port))
             except OSError:
-                raise ValueError("Configured backend/gateway port is occupied; establish prior process termination before launch") from None
+                raise ReleaseError("Configured backend/gateway port is occupied; establish prior process termination before launch") from None
 
 
 def launch(package, config, evidence):
@@ -590,29 +653,21 @@ def launch(package, config, evidence):
     manifest = verify_package(package)
     require_launch_evidence(config, manifest, evidence)
     if not manifest.get("dependencies") or not manifest.get("build") or set(manifest.get("runtime", {})) != {"jac", "jacpython"}:
-        raise ValueError("Launch requires the complete tested source, official runtime, build and dependency package")
+        raise ReleaseError("Launch requires the complete tested source, official runtime, build and dependency package")
     state_inventory(config)
-    marker = read_json(app / ".jac/release-installed.json")
-    if marker.get("package_manifest_sha256") != digest(package / "manifest.json") or marker.get("canonical_entry") != config["canonical_entry"]:
-        raise ValueError("Installed source does not match this package or canonical entry")
-    for name, expected in manifest["files"].items():
-        relative = Path(name)
-        if relative.parts[0] == "source" and relative.parts[1] in MANAGED:
-            target = app.joinpath(*relative.parts[1:])
-            if not target.is_file() or digest(target) != expected:
-                raise ValueError("Installed candidate source digest differs")
+    verify_installed_source(package, config, require_marker=True)
     environment = os.environ.copy()
     if not environment.get("JAC_DB_URL", "").startswith(("postgres://", "postgresql://")):
-        raise ValueError("Explicit durable PostgreSQL JAC_DB_URL is required")
+        raise ReleaseError("Explicit durable PostgreSQL JAC_DB_URL is required")
     environment.update(MLOCAL_ENV="production", MLOCAL_PUBLIC_INGRESS="restricted", MLOCAL_DEPLOYMENT_TOPOLOGY="single-instance-serialized",
                        MLOCAL_APP_REPLICAS="1", MLOCAL_DURABLE_ROOT=config["durable_root"], MLOCAL_ONBOARDING_DIR=config["onboarding_dir"],
                        MLOCAL_BACKEND_PORT=str(config["backend_port"]), PORT=str(config["gateway_port"]), MLOCAL_INGRESS_EVENT_LOG="stderr")
     effective_data = Path(environment.get("JAC_DATA_PATH", str(app / ".jac/data")))
     if not effective_data.is_absolute() or effective_data.resolve() / "jwt_secret" != Path(config["native_signing_file"]):
-        raise ValueError("JAC_DATA_PATH differs from the recorded original native signing state; preserve the existing path and key")
+        raise ReleaseError("JAC_DATA_PATH differs from the recorded original native signing state; preserve the existing path and key")
     # Node/gateway provenance and explicit trusted edge are host capabilities.
     if environment.get("MLOCAL_INGRESS") not in {"render", "funnel", "restricted-edge"}:
-        raise ValueError("Select the verified restricted HTTPS edge; production direct ingress is prohibited")
+        raise ReleaseError("Select the verified restricted HTTPS edge; production direct ingress is prohibited")
     lock = acquire_lock(config)
     processes = []
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
@@ -625,7 +680,7 @@ def launch(package, config, evidence):
                                cwd=app, env=environment, timeout=30, capture_output=True)
         if guard.returncode:
             names = sorted(set(re.findall(r"\b(?:MLOCAL_|JAC_)[A-Z_]+\b", guard.stdout.decode(errors="replace"))))
-            raise ValueError("Production configuration guard refused startup: " + (", ".join(names) or "required setting names unavailable; inspect protected guard check"))
+            raise ReleaseError("Production configuration guard refused startup: " + (", ".join(names) or "required setting names unavailable; inspect protected guard check"))
         # Guard is also run by Jac onboarding import. Failure of either process
         # terminates both process groups; no restart while queue outcome is unknown.
         processes.append(subprocess.Popen([str(package / "runtime/jac"), "run", str(app / "main.jac"), "--no-dev", "--host", "127.0.0.1", "--port", str(config["backend_port"])], cwd=app, env=environment, start_new_session=True))
@@ -642,11 +697,11 @@ def launch(package, config, evidence):
                 pass
             time.sleep(1)
         if not ready:
-            raise ValueError("Candidate failed meaningful gateway readiness; both process groups were stopped")
+            raise ReleaseError("Candidate failed meaningful gateway readiness; both process groups were stopped")
         print("Candidate reached gateway readiness; external traffic remains an operator responsibility.", flush=True)
         while all(process.poll() is None for process in processes):
             time.sleep(1)
-        raise ValueError("Backend or gateway exited; both process groups were stopped")
+        raise ReleaseError("Backend or gateway exited; both process groups were stopped")
     finally:
         stop_owned(processes)
         os.close(lock)
@@ -682,11 +737,17 @@ def main():
             result = verify_package(args.package)
         elif args.action == "inventory":
             result = state_inventory(config)
+            if not args.output:
+                raise ReleaseError("Inventory requires an explicit protected --output receipt destination")
+            reject_links(args.output)
+            args.output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            write_json(args.output, result, private=True)
         elif args.action in {"switch-source", "backup-private", "restore-private", "backup", "restore"}:
             validate_config(config)
             if not args.acknowledge_quiesced:
-                raise ValueError("Close ingress and stop all graph/CLI/private-store writers, then acknowledge quiescence")
+                raise ReleaseError("Close ingress and stop all graph/CLI/private-store writers, then acknowledge quiescence")
             lock = acquire_lock(config)
+            require_free_ports(config)
             if args.action == "switch-source":
                 verify_package(args.package)
                 install_source(args.package, Path(config["canonical_entry"]).parent, dry_run=args.dry_run)
@@ -719,7 +780,7 @@ def main():
     except (ValueError, KeyError, OSError, sqlite3.Error, subprocess.SubprocessError) as error:
         # OS paths may contain sensitive account names. Only fixed ValueError
         # messages above are public; other diagnostic details remain local.
-        print(str(error) if isinstance(error, ValueError) else "Release operation failed; inspect protected local state.", file=__import__("sys").stderr)
+        print(str(error) if isinstance(error, ReleaseError) else "Release operation failed; inspect protected local state.", file=__import__("sys").stderr)
         return 1
     except KeyboardInterrupt:
         return 130
