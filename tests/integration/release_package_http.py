@@ -54,6 +54,7 @@ def main():
     processes, checks = [], []
     pg_started, sink_closed, sink = False, False, None
     receipt = {'verdict': 'BLOCKED', 'source_sha': manifest['source_sha'],
+        'fixture_sha256': pkg.digest(Path(__file__).resolve()),
         'source_tree': manifest['source_tree'], 'manifest_sha256': pkg.digest(args.package / 'manifest.json'),
         'official_runtime': manifest['runtime'], 'disposable_fixture_only': True,
         'live_deployment': False, 'external_email': False, 'hosted_acceptance': False,
@@ -201,7 +202,9 @@ def main():
             os.environ.update(environment)
 
             def production(label):
-                proc = start([str(args.package / 'runtime/jacpython'), str(app / 'deploy/release/package.py'), 'run',
+                proc = start([str(args.package / 'runtime/jacpython'), '-c',
+                    'import runpy,sys;sys.argv.pop(0);runpy.run_path(sys.argv[0],run_name="__main__")',
+                    str(app / 'deploy/release/package.py'), 'run',
                     '--package', str(args.package), '--config', str(config_file), '--evidence', str(evidence_file)], environment, label)
                 api = ready(proc, 'http://127.0.0.1:' + str(gateway_port), gateway=True)
                 check(Api(api.origin, student_token).call('current_session')['actor_id'] == student_actor,

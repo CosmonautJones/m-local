@@ -722,9 +722,28 @@ def launch(package, config, evidence):
         # script arguments. Run the declared project from its canonical cwd so
         # --no-dev/host/port stay CLI options and no default Vite server starts.
         processes.append(subprocess.Popen([str(package / "runtime/jac"), "run", "--no-dev", "--host", "127.0.0.1", "--port", str(config["backend_port"])], cwd=app, env=environment, start_new_session=True))
+        deadline = time.monotonic() + 300
+        native_ready = False
+        # No gateway or public traffic exists yet. This native metadata probe
+        # performs no graph RPC. Starting the gateway before compilation ends
+        # would turn its first refused connection into an uncertainty latch.
+        while processes[0].poll() is None and time.monotonic() < deadline:
+            try:
+                with urllib.request.urlopen("http://127.0.0.1:" + str(config["backend_port"]) + "/healthz/ready", timeout=5) as response:
+                    body = response.read(64 * 1024 + 1)
+                    value = json.loads(body) if len(body) <= 64 * 1024 else None
+                    native_ready = response.status == 200 and isinstance(value, dict) and value.get("ready") is True
+                if native_ready:
+                    break
+            except (OSError, ValueError):
+                pass
+            time.sleep(1)
+        if not native_ready:
+            raise ReleaseError("Candidate failed private native startup readiness; owned process groups were stopped")
         processes.append(subprocess.Popen(["node", str(app / "scripts/hosted-gateway.mjs")], cwd=app, env=environment, start_new_session=True))
         ready = False
-        deadline = time.monotonic() + 300
+        # Both phases share the original total startup deadline. After gateway
+        # creation, its readiness and every graph RPC use only the same lane.
         while all(process.poll() is None for process in processes) and time.monotonic() < deadline:
             try:
                 with urllib.request.urlopen("http://127.0.0.1:" + str(config["gateway_port"]) + "/healthz", timeout=5) as response:

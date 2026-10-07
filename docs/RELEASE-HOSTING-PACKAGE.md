@@ -16,6 +16,12 @@ The lane holds its slot until the complete upstream response finishes. A
 downstream disconnect does not release it. An uncertain upstream failure or
 deadline permanently closes the lane until coordinated operator recovery.
 
+The launcher waits for private native `/healthz/ready` metadata before creating
+the gateway. This startup-only probe performs no graph RPC and runs before any
+public traffic or gateway exists. Both startup phases share the original
+300-second deadline. Once the gateway exists, its meaningful readiness and all
+graph RPCs traverse only the serialized lane; operators must not bypass it.
+
 This eliminates some concurrent writers; it does **not** establish that stock
 Jac acknowledges only durable commits. Official-runtime commit failure,
 unknown outcome, cache, concurrency and restart receipts must pass before
@@ -300,7 +306,9 @@ on a new private disposable mounted volume, using compatible PostgreSQL tools:
 ```bash
 source scripts/runtime.sh
 export JAC_BIN
-bash scripts/python.sh tests/integration/release_package_http.py \
+export JAC_CACHE_HOME=/absolute/new/private-bootstrap-cache
+bash scripts/python.sh -c \
+  'import runpy,sys;sys.argv[0]="tests/integration/release_package_http.py";runpy.run_path(sys.argv[0],run_name="__main__")' \
   --package /var/tmp/m-local-rc-build/release --tools / \
   --durable-base /absolute/new/disposable-mounted-volume \
   --receipt /absolute/new/private-package-proof.json
@@ -308,7 +316,10 @@ bash scripts/python.sh tests/integration/release_package_http.py \
 
 `--tools /` selects installed `/usr/lib/postgresql/16` tools; an extracted tools
 root is also supported. This fixture creates its own local databases and email
-recipients. Its private synthetic launch assertions never provide real rollout
+recipients. Use explicit `-c`/`runpy`: passing a Python filename directly to
+official `jacpython` invokes project takeover and can start development serving
+instead of executing the fixture. The bootstrap cache must also be isolated.
+Its private synthetic launch assertions never provide real rollout
 approval, hosted topology acceptance or transaction certification. CI retains
 only small source-bound engineering receipts; it excludes keys, recovery sets,
 raw native logs and the large archive. Record the actual terminal receipt before

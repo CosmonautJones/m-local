@@ -34,8 +34,9 @@ jobs:
       - name: Prove packaged startup and authenticated logical recovery
         run: |
           source scripts/runtime.sh
-          export JAC_BIN
-          timeout --signal=TERM --kill-after=30s 1200s bash scripts/python.sh tests/integration/release_package_http.py \
+          export JAC_BIN JAC_CACHE_HOME="$RUNNER_TEMP/package-fixture-bootstrap-cache"
+          timeout --signal=TERM --kill-after=30s 1200s bash scripts/python.sh -c \
+            'import runpy,sys; sys.argv[0]="tests/integration/release_package_http.py"; runpy.run_path(sys.argv[0],run_name="__main__")' \
             --package "$RUNNER_TEMP/release-package/release" --tools / \
             --durable-base "$RUNNER_TEMP/package-mount" --receipt "$RUNNER_TEMP/release-package/live-proof.json"
       - name: Unmount only the owned disposable state mount
