@@ -11,15 +11,27 @@ import time
 import uuid
 
 
-def main():
-    app = Path.cwd().resolve()
+def validate_fixture_store():
+    app = Path.cwd()
+    cache_name = os.environ.get("JAC_CACHE_HOME", "")
+    cache = Path(cache_name) if cache_name else None
+    owned_directories = (app.parent, app, cache)
     if (app.parent.parent != Path("/var/tmp")
             or not app.parent.name.startswith("m-local-release-browser.")
             or app.name != "app"
-            or app.is_symlink()
             or os.environ.get("MLOCAL_RELEASE_BROWSER_FIXTURE") != "1"
-            or os.environ.get("JAC_DB_URL")):
+            or not cache or not cache.is_absolute()
+            or cache.resolve() != app.parent / "cache"
+            or any(path.is_symlink() or not path.is_dir()
+                   or path.stat().st_uid != os.geteuid()
+                   or path.stat().st_mode & 0o777 != 0o700 for path in owned_directories)
+            or any(os.environ.get(name) for name in ("JAC_DB_URL", "JAC_DATA_PATH", "JAC_DEV_SOURCE"))):
         raise RuntimeError("Sample fixture refuses a non-disposable application store")
+    return app
+
+
+def main():
+    app = validate_fixture_store()
     from jaclang.cli.commands.execution import _discover_config_from_file
     from jaclang.compiler.driver.application import prepare_application
     from jaclang.runtime.constants import Constants as Con
