@@ -1,0 +1,364 @@
+{
+  "schema": 1,
+  "source_gate_unchanged": true,
+  "required_jac_percent": 40,
+  "overall_verdict": "BLOCKED",
+  "sources": {
+    "hardening": {
+      "head_sha": "82420879b9e57091b4827c39ed6aa6229cd115c3",
+      "jac_percent": 36.87,
+      "runs": [
+        {
+          "run_id": 37610994731,
+          "workflow": "checks",
+          "event": "push",
+          "head_sha": "82420879b9e57091b4827c39ed6aa6229cd115c3",
+          "url": "https://github.com/CosmonautJones/m-local/actions/runs/37610994731",
+          "status": "completed",
+          "conclusion": "failure",
+          "jobs": [
+            {
+              "name": "source-share",
+              "conclusion": "failure",
+              "proof_steps": []
+            },
+            {
+              "name": "jac",
+              "conclusion": "success",
+              "proof_steps": []
+            }
+          ]
+        },
+        {
+          "run_id": 37610994788,
+          "workflow": "Shared native onboarding proof",
+          "event": "push",
+          "head_sha": "82420879b9e57091b4827c39ed6aa6229cd115c3",
+          "url": "https://github.com/CosmonautJones/m-local/actions/runs/37610994788",
+          "status": "completed",
+          "conclusion": "failure",
+          "jobs": [
+            {
+              "name": "source-share",
+              "conclusion": "failure",
+              "proof_steps": []
+            },
+            {
+              "name": "shared-onboarding",
+              "conclusion": "success",
+              "proof_steps": [
+                {
+                  "name": "Verify shared onboarding over two native APIs",
+                  "conclusion": "success"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "run_id": 37610994745,
+          "workflow": "Release native preservation and topology proof",
+          "event": "push",
+          "head_sha": "82420879b9e57091b4827c39ed6aa6229cd115c3",
+          "url": "https://github.com/CosmonautJones/m-local/actions/runs/37610994745",
+          "status": "completed",
+          "conclusion": "success",
+          "jobs": [
+            {
+              "name": "native-hardening",
+              "conclusion": "success",
+              "proof_steps": [
+                {
+                  "name": "Prove startup and account preservation over native and ingress HTTP",
+                  "conclusion": "success"
+                }
+              ]
+            },
+            {
+              "name": "serialized-stock-runtime",
+              "conclusion": "success",
+              "proof_steps": [
+                {
+                  "name": "Prove official runtime native faults",
+                  "conclusion": "skipped"
+                },
+                {
+                  "name": "Prove integrated application races and commit faults",
+                  "conclusion": "skipped"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "run_id": 37610994785,
+          "workflow": "Release native browser proof",
+          "event": "push",
+          "head_sha": "82420879b9e57091b4827c39ed6aa6229cd115c3",
+          "url": "https://github.com/CosmonautJones/m-local/actions/runs/37610994785",
+          "status": "completed",
+          "conclusion": "success",
+          "jobs": [
+            {
+              "name": "native-browser",
+              "conclusion": "success",
+              "proof_steps": [
+                {
+                  "name": "Verify changed student flows through native HTTP and restricted ingress",
+                  "conclusion": "skipped"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "experience": {
+      "head_sha": "936e205a33aada4b2ad5aa6e430d58033c3d4688",
+      "jac_percent": 36.43,
+      "runs": [
+        {
+          "run_id": 37611006751,
+          "workflow": "checks",
+          "event": "push",
+          "head_sha": "936e205a33aada4b2ad5aa6e430d58033c3d4688",
+          "url": "https://github.com/CosmonautJones/m-local/actions/runs/37611006751",
+          "status": "completed",
+          "conclusion": "failure",
+          "jobs": [
+            {
+              "name": "jac",
+              "conclusion": "success",
+              "proof_steps": []
+            },
+            {
+              "name": "source-share",
+              "conclusion": "failure",
+              "proof_steps": []
+            }
+          ]
+        },
+        {
+          "run_id": 37611006721,
+          "workflow": "Shared native onboarding proof",
+          "event": "push",
+          "head_sha": "936e205a33aada4b2ad5aa6e430d58033c3d4688",
+          "url": "https://github.com/CosmonautJones/m-local/actions/runs/37611006721",
+          "status": "completed",
+          "conclusion": "failure",
+          "jobs": [
+            {
+              "name": "source-share",
+              "conclusion": "failure",
+              "proof_steps": []
+            },
+            {
+              "name": "shared-onboarding",
+              "conclusion": "success",
+              "proof_steps": [
+                {
+                  "name": "Verify shared onboarding over two native APIs",
+                  "conclusion": "success"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "run_id": 37611006752,
+          "workflow": "Release native preservation and topology proof",
+          "event": "push",
+          "head_sha": "936e205a33aada4b2ad5aa6e430d58033c3d4688",
+          "url": "https://github.com/CosmonautJones/m-local/actions/runs/37611006752",
+          "status": "completed",
+          "conclusion": "success",
+          "jobs": [
+            {
+              "name": "serialized-stock-runtime",
+              "conclusion": "success",
+              "proof_steps": [
+                {
+                  "name": "Prove official runtime native faults",
+                  "conclusion": "skipped"
+                },
+                {
+                  "name": "Prove integrated application races and commit faults",
+                  "conclusion": "skipped"
+                }
+              ]
+            },
+            {
+              "name": "native-hardening",
+              "conclusion": "success",
+              "proof_steps": [
+                {
+                  "name": "Prove startup and account preservation over native and ingress HTTP",
+                  "conclusion": "skipped"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "run_id": 37611006749,
+          "workflow": "Release native browser proof",
+          "event": "push",
+          "head_sha": "936e205a33aada4b2ad5aa6e430d58033c3d4688",
+          "url": "https://github.com/CosmonautJones/m-local/actions/runs/37611006749",
+          "status": "completed",
+          "conclusion": "success",
+          "jobs": [
+            {
+              "name": "native-browser",
+              "conclusion": "success",
+              "proof_steps": [
+                {
+                  "name": "Verify changed student flows through native HTTP and restricted ingress",
+                  "conclusion": "success"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "combined": {
+      "head_sha": "2be568a4e1a7fc3bef1a601d78b415ef8d88c99d",
+      "jac_percent": 31.26,
+      "runs": [
+        {
+          "run_id": 37611016712,
+          "workflow": "checks",
+          "event": "push",
+          "head_sha": "2be568a4e1a7fc3bef1a601d78b415ef8d88c99d",
+          "url": "https://github.com/CosmonautJones/m-local/actions/runs/37611016712",
+          "status": "completed",
+          "conclusion": "failure",
+          "jobs": [
+            {
+              "name": "source-share",
+              "conclusion": "failure",
+              "proof_steps": []
+            },
+            {
+              "name": "jac",
+              "conclusion": "success",
+              "proof_steps": []
+            }
+          ]
+        },
+        {
+          "run_id": 37611016652,
+          "workflow": "Shared native onboarding proof",
+          "event": "push",
+          "head_sha": "2be568a4e1a7fc3bef1a601d78b415ef8d88c99d",
+          "url": "https://github.com/CosmonautJones/m-local/actions/runs/37611016652",
+          "status": "completed",
+          "conclusion": "failure",
+          "jobs": [
+            {
+              "name": "shared-onboarding",
+              "conclusion": "success",
+              "proof_steps": [
+                {
+                  "name": "Verify shared onboarding over two native APIs",
+                  "conclusion": "success"
+                }
+              ]
+            },
+            {
+              "name": "source-share",
+              "conclusion": "failure",
+              "proof_steps": []
+            }
+          ]
+        },
+        {
+          "run_id": 37611016746,
+          "workflow": "Release native preservation and topology proof",
+          "event": "push",
+          "head_sha": "2be568a4e1a7fc3bef1a601d78b415ef8d88c99d",
+          "url": "https://github.com/CosmonautJones/m-local/actions/runs/37611016746",
+          "status": "completed",
+          "conclusion": "success",
+          "jobs": [
+            {
+              "name": "native-hardening",
+              "conclusion": "success",
+              "proof_steps": [
+                {
+                  "name": "Prove startup and account preservation over native and ingress HTTP",
+                  "conclusion": "success"
+                }
+              ]
+            },
+            {
+              "name": "serialized-stock-runtime",
+              "conclusion": "success",
+              "proof_steps": [
+                {
+                  "name": "Prove official runtime native faults",
+                  "conclusion": "success"
+                },
+                {
+                  "name": "Prove integrated application races and commit faults",
+                  "conclusion": "success"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "run_id": 37611016646,
+          "workflow": "Release native browser proof",
+          "event": "push",
+          "head_sha": "2be568a4e1a7fc3bef1a601d78b415ef8d88c99d",
+          "url": "https://github.com/CosmonautJones/m-local/actions/runs/37611016646",
+          "status": "completed",
+          "conclusion": "success",
+          "jobs": [
+            {
+              "name": "native-browser",
+              "conclusion": "success",
+              "proof_steps": [
+                {
+                  "name": "Verify changed student flows through native HTTP and restricted ingress",
+                  "conclusion": "success"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "run_id": 37611016706,
+          "workflow": "Offline release package and authenticated recovery proof",
+          "event": "push",
+          "head_sha": "2be568a4e1a7fc3bef1a601d78b415ef8d88c99d",
+          "url": "https://github.com/CosmonautJones/m-local/actions/runs/37611016706",
+          "status": "completed",
+          "conclusion": "success",
+          "jobs": [
+            {
+              "name": "package",
+              "conclusion": "success",
+              "proof_steps": [
+                {
+                  "name": "Build and verify the exact-source offline package",
+                  "conclusion": "success"
+                },
+                {
+                  "name": "Prove packaged startup and authenticated logical recovery",
+                  "conclusion": "success"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "conditional_skips": {
+    "hardening": "Native account/startup proof executes; integrated-runtime and experience-browser acceptance steps skipped. Combined proofs are separate.",
+    "experience": "Native-hardening and stock-runtime proof steps skipped; job success is not native proof. Actual student browser executes."
+  }
+}

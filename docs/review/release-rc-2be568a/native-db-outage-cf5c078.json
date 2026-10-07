@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "evidence_type": "native_database_outage",
+  "source_ref": "cf5c0780411a19c1dc6b8d2da2446be12f330a35",
+  "source_manifest_sha256": "bf02118558bfb422c1030a00f3a10dd11f624c6696fa224d8238f040ae8f5ff1",
+  "helper_sha256": "e94326e9390e971541daf7e2120e0aff4532fb7a2c1ba5f8c3bc4b8bd6ba39ec",
+  "original_receipt_sha256": "31c85dc07623a46c2ef3ae97f070154762edc113ff2ac68796c3684456bc3f66",
+  "runtime": {
+    "jac": "0.37.23",
+    "postgres_binary_sha256": "6bd248f43ab209b191e8c952ac479ba7c109d39b09c3ee7d595cc1809c8bc27a"
+  },
+  "status": "completed",
+  "results": {
+    "prime_health": {
+      "status": 200,
+      "ready": true,
+      "elapsed_seconds": 0.005
+    },
+    "prime_session": {
+      "status": 200,
+      "ok": true,
+      "strict_guest_shape": true,
+      "elapsed_seconds": 0.011
+    },
+    "prime_feed": {
+      "status": 200,
+      "ok": true,
+      "feed_shape": true,
+      "elapsed_seconds": 3.297
+    },
+    "outage_health": {
+      "status": 200,
+      "ready": true,
+      "elapsed_seconds": 0.003,
+      "private_postgres_remained_stopped": true
+    },
+    "outage_session": {
+      "status": 500,
+      "error_category": "http_error",
+      "elapsed_seconds": 0.01,
+      "private_postgres_remained_stopped": true
+    },
+    "outage_feed": {
+      "status": 500,
+      "error_category": "http_error",
+      "elapsed_seconds": 0.005,
+      "private_postgres_remained_stopped": true
+    }
+  },
+  "explicit_private_catalog_primed": true,
+  "private_postgres_ownership_verified": true,
+  "private_postgres_stopped_before_outage_probes": true,
+  "native_alive_during_outage": true,
+  "cleanup": {
+    "owned_native_stopped": true,
+    "private_postgres_stopped": true
+  },
+  "candidate_source_unchanged": true,
+  "limitations": [
+    "Disposable explicit loopback PostgreSQL on official Jac0.37.23; not hosted acceptance.",
+    "No production stores or shared PostgreSQL used.",
+    "Current_session is a metadata readiness RPC; complete public-feed startup/smoke remains a separate required gate."
+  ]
+}

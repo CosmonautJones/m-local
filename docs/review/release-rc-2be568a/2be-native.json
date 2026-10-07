@@ -1,0 +1,238 @@
+{
+  "candidate_sha": "2be568a4e1a7fc3bef1a601d78b415ef8d88c99d",
+  "ci": {
+    "conclusion": "success",
+    "head_sha": "2be568a4e1a7fc3bef1a601d78b415ef8d88c99d",
+    "jobs": [
+      {
+        "conclusion": "success",
+        "name": "native-hardening"
+      },
+      {
+        "conclusion": "success",
+        "name": "serialized-stock-runtime"
+      }
+    ],
+    "proof_steps": [
+      {
+        "conclusion": "success",
+        "job": "native-hardening",
+        "name": "Prove startup and account preservation over native and ingress HTTP"
+      },
+      {
+        "conclusion": "success",
+        "job": "serialized-stock-runtime",
+        "name": "Prove official runtime native faults"
+      },
+      {
+        "conclusion": "success",
+        "job": "serialized-stock-runtime",
+        "name": "Prove integrated application races and commit faults"
+      }
+    ],
+    "run_id": 37611016746,
+    "status": "completed",
+    "url": "https://github.com/CosmonautJones/m-local/actions/runs/37611016746",
+    "workflow": "Release native preservation and topology proof"
+  },
+  "cleanup": {
+    "owned_api_gateway_groups_stopped": true,
+    "private_postgres_stopped": true
+  },
+  "copied_source_unchanged": true,
+  "engineering_source_inputs_match_committed_blobs": true,
+  "external_email": false,
+  "fault_case_count": 21,
+  "fault_cases": [
+    {
+      "expected_sqlstate": "57P01",
+      "http_status": 500,
+      "mode": "rollback",
+      "operation": "save_offer",
+      "response_ok": false
+    },
+    {
+      "expected_sqlstate": "40001",
+      "http_status": 200,
+      "mode": "rollback",
+      "operation": "save_offer",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "08006",
+      "http_status": 200,
+      "mode": "rollback",
+      "operation": "save_offer",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "08006",
+      "http_status": 200,
+      "mode": "transport_loss_before_commit",
+      "operation": "save_offer",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "08006",
+      "http_status": 200,
+      "mode": "accepted_ack_loss",
+      "operation": "save_offer",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "",
+      "http_status": 502,
+      "mode": "process_death_before_commit",
+      "operation": "save_offer",
+      "response_ok": false
+    },
+    {
+      "expected_sqlstate": "",
+      "http_status": 502,
+      "mode": "process_death_after_commit",
+      "operation": "save_offer",
+      "response_ok": false
+    },
+    {
+      "expected_sqlstate": "57P01",
+      "http_status": 500,
+      "mode": "rollback",
+      "operation": "claim_offer",
+      "response_ok": false
+    },
+    {
+      "expected_sqlstate": "40001",
+      "http_status": 200,
+      "mode": "rollback",
+      "operation": "claim_offer",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "08006",
+      "http_status": 200,
+      "mode": "rollback",
+      "operation": "claim_offer",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "08006",
+      "http_status": 200,
+      "mode": "transport_loss_before_commit",
+      "operation": "claim_offer",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "08006",
+      "http_status": 200,
+      "mode": "accepted_ack_loss",
+      "operation": "claim_offer",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "",
+      "http_status": 502,
+      "mode": "process_death_before_commit",
+      "operation": "claim_offer",
+      "response_ok": false
+    },
+    {
+      "expected_sqlstate": "",
+      "http_status": 502,
+      "mode": "process_death_after_commit",
+      "operation": "claim_offer",
+      "response_ok": false
+    },
+    {
+      "expected_sqlstate": "57P01",
+      "http_status": 500,
+      "mode": "rollback",
+      "operation": "redeem_claim",
+      "response_ok": false
+    },
+    {
+      "expected_sqlstate": "40001",
+      "http_status": 200,
+      "mode": "rollback",
+      "operation": "redeem_claim",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "08006",
+      "http_status": 200,
+      "mode": "rollback",
+      "operation": "redeem_claim",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "08006",
+      "http_status": 200,
+      "mode": "transport_loss_before_commit",
+      "operation": "redeem_claim",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "08006",
+      "http_status": 200,
+      "mode": "accepted_ack_loss",
+      "operation": "redeem_claim",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "",
+      "http_status": 502,
+      "mode": "process_death_before_commit",
+      "operation": "redeem_claim",
+      "response_ok": false
+    },
+    {
+      "expected_sqlstate": "",
+      "http_status": 502,
+      "mode": "process_death_after_commit",
+      "operation": "redeem_claim",
+      "response_ok": false
+    }
+  ],
+  "hardening_cleanup_assertion_passed": true,
+  "hardening_elapsed_seconds": 370.877,
+  "hosted_acceptance": false,
+  "installed_runtime_edited": false,
+  "integrated_runtime_check_count": 266,
+  "local_sink_delivery_count": 4,
+  "local_tls_smtp": true,
+  "multi_writer_or_capacity_acceptance": false,
+  "native_check_count": 80,
+  "native_fixture_sha256": "241a489d8e148590d39ab1f85983c3a3b06fee30fbc5c21f7f15e52f48c97439",
+  "native_input_verification": {
+    "engineering_inputs_verified": 263,
+    "research_file_contents_examined": false,
+    "research_inputs_omitted": 14
+  },
+  "native_receipt_sha256": "765a196f803399e218314231aa20ea6bb628d39a27be7fdd608ba13a10fb8376",
+  "native_register_reproduction": true,
+  "native_source_manifest_sha256": "d362d6675f90b9c0870c30cc9d8a422e3a1de809afea4e4f30241dd5e4e4a9be",
+  "official_runtime": {
+    "jac": "2c3c697616b08516caf01704571e7e7020f4b294cd2bef7f04e8ef1ceec9d6ad",
+    "jacpython": "198225fb91707f48461f3fec1684d444ab0fd7b5a1e0913f0a0a8f11c9d02542"
+  },
+  "private_session_methods_modified": false,
+  "production_config_process_checks": true,
+  "production_entry_startup_catalog_admission": "enabled; separate browser and packaged-startup evidence required",
+  "provider_durability_acceptance": false,
+  "public_ingress_native_post_denied": true,
+  "repository_source_unchanged": true,
+  "rollout_approval": false,
+  "runtime_fixture_scope": "deliberate concurrent cold-catalog stress with automatic startup catalog admission disabled only in this fixture",
+  "runtime_fixture_sha256": "d2ac2c7d57a72be7db8f944564b6c1a93608a393549210bc2ebf502591d05f47",
+  "runtime_input_verification": {
+    "engineering_inputs_verified": 263,
+    "research_file_contents_examined": false,
+    "research_inputs_omitted": 14
+  },
+  "runtime_receipt_sha256": "fd05d5112215d5759935d7bf30c21fa3993dc4278bd7723447ce3a70dd925556",
+  "runtime_source_manifest_sha256": "d362d6675f90b9c0870c30cc9d8a422e3a1de809afea4e4f30241dd5e4e4a9be",
+  "schema": 1,
+  "scope": "disposable account preservation and exclusive serialized stock-runtime safety",
+  "test_only_instrumentation": true,
+  "topology": "one exclusive backend and one serialized gateway; no parallel operator or CLI writes",
+  "verdict": "BOUNDED_SERIALIZED_APP_RACES_PASS_NOT_HOSTING_CERTIFIED"
+}

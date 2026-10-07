@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "candidate_sha": "2be568a4e1a7fc3bef1a601d78b415ef8d88c99d",
+  "scope": "Read-only local package integrity incident review; not a deployment or local recovery certificate",
+  "manifest_file_count": 430,
+  "complete_manifest_traversal_reviewed": true,
+  "unreadable_files_in_completed_digest_traversal": 0,
+  "changed_payload_count": 4,
+  "changed_relative_paths": [
+    "artifact/m-local.jab",
+    "dependencies/libraries.tar",
+    "runtime/jac",
+    "runtime/jacpython"
+  ],
+  "extra_file_count": 0,
+  "small_source_files_match_sealed_manifest": true,
+  "retained_original_inputs_match_all_four_expected_digests": true,
+  "windows_dependency_archive_digest_independently_matches": true,
+  "damaged_package_preserved": true,
+  "local_recovery_certificate": false,
+  "cloud_recovery_is_separate_exact_artifact": true,
+  "original_integrity_receipt_sha256": "a74b027d4d7c38bf7746a184de71c0dc2cf25d79fc42c7ecd97a410ddd897968",
+  "retained_inputs_receipt_sha256": "aa539cb9c759328dd4267e0a92918169e46d1d4f86dff67134d2971ea6860da6",
+  "diagnostic_helper_sha256": "47d62d7348b3a55052f0f4625fdf96ffa7eb835c867b3a2917f9057cbb6889bf",
+  "limitations": [
+    "EIO occurred before fixture server setup; no successful local authenticated recovery receipt exists",
+    "Four copied large payloads differ from their sealed manifest; underlying filesystem cause is unproven",
+    "Fresh private package reconstruction must receive its own complete integrity/archive verification; original damaged material must stay quarantined",
+    "Cloud66 proof binds its distinct cloud artifact and dependency digests; it does not certify these local copies"
+  ],
+  "damaged_copied_runtime_not_executed_in_failed_drill": true
+}

@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "candidate_sha": "2be568a4e1a7fc3bef1a601d78b415ef8d88c99d",
+  "foundation_sha": "c581d142a08f733e0ebc0324ff6987a9d12c8f8b",
+  "expected_distinct": 134,
+  "passed_distinct": 134,
+  "execution_count": 493,
+  "unsuccessful_outcomes": 0,
+  "unmapped_labels": 0,
+  "ambiguous_labels": 0,
+  "original_receipt_sha256": "bc41f64b0c5544ad6fb89186e694a0396cd4c789cdb5999f9ece2bca9ab0d553",
+  "binding_sha256": "5567ac629b5b9da6127d93aa9bea0e10c8244025ea5890c32c481542d2023a5d",
+  "core_log_sha256": "7ab9cf146e861225e0894342339e3c3993fdacf922c449be471276ca51ebc50a",
+  "foundation_core_definitions": 124,
+  "candidate_core_definitions": 134,
+  "intentional_policy_replacement": {
+    "old": {
+      "path": "services/business_profile.test.jac",
+      "name": "anonymous direct calls are rejected before catalog access"
+    },
+    "new_name": "anonymous business lookup exposes the sanitized public projection only",
+    "reason": "Guest browsing uses sanitized public fields with private claim/QR/owner denial assertions."
+  },
+  "retained_changed_cases": [
+    {
+      "path": "services/business_profile.test.jac",
+      "name": "demo mode gates sample businesses and offers for both lookup paths",
+      "old_body_sha256": "ac315d9f817d9c0e20ffc26d7ef18fd5ce668bc933a3707d9ea7d74fdd4ebd63",
+      "new_body_sha256": "5b8be762ccf2fba083ad1a2d5d194f52e4a60501b87041f3fc7ca630c81859bb",
+      "old_lexical_assertions": 10,
+      "new_lexical_assertions": 11
+    },
+    {
+      "path": "services/foryou.test.jac",
+      "name": "hosted dataset replaces starter fixture discovery without deleting starter records",
+      "old_body_sha256": "41a265478d56cbe893085a7e957271e4b192972e092c5d9506f6b499e008e0cf",
+      "new_body_sha256": "8eed0364a8e3274fc1f9dca1998e46d7acd1be0b78416dcd068de10d3891d347",
+      "old_lexical_assertions": 3,
+      "new_lexical_assertions": 3
+    },
+    {
+      "path": "services/foryou.test.jac",
+      "name": "home retains only the owner's live claim across price diet and time filters",
+      "old_body_sha256": "8ed030bed05b2086738470f8c2d01ecc97c15151a8db03474b741e4aeb919d29",
+      "new_body_sha256": "ace84d3d6ca227ff83efa519cc09b470c09c8e2bf08dbd9626020373abf2c83a",
+      "old_lexical_assertions": 8,
+      "new_lexical_assertions": 8
+    }
+  ],
+  "historical_discovery": {
+    "baseline_executions": 410,
+    "baseline_names": 110,
+    "experience_executions": 380,
+    "experience_names": 111,
+    "all_baseline_names_present": true,
+    "fewer_repeated_executions": 32,
+    "new_executions": 2,
+    "net_execution_change": -30
+  },
+  "scope": "Named definitions, outcomes, complete-body hashes and lexical assertions; not branch coverage."
+}

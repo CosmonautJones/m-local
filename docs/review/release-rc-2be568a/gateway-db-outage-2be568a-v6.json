@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "evidence_type": "gateway_database_outage",
+  "source_ref": "cf5c0780411a19c1dc6b8d2da2446be12f330a35",
+  "source_manifest_sha256": "bf02118558bfb422c1030a00f3a10dd11f624c6696fa224d8238f040ae8f5ff1",
+  "gateway_ref": "2be568a4e1a7fc3bef1a601d78b415ef8d88c99d",
+  "gateway_manifest_sha256": "4d1c213d937b3013c9162f02450e85f1192f9f066b0972861e8a514a74f2e709",
+  "gateway_files": {
+    "scripts/hosted-gateway.mjs": "4285a245dfbbf59447352b98fee62b084ae06c389074695d1215884f3083469c",
+    "scripts/phone-share-proxy.mjs": "c8a9792bed71b7b51c2ede95b32bba8f34acb238a5607a1810b86c1f81ce4337",
+    "scripts/serialized-ingress.mjs": "565d5a811f1974e9e2cc74faf2ea6681ccfb0cfca404251f567a6179e2b5ec5c",
+    "scripts/onboarding-ingress.mjs": "65bcba90a252f1aea2c97967754ec2cc2dbe8960c6dd08e32abfc49d762b9992",
+    "client/feed-validation.mjs": "ee59bc3b2c0eb207a03f2a5cf40100741bfb4d345cbdf401cc139e605711fc0b"
+  },
+  "helper_sha256": "f16484d4d6e3903ad24a0e769f777f663041385931264ebec7bd763563c78c57",
+  "original_receipt_sha256": "660e4c1abb329498145380d7a9d38be02056b9a8bcab4b8d00d9f363df21f8b4",
+  "runtime": {
+    "jac": "0.37.23",
+    "node": "v20.19.5",
+    "postgres_binary_sha256": "6bd248f43ab209b191e8c952ac479ba7c109d39b09c3ee7d595cc1809c8bc27a"
+  },
+  "status": "passed",
+  "results": {
+    "native_startup_metadata": {
+      "status": 200,
+      "ready": true,
+      "elapsed_seconds": 0.01,
+      "startup_elapsed_seconds": 3.04,
+      "attempts": 13
+    },
+    "public_prime_health": {
+      "status": 200,
+      "ready": true,
+      "elapsed_seconds": 0.05,
+      "startup_elapsed_seconds": 3.833,
+      "attempts": 16
+    },
+    "public_prime_session": {
+      "status": 200,
+      "ok": true,
+      "strict_guest_shape": true,
+      "elapsed_seconds": 0.009
+    },
+    "public_prime_feed": {
+      "status": 200,
+      "ok": true,
+      "feed_shape": true,
+      "elapsed_seconds": 3.421
+    },
+    "public_outage_health": {
+      "status": 503,
+      "error_category": "http_error",
+      "strict_unready_shape": true,
+      "elapsed_seconds": 0.058,
+      "private_postgres_remained_stopped": true
+    },
+    "public_outage_session": {
+      "status": 500,
+      "error_category": "http_error",
+      "elapsed_seconds": 0.005,
+      "private_postgres_remained_stopped": true
+    },
+    "public_outage_feed": {
+      "status": 500,
+      "error_category": "http_error",
+      "elapsed_seconds": 0.004,
+      "private_postgres_remained_stopped": true
+    }
+  },
+  "public_catalog_and_guest_accepted": true,
+  "private_postgres_ownership_verified": true,
+  "private_postgres_stopped_before_outage_probes": true,
+  "native_and_gateway_alive_during_outage": true,
+  "gateway_event_categories": {
+    "READINESS_FAILED": 15,
+    "UPSTREAM_5XX": 2
+  },
+  "cleanup": {
+    "owned_processes_stopped": true,
+    "private_postgres_stopped": true
+  },
+  "candidate_source_unchanged": true,
+  "gateway_source_unchanged": true,
+  "limitations": [
+    "Gateway2be was tested with frozen cf5 app in a disposable explicit-loopback database fixture.",
+    "All calls while gateway was alive went through its serialized public lane.",
+    "Original3/5/30 request bounds and300 startup bound unchanged.",
+    "Final component and combined exact-head functional/native-browser CI remain separate gates.",
+    "No hosted acceptance or production-store changes occurred.",
+    "Ran a development fixture with demo/sample visibility enabled; does not certify guarded production configuration or admission.",
+    "Used the official retained PostgreSQL18.6 test binary; the production package targets PostgreSQL16 and requires its separate validation."
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "verdict": "BLOCKED",
+  "source_sha": "2be568a4e1a7fc3bef1a601d78b415ef8d88c99d",
+  "source_tree": "7e7552dd712f22ce7704d4d427df7c9f8aec1ef5",
+  "fixture_sha256": "25e9c82794c126ed4c6366c09b1d0618783e9f393282b17051f06f84f43f3048",
+  "manifest_sha256": "27f7900f4b5523c08eb81559267d64e513a803230cd2e3f09cd9d5d7c64f18a5",
+  "official_runtime": {
+    "jac": "2c3c697616b08516caf01704571e7e7020f4b294cd2bef7f04e8ef1ceec9d6ad",
+    "jacpython": "198225fb91707f48461f3fec1684d444ab0fd7b5a1e0913f0a0a8f11c9d02542"
+  },
+  "disposable_fixture_only": true,
+  "live_deployment": false,
+  "external_email": false,
+  "hosted_acceptance": false,
+  "failure_phase": "initialization",
+  "failure_type": "OSError",
+  "cleanup": {
+    "owned_groups_stopped": true,
+    "private_postgres_stopped": true,
+    "local_mail_sink_closed": true
+  },
+  "schema": 1,
+  "passed_check_count": 0,
+  "original_receipt_sha256": "0a90688cf66de8fbc4b743e31d4742b83fb5bc5d1a26118b273bf98c7cba15b8",
+  "failure_category": "WSL filesystem EIO during source installation before database/mail/server startup",
+  "local_authenticated_recovery_passed": false,
+  "cloud_receipt_substituted": false,
+  "private_mount_cleanup": "Outer mount-holder encountered EIO in mountpoint during cleanup; no global mount/storage repair attempted."
+}

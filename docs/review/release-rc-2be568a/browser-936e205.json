@@ -1,0 +1,159 @@
+{
+  "schema": 1,
+  "original_receipt_sha256": "7dc1281fcdbfce6940343ed6eb65e9de7e978a142110683e84644244bf58e24c",
+  "source_ref": "936e205a33aada4b2ad5aa6e430d58033c3d4688",
+  "gateway_ref": "936e205a33aada4b2ad5aa6e430d58033c3d4688",
+  "source_sha256": "7a81710d4f442744ee23d644802d6b35fafd12316aa87145ed224ddbf2c76b3c",
+  "runtime": {
+    "jac": "0.37.23",
+    "version_pin_sha256": "d6bd6fe9e6b248fb2bc5fec05960b57f3a6c65033a169bb99f75773955d96b4a",
+    "project_config_sha256": "fefd59af700d0f6d54f4ee1e6723ac0b9c848551d58285894f6e495ec7edbb76",
+    "wrapper_sha256": "a761908c91d43964f18725db50db20e0d6db285de1d0ca16e4b81cf3746f9029"
+  },
+  "ci": {
+    "event": "push",
+    "run_id": 37611006749,
+    "url": "https://github.com/CosmonautJones/m-local/actions/runs/37611006749",
+    "artifact_id": 11477982945,
+    "job_id": 112757977925,
+    "job_status": "success",
+    "artifact_zip_sha256": "e459f38d09b7d8e3e48dcc2a0f169671b5843a97b862127c3ffbad32b429e3b0",
+    "executed_steps": [
+      {
+        "name": "Install official pinned runtime",
+        "status": "success"
+      },
+      {
+        "name": "Verify fixture isolation and diagnostic receipt privacy",
+        "status": "success"
+      },
+      {
+        "name": "Verify changed student flows through native HTTP and restricted ingress",
+        "status": "success"
+      },
+      {
+        "name": "Run actions/upload-artifact@v4",
+        "status": "success"
+      }
+    ],
+    "skipped_applicable_steps": []
+  },
+  "status": "passed",
+  "passed_checks": 62,
+  "seconds": 294.02,
+  "scenarios": {
+    "native_bootstrap_before_fixture": "passed",
+    "bound_candidate_source_unchanged": "passed",
+    "mixed_sample_records_visible": "passed",
+    "guest_browse_and_sanitized_profile": "passed",
+    "public_offer_intent_verify_reload": "passed",
+    "responsive_keyboard": "passed",
+    "axe_wcag_a_aa": "passed",
+    "qr_unobstructed": "passed",
+    "scanner_lazy_chunk": "passed",
+    "native_qr_preview_confirm_and_visible_refresh": "passed",
+    "availability_rechecked": "passed",
+    "metadata_csp": "passed",
+    "sample_feed_detail_profile_claims": "passed",
+    "sample_favorites_policy_and_restoration": "passed"
+  },
+  "redemption_transition_ms": 1988.63,
+  "qr_diagnostics": {
+    "collected": true,
+    "layout": {
+      "x": 72,
+      "y": 546,
+      "width": 240,
+      "height": 240,
+      "viewport_width": 390,
+      "viewport_height": 844,
+      "occluded_sample_points": 0,
+      "within_viewport": true
+    },
+    "page_error_count": 0,
+    "csp_error_count": 0,
+    "image_decoded": true,
+    "native_payload_shape": true,
+    "matches_expected": true,
+    "image": {
+      "width": 240,
+      "height": 240,
+      "non_gray_pixels": 38,
+      "quiet_edges": {
+        "top": 1.0,
+        "bottom": 1.0,
+        "left": 1.0,
+        "right": 1.0
+      }
+    }
+  },
+  "owned_processes_stopped": true,
+  "private_postgres_stopped": true,
+  "original_source_binding_sha256": "cf69a9407c90c4b737c6c173e76cf31fc8cf0d5f9ad5d11ac84617950dc1c89f",
+  "original_job_log_sha256": "fb5dd3a51d11cefe10e9291eed0e8a7c9908b41144b2ea9cebd8f4408a1ab6e6",
+  "limitations": [
+    "Actual disposable Ubuntu native/browser proof on this exact push source; no hosted, real-inbox or physical-device acceptance.",
+    "Uses an isolated development/local TLS SMTP fixture; production admission and hosting-package recovery are separate proofs.",
+    "The unchanged40% source-share gate remains failed; successful browser proof does not make the overall release ready."
+  ],
+  "startup_readiness": [
+    {
+      "label": "native-setup",
+      "seconds": 91.456,
+      "attempts": 366,
+      "ready": true,
+      "unready_503_count": 0,
+      "client_timeout_count": 0
+    },
+    {
+      "label": "native",
+      "seconds": 3.262,
+      "attempts": 14,
+      "ready": true,
+      "unready_503_count": 0,
+      "client_timeout_count": 0
+    },
+    {
+      "label": "gateway",
+      "seconds": 0.308,
+      "attempts": 2,
+      "ready": true,
+      "unready_503_count": 0,
+      "client_timeout_count": 0
+    },
+    {
+      "label": "native-samples-disabled",
+      "seconds": 3.261,
+      "attempts": 14,
+      "ready": true,
+      "unready_503_count": 0,
+      "client_timeout_count": 0
+    },
+    {
+      "label": "gateway-samples-disabled",
+      "seconds": 3.332,
+      "attempts": 14,
+      "ready": true,
+      "unready_503_count": 12,
+      "client_timeout_count": 0
+    },
+    {
+      "label": "native-samples-restored",
+      "seconds": 3.261,
+      "attempts": 14,
+      "ready": true,
+      "unready_503_count": 0,
+      "client_timeout_count": 0
+    },
+    {
+      "label": "gateway-samples-restored",
+      "seconds": 4.084,
+      "attempts": 17,
+      "ready": true,
+      "unready_503_count": 15,
+      "client_timeout_count": 0
+    }
+  ],
+  "browser_helper_sha256": "2e281d9fd15cae3bcd91153c3c603fd97a7b927e86383248ae793d1d95ef8877",
+  "mixed_sample_helper_sha256": "b5afc519e05d601c34f1187982cc8194bf2877b8996a666a9828a7badb3e9818"
+}

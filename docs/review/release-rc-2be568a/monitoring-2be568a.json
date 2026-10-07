@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "candidate_sha": "2be568a4e1a7fc3bef1a601d78b415ef8d88c99d",
+  "checks": 23,
+  "status": "passed",
+  "original_receipt_sha256": "7fa1327199a3cccc7728629e52106722cc9cdf7e97f08ea6560585ecde857e01",
+  "source_input_manifest_sha256": "d362d6675f90b9c0870c30cc9d8a422e3a1de809afea4e4f30241dd5e4e4a9be",
+  "jac_sha256": "2c3c697616b08516caf01704571e7e7020f4b294cd2bef7f04e8ef1ceec9d6ad",
+  "jacpython_sha256": "198225fb91707f48461f3fec1684d444ab0fd7b5a1e0913f0a0a8f11c9d02542",
+  "official_runtime_verified": true,
+  "local_tls_smtp": true,
+  "elapsed_seconds": 94.148,
+  "cleanup": true,
+  "external_delivery": false,
+  "hosted_monitoring_acceptance": false,
+  "categories": [
+    "email_admission",
+    "smtp_failure",
+    "quota_headroom",
+    "quota_denial",
+    "claim_denial",
+    "redeem_denial",
+    "schema_redaction"
+  ]
+}

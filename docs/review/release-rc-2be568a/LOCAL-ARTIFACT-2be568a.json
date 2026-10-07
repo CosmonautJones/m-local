@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "candidate_sha": "2be568a4e1a7fc3bef1a601d78b415ef8d88c99d",
+  "source_tree": "7e7552dd712f22ce7704d4d427df7c9f8aec1ef5",
+  "archive_name": "m-local-release-2be568a4e1a7fc3bef1a601d78b415ef8d88c99d.tar.gz",
+  "archive_bytes": 363842601,
+  "archive_sha256": "802784f2b264897ce99892b91e78468a29f42af9f7945016f7c040e26fe89513",
+  "package_manifest_sha256": "27f7900f4b5523c08eb81559267d64e513a803230cd2e3f09cd9d5d7c64f18a5",
+  "compiled_jab_sha256": "991ed8572c62071a4c9ec37f71b3a044fa2deb0a6fec87f97c3eada76ebb8141",
+  "dependency_archive_sha256": "e85278d939782cb9a3e7231993a0088bcb51a6418a4f571d171839f0e026dcbe",
+  "official_runtime": {
+    "jac": "2c3c697616b08516caf01704571e7e7020f4b294cd2bef7f04e8ef1ceec9d6ad",
+    "jacpython": "198225fb91707f48461f3fec1684d444ab0fd7b5a1e0913f0a0a8f11c9d02542"
+  },
+  "source_check_passed": true,
+  "production_build_passed": true,
+  "node_tests_passed": 66,
+  "sealed_package_verification_passed": true,
+  "local_authenticated_recovery_passed": false,
+  "local_recovery_failure": "WSL returned EIO before fixture server startup; later file read succeeded and disposable bind mount was absent.",
+  "cloud_authenticated_recovery_scope": "Exact same candidate source, separately bound cloud artifact;66PASS in37611016706.",
+  "archive_published": false,
+  "live_deployment": false,
+  "external_email": false,
+  "hosted_acceptance": false,
+  "rollout_approval": false,
+  "publication_gate": "Full tracked-source archive includes existing research material and remains private pending issue41 policy."
+}

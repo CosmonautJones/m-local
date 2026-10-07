@@ -1,0 +1,147 @@
+{
+  "schema": 1,
+  "source_ref": "936e205a33aada4b2ad5aa6e430d58033c3d4688",
+  "runtime": "jac 0.37.23  (Linux x86_64)",
+  "runtime_sha256": "2c3c697616b08516caf01704571e7e7020f4b294cd2bef7f04e8ef1ceec9d6ad",
+  "ci": {
+    "event": "push",
+    "run_id": 37611006751,
+    "job_id": 112757978033,
+    "artifact_id": 11478950344,
+    "artifact_zip_sha256": "08722df44a26623fa2468225a80ac83ea6d6a28ecf6b46e8c87d5e360d0aa435",
+    "workflow_status": "failure",
+    "functional_status": "success",
+    "source_share_status": "failure",
+    "source_share_percent": 36.43,
+    "required_percent": 40,
+    "skipped_applicable_steps": [],
+    "executed_steps": [
+      {
+        "name": "Install pinned Jac",
+        "status": "success"
+      },
+      {
+        "name": "Install project dependencies",
+        "status": "success"
+      },
+      {
+        "name": "Check Jac sources",
+        "status": "success"
+      },
+      {
+        "name": "Run core tests",
+        "status": "success"
+      },
+      {
+        "name": "Verify named core test inventory",
+        "status": "success"
+      },
+      {
+        "name": "Run access context tests",
+        "status": "success"
+      },
+      {
+        "name": "Run business insights tests",
+        "status": "success"
+      },
+      {
+        "name": "Run onboarding security tests",
+        "status": "success"
+      },
+      {
+        "name": "Verify shared onboarding across processes",
+        "status": "success"
+      },
+      {
+        "name": "Test photo normalization and ownership",
+        "status": "success"
+      },
+      {
+        "name": "Verify business approval over HTTP and after restart",
+        "status": "success"
+      },
+      {
+        "name": "Verify coordinated recovery and recovered restart",
+        "status": "success"
+      },
+      {
+        "name": "Test deployment source and data separation",
+        "status": "success"
+      },
+      {
+        "name": "Build compiled app and client dependencies",
+        "status": "success"
+      },
+      {
+        "name": "Run gateway and UI unit tests",
+        "status": "success"
+      },
+      {
+        "name": "Test deployment safety with disposable Git repositories",
+        "status": "success"
+      },
+      {
+        "name": "Install compiled UI test runtime",
+        "status": "success"
+      },
+      {
+        "name": "Check compiled onboarding and phone flows",
+        "status": "success"
+      },
+      {
+        "name": "Preserve exact-source test inventory and compiled artifact",
+        "status": "success"
+      }
+    ]
+  },
+  "original_receipts": {
+    "core_binding_sha256": "0fb43bda52dcb783ad4bf6242077776603e7dd80ca76fc27f5d6343549f6035d",
+    "test_inventory_sha256": "811df7c037a4af19d52b48d6efdb44f6d4c3ecb2e58f61fe6fd4ea9d70fa2159",
+    "functional_job_log_sha256": "e375d1b82623110c555637ac65f3158b04ad82df021bfe1cefa88f2aceeed10c",
+    "source_share_job_log_sha256": "849543e1a90803978d72b1562729d9d74a73aebc6547b814aec7cb918d6ca305",
+    "terminal_run_metadata_sha256": "ac3bb935839d89f0f65261c4b9db6771c5fdba509309c0a07aa0d7523cf66664",
+    "terminal_jobs_sha256": "7266095bdbc367990b9ce47d23bb16db5658964b03935ca527feba97dc21c284"
+  },
+  "core": {
+    "executions": 478,
+    "declared": 132,
+    "expected_distinct": 131,
+    "passed_distinct": 131,
+    "missing": 0,
+    "unsuccessful": 0,
+    "ambiguous": 0,
+    "unmapped": 0,
+    "binding_errors": 0,
+    "source_unchanged": true,
+    "core_log_sha256": "44061416fdfc6126128d0325e5a37c43d66c2c44961defd6ad13b30f5b5b9f80",
+    "binding_sha256": "0fb43bda52dcb783ad4bf6242077776603e7dd80ca76fc27f5d6343549f6035d",
+    "inventory_sha256": "811df7c037a4af19d52b48d6efdb44f6d4c3ecb2e58f61fe6fd4ea9d70fa2159"
+  },
+  "other_checks": {
+    "source_checks": 1,
+    "context_executions": 13,
+    "insights_python_tests": 12,
+    "insights_node_tests": 11,
+    "insights_jac_executions": 65,
+    "onboarding_tests": 75,
+    "shared_onboarding_python_tests": 7,
+    "photo_tests": 7,
+    "business_approval_native_checks": 45,
+    "deployment_source_tests": 25,
+    "coordinated_recovery_checks": 71,
+    "gateway_ui_node_tests": 66,
+    "deployment_safety_status": "success",
+    "compiled_browser_tests": 162
+  },
+  "artifact": {
+    "name": "m-local.jab",
+    "bytes": 13031536,
+    "sha256": "4a6b2e63c35e8425e629d61c070014a2013823ebca77673c9b93a6f2067b7184"
+  },
+  "limitations": [
+    "Functional job success is separate from the failed unchanged40% source-share gate; overall checks workflow is failure.",
+    "Native shared-onboarding unit tests here do not substitute for the separate multi-process native proof workflow.",
+    "The compiled .jab byte count is total app artifact size, not initial browser bundle size or a hosted Lighthouse measurement.",
+    "Disposable CI evidence does not complete hosted, real-inbox, physical-device or human pilot acceptance."
+  ]
+}

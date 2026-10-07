@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "evidence_type": "gateway_database_outage_attempt",
+  "source_ref": "cf5c0780411a19c1dc6b8d2da2446be12f330a35",
+  "source_manifest_sha256": "bf02118558bfb422c1030a00f3a10dd11f624c6696fa224d8238f040ae8f5ff1",
+  "gateway_ref": "57bd0827b3c021361862aa72a8cdf2b75dc01fee",
+  "gateway_manifest_sha256": "b3b2586b16596a33e0eb24fced6359d8bf93e7e71681db9e47a47cb668a62989",
+  "gateway_files": {
+    "scripts/hosted-gateway.mjs": "4285a245dfbbf59447352b98fee62b084ae06c389074695d1215884f3083469c",
+    "scripts/phone-share-proxy.mjs": "4f473c1f5216e62cd7bd6f629ca315832e0bc37a815793b6f3f5188bdc2b4e7a",
+    "scripts/serialized-ingress.mjs": "565d5a811f1974e9e2cc74faf2ea6681ccfb0cfca404251f567a6179e2b5ec5c",
+    "scripts/onboarding-ingress.mjs": "65bcba90a252f1aea2c97967754ec2cc2dbe8960c6dd08e32abfc49d762b9992",
+    "client/feed-validation.mjs": "ee59bc3b2c0eb207a03f2a5cf40100741bfb4d345cbdf401cc139e605711fc0b"
+  },
+  "helper_sha256": "682a537597f928705f0522ad4f89aa72e6b01aa381d977a749e753e233fbac69",
+  "original_receipt_sha256": "f5ef52f819ae12e1e56fcf88c4a5a005a5047bc1515fea952178485914f975b4",
+  "runtime": {
+    "jac": "0.37.23",
+    "node": "v20.19.5",
+    "postgres_binary_sha256": "6bd248f43ab209b191e8c952ac479ba7c109d39b09c3ee7d595cc1809c8bc27a"
+  },
+  "status": "failed",
+  "failure_category": "public_readiness_deadline",
+  "outage_not_executed": true,
+  "results": {
+    "native_startup_metadata": {
+      "status": 200,
+      "ready": true,
+      "elapsed_seconds": 0.009,
+      "startup_elapsed_seconds": 2.781,
+      "attempts": 12
+    }
+  },
+  "gateway_event_categories": {
+    "READINESS_FAILED": 1001
+  },
+  "diagnostic": {
+    "original_sha256": "a305da2ae2431897b67bbca8f3a1bc8da2450acfe59ff5c3961c17ee2c1f50c4",
+    "status": 200,
+    "ok": true,
+    "result_key_count": 13,
+    "metadata_field_types": {
+      "_jac_type": "str",
+      "_jac_id": "str",
+      "_jac_archetype": "str",
+      "_jac_type_id": "str"
+    },
+    "required_guest_fields_match": true
+  },
+  "cleanup": {
+    "owned_processes_stopped": true,
+    "private_postgres_stopped": true
+  },
+  "candidate_source_unchanged": true,
+  "gateway_source_unchanged": true,
+  "limitations": [
+    "The public gateway could not reach ready; no PostgreSQL outage was executed.",
+    "Public same-lane diagnostics established exact official metadata schema mismatch.",
+    "All original deadlines and assertions preserved. Final source acceptance remains separate.",
+    "Ran a development fixture with demo/sample visibility enabled; does not certify guarded production configuration or admission.",
+    "Used the official retained PostgreSQL18.6 test binary; the production package targets PostgreSQL16 and requires its separate validation."
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "revision": "HEAD",
+  "language_bytes": {
+    "Batchfile": 632,
+    "Jac": 565332,
+    "JavaScript": 356842,
+    "PowerShell": 32634,
+    "Python": 811759,
+    "Shell": 41084
+  },
+  "total_bytes": 1808283,
+  "jac_percent": 31.26,
+  "required_percent": 40.0,
+  "tested_candidate_sha": "2be568a4e1a7fc3bef1a601d78b415ef8d88c99d",
+  "ci_run": "https://github.com/CosmonautJones/m-local/actions/runs/37611016712",
+  "original_log_sha256": "1ba8eeea4479ece4fde95e85a444dfb02711ff9a40d0167a74bb6caed4159d96"
+}
