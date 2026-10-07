@@ -1,0 +1,68 @@
+{
+  "status": "passed_local_followup",
+  "observed_source_sha256": "71f73c9482f65ae41ca9521650f22bf5d226bc535c39379ef16ddce465341f42",
+  "official_jac_version": "0.37.23",
+  "official_binary_sha256": "2c3c697616b08516caf01704571e7e7020f4b294cd2bef7f04e8ef1ceec9d6ad",
+  "built_artifact_sha256": "34f39f0d13323fa73b8d4c92bb6ca8c9bc165a31150992126749d210f3d2983e",
+  "source_check_receipt_sha256": "3fec6a9c638bd2cd6f0276fb5ef35df36774e63a652942c0ba5e2e31fb450c30",
+  "prior_check_build_media_receipt_sha256": "ed1a040f0da9cb4736543e8d89025329138e9bccf3e2af6241bdcbcc36dc4d68",
+  "native_http_receipt_sha256": "1a8b591eeec1a1e6f893a5a268340004d4f50de402aea0103d06371dc55b31bc",
+  "bind_update_rollback_receipt_sha256": "a23bb7068f84b6cd9a149f5efbdf49fb64a6d6f96626054b670cf70f81d4d45b",
+  "checks": {
+    "core": {
+      "passed": 41,
+      "skipped": 6
+    },
+    "media": 7,
+    "compiled_ui": 130,
+    "gateway_ui": 34,
+    "onboarding": 75,
+    "native_http_and_restart": 45,
+    "tooling_linux": {
+      "passed": 22,
+      "skipped": 3
+    },
+    "source_sync_windows": {
+      "passed": 13,
+      "skipped": 2
+    },
+    "actual_photo_bind_update_and_rollback": 5,
+    "insights": {
+      "python_passed": 12,
+      "javascript_passed": 11,
+      "jac_backend_skipped": 1
+    }
+  },
+  "phase_log_sha256": {
+    "check": "654992ddac1b93969cc685f05d43c9860a66039c3adfaf176a6ac60a88313cd5",
+    "build": "6845f2ecee25985295c1aa7ee3fc77cb7e44726dc09ffe31e501008d2b082ae1",
+    "media": "2966270b91333c24911b66202abfccfab3191df4faa365697cc3b6627dd16256",
+    "core": "7adc46654b471b0829cf466997f6dd3ca6054736a18e0ef9252fd0d74af22879",
+    "compiled-ui": "f3278b13ddcbe47090b53160a5396ff194c8619eeeafc6210ea99921ca2dde1a",
+    "gateway-ui": "355b9063696d8619a3242e7edb6270f32019fadc16ce4404078bc3319ef1db56",
+    "onboarding": "66451f2b1b5d4d0da1af68775901f2a114d6013750adeac45847ee2bc9b9c425",
+    "insights": "1daff00da18125896c9b16af3fe2c71ab673282d4d8d47d81804263dfb8bd3c3",
+    "tooling": "55e43ef5367a29921f192ec7ddacc8d68163e91a592976800281f4c6d9a672ad"
+  },
+  "changed_code_sha256": {
+    "services/promo.jac": "4dee0d0b06503b90791ef521efbfc307320b9f793cb796559d0d7d0630531639",
+    "services/promo.test.jac": "2168728cf3e91570d60f269ce1b4067cc00e351762439f260c028c1c328f5ecf",
+    "tests/integration/business_approval_http.py": "4855b4b0522d896b52166ec16c2f737abfb3f89011ece204f61542230f4b617f",
+    "scripts/sync-phone-source.py": "0bac1001b55e146a777e11e1eafd82add1fd4348c306d5d8634b7e1aa3c30059",
+    "tests/tooling/test_sync_phone_source.py": "7f09ac923a1bfea0aed24ced82bc863c0215143eaa8a6f33733a21f49f02d290"
+  },
+  "regression": "Omitted or null photo values preserve an owned business/offer image; empty values remove it; replacement and same-store restart are verified.",
+  "source_sync": "Updates and rollback preserve assets/photos, ignore source photos, and reject overlapping paths, symlinks and Windows reparse points before mutation. An actual read-only POSIX photo bind was tested.",
+  "independent_review": "Scoped acceptance of source-sync path safety and photo-default compatibility; no overall production A claim.",
+  "retained_failure": "The first core attempt failed two database-dependent tests because embedded PostgreSQL did not become ready. The same source passed with a dedicated owned PostgreSQL instance; no assertion was removed.",
+  "limitations": [
+    "Local verification only; GitHub CI status is separate.",
+    "The Jac core runner skipped six cases; the Jac insights backend runner skipped one. Skips do not count as passing coverage.",
+    "Linux tooling skipped two Windows junction cases and a case-insensitive filesystem case; Windows junction cases were verified separately.",
+    "Coordinated durable backup/restore of photos, real private ownership database and graph data remains open.",
+    "Bind proof used a private-registry sentinel; it does not certify database recovery.",
+    "Physical Safari/HEIC and large phone photos, representative merchant website import and real U-M inbox acceptance remain open.",
+    "Historical visual screenshots use source 54c0f42c; this follow-up changes backend compatibility and source-sync protection, not visual layout.",
+    "Derivative runtime source proof is separate and is not installed or adopted; capacity and sealed-runtime release acceptance remain open."
+  ]
+}

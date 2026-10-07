@@ -4,6 +4,28 @@ import { once } from 'node:events';
 import test from 'node:test';
 import { createShareProxy } from '../../scripts/phone-share-proxy.mjs';
 
+test('oversized declared and chunked RPC bodies never reach the app', async t => {
+  let reached=0;
+  const upstream=http.createServer((req,res)=>{reached++;req.resume();res.end('{}');}).listen(0,'127.0.0.1');
+  await once(upstream,'listening');
+  const proxy=createShareProxy({upstreamHost:'127.0.0.1',upstreamPort:upstream.address().port}).listen(0,'127.0.0.1');
+  await once(proxy,'listening');
+  t.after(()=>{proxy.closeAllConnections();proxy.close();upstream.closeAllConnections();upstream.close();});
+  const url=`http://127.0.0.1:${proxy.address().port}/function/save_business_draft`;
+  assert.equal((await fetch(url,{method:'POST',body:'x'.repeat(65*1024)})).status,413);
+  const chunked=await new Promise((resolve,reject)=>{
+    const request=http.request(url,{method:'POST',headers:{'transfer-encoding':'chunked'}},response=>{
+      response.resume();response.on('end',()=>resolve(response.statusCode));
+    });
+    request.on('error',reject);
+    request.write('x'.repeat(32*1024));request.write('x'.repeat(32*1024));request.end('x');
+  });
+  assert.equal(chunked,413);
+  assert.equal(reached,0,'body rejection happens before forwarding any RPC');
+  const valid=await fetch(url,{method:'POST',body:JSON.stringify({menu_text:'x'.repeat(4000)})});
+  assert.equal(valid.status,200);assert.equal(reached,1);
+});
+
 test('phone link forwards app/auth traffic but never development files or admin APIs', async t => {
   const seen = [];
   const upstream = http.createServer((req, res) => {

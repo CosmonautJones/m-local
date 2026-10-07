@@ -6,24 +6,26 @@ test('business setup keeps optional photo and menu fields out of the required pa
  const ui=await app({role:'business',verified:true,intercept(name){
   if(name==='get_business_draft')return rpc({ok:true,name:'Fixture Cafe',address:'123 Fixture Street'});
   if(name==='save_business_draft')return rpc({ok:false,message:'Fixture save retained.'});
+  if(name==='import_business_photo')return rpc({ok:true,url:'/static/photos/'+ 'a'.repeat(32)+'.jpg'});
  }});
  try{
   await until(()=>ui.document.querySelector('[placeholder="Business name"]')?.value==='Fixture Cafe');
-  const extras=ui.document.querySelector('details');
+  const extras=[...ui.document.querySelectorAll('details')].find(d=>d.querySelector('summary')?.textContent.includes('Menu details'));
   assert.ok(extras,'optional details have an explicit disclosure');
   assert.equal(extras.open,false);
-  assert.equal(extras.querySelector('summary').textContent,'Photo and menu (optional)');
+  assert.equal(extras.querySelector('summary').textContent,'Menu details (optional)');
   assert.equal(extras.querySelectorAll('[required]').length,0);
   assert.equal(ui.document.querySelector('[placeholder="Business name"]').closest('details'),null);
   assert.equal(ui.document.querySelector('[placeholder="Street address"]').closest('details'),null);
   extras.open=true;
   ui.fill('https://your-business.com/photo.jpg','https://example.test/photo.jpg');
+  ui.click('Use website photo');await until(()=>ui.document.querySelector('.ml-photo-preview img'));
   ui.fill('Menu items and prices','Soup $8');
   extras.open=false;
   ui.document.querySelector('input[type="checkbox"]').click();
-  ui.click('Save business profile');await until(()=>ui.text().includes('Fixture save retained.'));
+  ui.click('Submit for review');await until(()=>ui.text().includes('Fixture save retained.'));
   const request=ui.calls.find(call=>call.name==='save_business_draft');
-  assert.equal(request.body.image_url,'https://example.test/photo.jpg');
+  assert.equal(request.body.image_url,'/static/photos/'+'a'.repeat(32)+'.jpg');
   assert.equal(request.body.menu_text,'Soup $8');
   ui.fill('https://your-business.com/photo.jpg','invalid link');
   ui.document.querySelector('[placeholder="https://your-business.com/photo.jpg"]').dispatchEvent(new ui.window.Event('invalid'));
@@ -35,9 +37,9 @@ test('business setup keeps optional photo and menu fields out of the required pa
 test('offer dietary choices use checkboxes and save the existing dietary contract',async()=>{
  const ui=await app({role:'merchant'});
  try{
-  ui.click('Manage');await until(()=>ui.find('New offer'));
+  ui.click('Offers');await until(()=>ui.find('New offer'));
   ui.click('New offer');await until(()=>ui.document.querySelector('[placeholder="Lunch bowl for $7"]'));
-  const extras=ui.document.querySelector('details');
+  const extras=[...ui.document.querySelectorAll('details')].find(d=>d.querySelector('summary')?.textContent==='More details (optional)');
   assert.ok(extras);
   assert.equal(extras.open,false);
   extras.open=true;

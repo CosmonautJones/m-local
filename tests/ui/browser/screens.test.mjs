@@ -32,16 +32,17 @@ test('student heart adds the place to the favorites strip and can remove it',asy
   if(name==='home_feed')return rpc(home([feedItem(offer(),{is_favorite:kept})],{signed_in:true,favorites:kept?[place]:[]}));
  }});
  try{
-  assert.ok(has(ui,'Your favorites'));assert.ok(has(ui,'Tap the heart on a place to keep it here.'));
+  assert.equal(has(ui,'Your favorites'),false);assert.equal(has(ui,'Edit my tastes'),false);
   heart(ui,'Add').dispatchEvent(new ui.window.MouseEvent('click',{bubbles:true}));
   await until(()=>heart(ui,'Remove'),'heart turns on');
+  assert.ok(has(ui,'Your favorites'),'the saved favorites section appears after adding a place');
   assert.deepEqual(ui.calls.find(c=>c.name==='toggle_favorite').body,{slug:'fixture-kitchen',offer_id:''});
   assert.equal(has(ui,'Tap the heart on a place to keep it here.'),false);
   assert.equal(ui.calls.some(c=>c.name==='get_offer'),false,'the heart must not open the offer under it');
   assert.equal(ui.document.querySelector('button button'),null,'no button nested inside a button');
   heart(ui,'Remove').dispatchEvent(new ui.window.MouseEvent('click',{bubbles:true}));
   await until(()=>heart(ui,'Add'),'heart turns off');
-  assert.ok(has(ui,'Tap the heart on a place to keep it here.'));
+  assert.equal(has(ui,'Your favorites'),false);
   assert.equal(ui.calls.filter(c=>c.name==='toggle_favorite').length,2);
   assert.deepEqual(ui.errors,[]);
  }finally{ui.close();}
@@ -50,8 +51,9 @@ test('student heart adds the place to the favorites strip and can remove it',asy
 test('student menu is Offers and Account, and log out hides the deals',async()=>{
  const ui=await app({verified:true});
  try{
-  assert.ok(has(ui,'Offers'));assert.ok(has(ui,'Account'));
-  assert.equal(has(ui,'Manage'),false);assert.equal(has(ui,'Redeem'),false);
+  const tabs=[...ui.document.querySelectorAll('[data-testid="app-tabbar"] button')].map(button=>button.textContent);
+  assert.deepEqual(tabs,['Offers','Account']);
+  for(const label of ['New offer','Scan QR','Insights'])assert.equal(has(ui,label),false);
   assert.ok(has(ui,'Log out'));
   ui.click('Account');await until(()=>ui.text().includes('YOUR ACCOUNT'));
   assert.ok(has(ui,'Log out'));assert.ok(has(ui,'Edit my tastes'));
@@ -62,21 +64,22 @@ test('student menu is Offers and Account, and log out hides the deals',async()=>
  }finally{ui.close();}
 });
 
-test('restaurant lands on Insights with business navigation and can log out',async()=>{
+test('restaurant lands on Offers with business navigation and can log out',async()=>{
  const ui=await app({role:'merchant',verified:true,audience:'business'});
  try{
-  await until(()=>ui.calls.some(c=>c.name==='merchant_insights'),'private insights load on landing');
+  await until(()=>has(ui,'New offer'),'offer creation is available on landing');
+  assert.equal(ui.calls.some(c=>c.name==='merchant_insights'),false,'analytics loads only when opened');
   assert.ok(has(ui,'Insights'));
   assert.equal(ui.calls.some(c=>c.name==='home_feed'),false,'business landing does not fetch the student feed');
-  assert.equal(ui.document.querySelector('[data-testid="app-tabbar"] [role=button]').textContent,'Insights');
-  ui.click('Manage');await until(()=>has(ui,'New offer'));
-  assert.ok(has(ui,'Manage'));assert.ok(has(ui,'Redeem'));assert.ok(has(ui,'Account'));
+  assert.equal(ui.document.querySelector('[data-testid="app-tabbar"] [role=button]').textContent,'Offers');
+  ui.click('Offers');await until(()=>has(ui,'New offer'));
+  assert.ok(has(ui,'Offers'));assert.ok(has(ui,'Scan QR'));assert.ok(has(ui,'Account'));
   assert.equal(has(ui,'Nearby'),false);assert.equal(has(ui,'Your favorites'),false);
-  ui.click('Redeem');await until(()=>ui.text().includes('Scan a claim'));
+  ui.click('Scan QR');await until(()=>ui.text().includes('Scan a claim'));
   assert.ok(has(ui,'Log out'));
   ui.click('Log out');await until(()=>ui.find('Find local deals'));
   assert.equal(ui.window.localStorage.getItem('jac_token'),null);
-  assert.equal(has(ui,'Manage'),false);assert.equal(has(ui,'Current bowl'),false);
+  assert.equal(has(ui,'Offers'),false);assert.equal(has(ui,'Current bowl'),false);
   assert.deepEqual(ui.errors,[]);
  }finally{ui.close();}
 });
@@ -85,7 +88,7 @@ test('business without a restaurant sees only its own account and can log out',a
  const ui=await app({role:'business',verified:true,audience:'business'});
  try{
   assert.ok(ui.text().includes('YOUR BUSINESS'));assert.ok(ui.document.querySelector('[placeholder="Business name"]'));assert.equal(has(ui,'Business profile'),false);assert.ok(has(ui,'Log out'));
-  assert.equal(has(ui,'Current bowl'),false);assert.equal(has(ui,'Nearby'),false);assert.equal(has(ui,'Manage'),false);
+  assert.equal(has(ui,'Current bowl'),false);assert.equal(has(ui,'Nearby'),false);assert.equal(has(ui,'Offers'),false);
   ui.click('Log out');await until(()=>ui.find('Find local deals'));
   assert.equal(has(ui,'Business profile'),false);
   assert.deepEqual(ui.errors,[]);

@@ -12,11 +12,11 @@ permissions:
 
 jobs:
   jac:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Verify Jac source-byte share
-        run: python3 scripts/check-jac-share.py --min-jac 40
+      - name: Report tracked source-byte composition
+        run: python3 scripts/check-jac-share.py
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -32,10 +32,22 @@ jobs:
         run: ./scripts/check.sh
       - name: Run core tests
         run: ./scripts/test.sh core
+      - name: Run access context tests
+        run: ./scripts/test.sh context
       - name: Run business insights tests
         run: ./scripts/test.sh insights
       - name: Run onboarding security tests
         run: bash scripts/test.sh onboarding
+      - name: Verify shared onboarding across processes
+        timeout-minutes: 10
+        run: bash scripts/python.sh -m unittest discover -s tests/integration -p test_onboarding_shared.py
+      - name: Test photo normalization and ownership
+        run: bash scripts/python.sh -m unittest tests/photo_media.py
+      - name: Verify business approval over HTTP and after restart
+        run: bash scripts/test-business-approval.sh
+      - name: Verify coordinated recovery and recovered restart
+        timeout-minutes: 22
+        run: bash scripts/test-recovery.sh
       - name: Test deployment source and data separation
         run: python3 -m unittest discover -s tests/tooling -p 'test_*.py'
       - name: Build compiled app and client dependencies

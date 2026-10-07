@@ -41,10 +41,17 @@ def configured_owners(text: str) -> dict[str, str] {
 
 def merchant_owner(slug: str) -> str {
     configured = configured_owners(os.environ.get("MLOCAL_MERCHANT_OWNERS", "{}"));
-    if slug in configured { return configured[slug]; }
     registered = registered_business_owner(slug);
+    if slug in configured {
+        if slug.startswith("business-") and registered != configured[slug] { return ""; }
+        return configured[slug];
+    }
     # An explicitly provisioned account still owns one restaurant even if it
     # previously activated a self-service listing under another slug.
     if registered in configured.values() { return ""; }
     return registered;
+}
+
+def listing_visible(slug: str, source: str) -> bool {
+    return source != "business_signup" or bool(merchant_owner(slug));
 }

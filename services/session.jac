@@ -15,6 +15,7 @@ obj SessionView {
         display_name: str = "",
         is_demo: bool = False,
         email_verified: bool = False,
+        business_account: bool = False,
         catalog_activity: bool = False;
 }
 
@@ -46,12 +47,12 @@ def:pub current_session() -> SessionView {
     if r is not None {
         return SessionView(authenticated=True, actor_id=actor, role="merchant",
             restaurant_id=jid(r), display_name=account_name(actor, r.name), is_demo=r.is_demo,
-            email_verified=bool(account), catalog_activity=hosted_dataset_enabled());
+            email_verified=bool(account), business_account=account.get("kind") == "business", catalog_activity=hosted_dataset_enabled());
     }
     if account {
         return SessionView(authenticated=True, actor_id=actor,
             role="business" if account.get("kind") == "business" else "student",
-            display_name=str(account.get("name", "")), email_verified=True);
+            display_name=str(account.get("name", "")), email_verified=True, business_account=account.get("kind") == "business");
     }
     if is_demo_student(actor) {
         return SessionView(authenticated=True, actor_id=actor, role="student",

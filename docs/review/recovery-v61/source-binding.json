@@ -1,0 +1,9 @@
+{
+  "copied_source_input_manifest_sha256": "a965bac8f51913cdf18d12ccce756034358d9829819f7d5227b38bac6ec56f84",
+  "executed_probe_sha256": "3261b45d98c4eca746f296a1c0ff904cb4be8c6a6c576b04d7f8b43b604a7231",
+  "git_blob_count": 215,
+  "run_head_revision": "b0f2321016ba004b3a77db6fe05828080c755cd3",
+  "scope": "Exact pushed Git source/test/brand blobs match native recovery input; CI used a pull-request merge revision. No public artifact or fresh-host acceptance.",
+  "status": "passed",
+  "tested_github_merge_revision": "41f7abde549ff9416e1582b8266d0b0d40c21775"
+}

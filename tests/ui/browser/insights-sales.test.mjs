@@ -18,7 +18,7 @@ function insights(days,withSales=true,busy=true) {
    {title:'Late slice',schedule:'',claims:days,redemptions:days,value_cents:days*500,busiest:'Late night',blocks:SALES_KEYS.map(key=>({key,label:names[key],claims:key==='late'?days:0,redemptions:key==='late'?days:0,value_cents:key==='late'?days*500:0}))}]:[]};
  return {ok:true,business_name:`Fixture ${days} days`,is_demo:true,period_days:days,timezone:'America/Detroit',start_date:date(1),end_date:date(days),as_of:end/1000,coverage_start_date:date(1),warnings:[],frames,...(withSales?{sales}:{})};
 }
-const merchant=make=>app({role:'merchant',verified:true,intercept(name,body){if(name==='merchant_insights')return rpc(make(body.days));}});
+const merchant=async make=>{const ui=await app({role:'merchant',verified:true,intercept(name,body){if(name==='merchant_insights')return rpc(make(body.days));}});ui.click('Insights');return ui;};
 const region=ui=>ui.document.querySelector('section[aria-label="Sales through your offers"]');
 const chart=(ui,part)=>region(ui).querySelector(`.bi-sales-chart[data-part="${part}"]`);
 const bars=(ui,part)=>chart(ui,part).querySelectorAll('svg rect.bi-bar-paid').length;

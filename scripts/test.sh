@@ -15,6 +15,10 @@ case "$suite" in
         exit 0 ;;
     *) echo 'Usage: scripts/test.sh core|context|insights|integration|onboarding|all' >&2; exit 2 ;;
 esac
+if [[ -n "${JAC_DB_URL:-}" ]]; then
+    echo 'Graph tests require isolated embedded databases; unset JAC_DB_URL.' >&2
+    exit 2
+fi
 if [[ "$suite" == insights ]]; then
     python3 -m unittest discover -s tests/analytics -p test_analytics.py
     node --test tests/analytics/insights.test.mjs
@@ -30,6 +34,9 @@ echo "Isolated test workspace (retained for diagnosis): $test_root"
 # Seeded catalog tests read fixture rows. Production leaves this unset.
 export MLOCAL_DEMO_MODE=1
 cd -- "$test_root"
+# Isolated workspaces need the declared Python dependencies too.
+"$JAC_BIN" install --no-npm
+export JAC_TEST_STRICT=1
 if [[ "$suite" == context ]]; then
     "$JAC_BIN" test services/context.test.jac
 elif [[ "$suite" == insights ]]; then

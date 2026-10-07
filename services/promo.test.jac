@@ -26,6 +26,19 @@ def _restaurant_by_slug(slug: str) -> Restaurant {
 }
 
 
+test "offer state and remaining stock use the same observation" {
+    now = time.time();
+    o = Offer(title="Stock observation", start_ts=now - 60, end_ts=now + 60, quantity=2, qr_ready=True);
+    observations = iter([2, 0]);
+    with patch.dict(_view.__globals__, {
+        "_remaining": lambda (offer: Offer, at: float) -> int { return next(observations); }
+    }) {
+        v = _view(o, now);
+        assert v.state == "active" and v.remaining == 2;
+    }
+}
+
+
 test "seed is persistent and idempotent" {
     _ensure_seed();
     n = len([root.shared -->[?:Restaurant]]);
@@ -422,6 +435,49 @@ test "offer editing keeps the same listing paused state and original claim" {
 }
 
 
+test "offer publish retries keep one offer and do not overwrite later edits" {
+    _ensure_seed();
+    r = _restaurant_by_slug("arbor-leaf-kitchen");
+    now = 1790434800.0;
+    key = "publish-retry-fixture-001";
+    before = len([r ->:Publishes:->]);
+    first = _save_offer(r, "", "Retry lunch", "Lunch", "5", "7",
+        "2026-09-26 10:00", "2026-09-26 16:00", "2", "Students", "One each", "", "", now, key);
+    assert first.ok, first.message;
+    again = _save_offer(r, "", "Retry lunch", "Lunch", "5", "7",
+        "2026-09-26 10:00", "2026-09-26 16:00", "2", "Students", "One each", "", "", now + 60, key);
+    assert again.ok and again.code == first.code;
+    equivalent = _save_offer(r, "", " Retry lunch ", "Lunch ", "5.00", "7.00",
+        "2026-09-26T10:00", "2026-09-26T16:00", "02", "Students ", " One each", "", "", now, key);
+    assert equivalent.ok and equivalent.code == first.code;
+    assert len([r ->:Publishes:->]) == before + 1;
+    changed = _save_offer(r, "", "Changed retry", "Lunch", "6", "7",
+        "2026-09-26 10:00", "2026-09-26 16:00", "2", "Students", "One each", "", "", now, key);
+    assert not changed.ok and "already published" in changed.message;
+    o = _owned_offer(r, first.code) as Offer;
+    assert o.title == "Retry lunch" and o.price_cents == 500;
+    o.title = "Later edit";
+    expired_retry = _save_offer(r, "", "Retry lunch", "Lunch", "5", "7",
+        "2026-09-26 10:00", "2026-09-26 16:00", "2", "Students", "One each", "", "", now + 86400, key);
+    assert expired_retry.ok and expired_retry.code == first.code and o.title == "Later edit";
+    other = _restaurant_by_slug("maize-noodle-lab");
+    separate = _save_offer(other, "", "Retry lunch", "Lunch", "5", "7",
+        "2026-09-26 10:00", "2026-09-26 16:00", "2", "Students", "One each", "", "", now, key);
+    assert separate.ok and separate.code != first.code;
+}
+
+test "malformed publish keys cannot create an offer" {
+    _ensure_seed();
+    r = _restaurant_by_slug("arbor-leaf-kitchen");
+    before = len([r ->:Publishes:->]);
+    for key in ["short", "x" * 81, "invalid/publish/key/value", " " * 32] {
+        saved = _save_offer(r, "", "Malformed key lunch", "Lunch", "5", "7",
+            "2026-09-26 10:00", "2026-09-26 16:00", "2", "Students", "One each", "", "", 1790434800.0, key);
+        assert not saved.ok;
+    }
+    assert len([r ->:Publishes:->]) == before;
+}
+
 test "invalid offer edits leave listing and menu relationships unchanged" {
     _ensure_seed();
     r = _restaurant_by_slug("arbor-leaf-kitchen");
@@ -479,21 +535,63 @@ test "expired offers must receive a future deadline before they can resume" {
 }
 
 
-test "merchant profile saves normalized fields and is readable after commit" {
+test "configured merchant cannot bypass review by changing identity in legacy profile RPC" {
+    r = Restaurant(slug="configured-profile-review", name="Configured Cafe", source="manual");
+    root.shared ++> r;
+    r +>:HasLocation():+> Location(address="123 Main St");
+    with patch.dict(update_profile.__globals__, {"_merchant": lambda () -> Restaurant { return r; }}) {
+        renamed = update_profile("Renamed Cafe", "Cafe", "Lunch", "123 Main St", "", "", "");
+        assert not renamed.ok and "review" in renamed.message;
+        moved = update_profile("Configured Cafe", "Cafe", "Lunch", "456 Main St", "", "", "");
+        assert not moved.ok and "review" in moved.message;
+    }
+    persisted = _restaurant_by_slug("configured-profile-review");
+    assert persisted.name == "Configured Cafe" and (_location_of(persisted) as Location).address == "123 Main St";
+}
+
+
+test "merchant profile saves normalized routine fields and is readable after commit" {
     r = Restaurant(slug="profile-test", name="Profile Test (Demo)", is_demo=True);
     root.shared ++> r;
+    r +>:HasLocation():+> Location(address="123 Main St");
     with patch.dict(update_profile.__globals__, {"_merchant": lambda () -> Restaurant { return r; }}) {
-        result = update_profile("  Updated Profile (Demo)  ", "  Cafe  ", "  Lunch and coffee  ",
+        result = update_profile("  Profile Test (Demo)  ", "  Cafe  ", "  Lunch and coffee  ",
             "  123 Main St  ", "  Downtown  ", "  Use Main St door  ", "  2026-09-26  ");
         assert result.ok, result.message;
-        assert result.name == "Updated Profile" and result.address == "123 Main St";
+        assert result.name == "Profile Test" and result.address == "123 Main St";
         assert result.cuisine == "Cafe" and result.blurb == "Lunch and coffee";
     }
     persisted = _restaurant_by_slug("profile-test");
     loc = _location_of(persisted) as Location;
-    assert persisted.name == "Updated Profile (Demo)" and loc.address == "123 Main St";
+    assert persisted.name == "Profile Test (Demo)" and loc.address == "123 Main St";
     assert loc.neighborhood == "Downtown" and loc.entrance_note == "Use Main St door";
     assert loc.note_date == "2026-09-26";
+}
+
+obj _UnavailableDetailsStore {
+    def update_business_details(actor: str, cuisine: str, description: str, image_url: str | None = None) -> None {
+        raise RuntimeError("Private profile store unavailable");
+    }
+}
+
+def _unavailable_details_store() -> any { return _UnavailableDetailsStore(); }
+
+test "private routine draft failure prevents public profile mutation" {
+    r = Restaurant(slug="private-profile-failure", name="Failure Cafe", cuisine="Cafe", blurb="Original description");
+    root.shared ++> r;
+    r +>:HasLocation():+> Location(address="123 Main St");
+    commit();
+    failed = False;
+    with patch.dict(update_profile.__globals__, {"_merchant": lambda () -> Restaurant { return r; }, "store": _unavailable_details_store}) {
+        try { update_profile("Failure Cafe", "Bakery", "Edited description", "123 Main St", "", "", ""); }
+        except RuntimeError {
+            failed = True;
+            Jac.get_context().mem.abort();
+        }
+    }
+    assert failed;
+    persisted = _restaurant_by_slug("private-profile-failure");
+    assert persisted.cuisine == "Cafe" and persisted.blurb == "Original description";
 }
 
 
@@ -550,7 +648,7 @@ def _raise_lock_test_error() {
 
 
 test "lock refresh failure closes the file descriptor" {
-    fd = os.open(LOCK_PATH, os.O_CREAT | os.O_RDWR, 384);
+    fd = os.open(mutation_lock_path(), os.O_CREAT | os.O_RDWR, 384);
     closed = False;
     try {
         with patch("os.open", return_value=fd) {

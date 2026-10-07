@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from services.email_codes import CodeStore
+from services.email_codes import CodeStore, business_revision
 from qr_http import Api, require
 
 
@@ -154,8 +154,15 @@ def main():
               for index in range(2)]
     activated = parallel([lambda client=client, draft=draft: client.call('save_business_draft', **draft)
                           for client, draft in zip(clients[2:], drafts)])
+    require(all(result['ok'] and result['status'] == 'pending_review' for result in activated),
+            'two simultaneous submissions remain private until approval')
+    state = CodeStore(ROOT / '.jac/onboarding')
+    for user in users[2:]:
+        state.approve_business(user['actor_id'], 'HTTP fixture reviewer', 'Verified fictional business authority', business_revision(state.draft(user['actor_id'])))
+    activated = parallel([lambda client=client, draft=draft: client.call('save_business_draft', **draft)
+                          for client, draft in zip(clients[2:], drafts)])
     require(all(result['ok'] and result['status'] == 'active' for result in activated),
-            'two businesses activate concurrently without approval')
+            'two approved businesses activate concurrently')
     for client, user, draft in zip(clients[2:], users[2:], drafts):
         user.update(restaurant_id=client.call('current_session')['restaurant_id'],
                     business_name=draft['name'], menu_text=draft['menu_text'])
@@ -185,7 +192,7 @@ def main():
                 'student tastes are private to each session')
 
     now = datetime.now(ZoneInfo('America/Detroit'))
-    posts = [dict(offer_id='', title=f'Multi-user lunch {index + 1} {run}', description='Fictional concurrent acceptance offer',
+    posts = [dict(offer_id='', create_key=secrets.token_hex(16), title=f'Multi-user lunch {index + 1} {run}', description='Fictional concurrent acceptance offer',
                   price='4.00', regular_price='6.00',
                   start_local=(now - timedelta(minutes=2)).strftime('%Y-%m-%d %H:%M'),
                   end_local=(now + timedelta(hours=2)).strftime('%Y-%m-%d %H:%M'),

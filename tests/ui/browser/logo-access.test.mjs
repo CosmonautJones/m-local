@@ -3,35 +3,36 @@ import assert from 'node:assert/strict';
 import {app,offer,until} from './harness.mjs';
 
 const logo = 'https://example.com/logo.png';
+const food = 'https://example.com/bowl.jpg';
 
 function following(node, other) {
   return Boolean(node.compareDocumentPosition(other) & node.ownerDocument.defaultView.Node.DOCUMENT_POSITION_FOLLOWING);
 }
 
-test('deal and detail show the https logo above the name, and an empty url draws nothing', async () => {
-  const shown = await app({item: offer({image_url: logo})});
+test('deal and detail use the offer photo separately from business identity, and no photo draws nothing', async () => {
+  const shown = await app({item: offer({image_url: logo,offer_image_url: food})});
   try {
-    const deal = shown.document.querySelector('img[alt="Fixture Kitchen"]');
-    assert.equal(deal?.getAttribute('src'), logo);
-    assert.equal(deal.style.height, '96px');
+    const deal = shown.document.querySelector('img[alt="Current bowl"]');
+    assert.equal(deal?.getAttribute('src'), food);
+    assert.equal(deal.style.height, '184px');
     assert.equal(deal.style.width, '100%');
     assert.equal(deal.style.objectFit, 'cover');
     assert.equal(deal.getAttribute('referrerpolicy') || deal.referrerPolicy, 'no-referrer');
     assert.ok(following(deal, shown.find('Fixture Kitchen')));
     shown.click('Current bowl');
     await until(() => shown.text().includes('Claim this offer'));
-    const detail = shown.document.querySelector('img[alt="Fixture Kitchen"]');
-    assert.equal(detail.style.height, '160px');
+    const detail = shown.document.querySelector('img[alt="Current bowl"]');
+    assert.equal(detail.style.height, '220px');
     assert.ok(following(detail, shown.find('Current bowl')));
     assert.deepEqual(shown.errors, []);
   } finally { shown.close(); }
 
   const blank = await app({item: offer({image_url: ''})});
   try {
-    assert.equal(blank.document.querySelector('img[alt="Fixture Kitchen"]'), null);
+    assert.equal(blank.document.querySelector('img[alt="Current bowl"]'), null);
     blank.click('Current bowl');
     await until(() => blank.text().includes('Claim this offer'));
-    assert.equal(blank.document.querySelector('img[alt="Fixture Kitchen"]'), null);
+    assert.equal(blank.document.querySelector('img[alt="Current bowl"]'), null);
     assert.deepEqual(blank.errors, []);
   } finally { blank.close(); }
 });
@@ -39,7 +40,7 @@ test('deal and detail show the https logo above the name, and an empty url draws
 test('merchant profile shows the logo beside the restaurant name', async () => {
   const ui = await app({role: 'merchant', item: offer({image_url: logo})});
   try {
-    ui.click('Manage');
+    ui.click('Offers');
     await until(() => ui.text().includes('Restaurant profile'));
     const mark = ui.document.querySelector('img[alt="Fixture Kitchen"]');
     assert.equal(mark?.getAttribute('src'), logo);

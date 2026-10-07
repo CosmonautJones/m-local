@@ -49,7 +49,7 @@ def main():
                 f"{days}-day period includes zero baseline and local daily frames")
     now = datetime.now(ZoneInfo("America/Detroit"))
     run = secrets.token_hex(5)
-    offer = dict(offer_id="", title="Insights acceptance " + run,
+    offer = dict(offer_id="", create_key=secrets.token_hex(16), title="Insights acceptance " + run,
                  description="Fictional local acceptance offer", price="3.00", regular_price="5.00",
                  start_local=(now-timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M"),
                  end_local=(now+timedelta(hours=1)).strftime("%Y-%m-%d %H:%M"), quantity="2",

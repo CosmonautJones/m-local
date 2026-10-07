@@ -1,0 +1,32 @@
+{
+  "observed_source_sha256": "54c0f42cfa62a0eb06d9d4198543782cc85079925e64234e8a00cc37bc8b5826",
+  "check_build": "passed",
+  "media_tests": 7,
+  "core_tests": {
+    "passed": 41,
+    "skipped": 6
+  },
+  "compiled_ui_tests": 130,
+  "ingress_tests": 7,
+  "native_http_restart_checks": 25,
+  "external_photo_import_checks": 3,
+  "browser_checks": [
+    "Business website choices display three image thumbnails and a selected-photo preview, with no URL/filename dropdown.",
+    "Choosing a thumbnail imports an owned canonical photo; replacing it through the file chooser clears the earlier thumbnail selection.",
+    "Business phone-style file upload saves, reopens and appears on the public business page.",
+    "Offer phone-style file upload saves independently and appears in student discovery.",
+    "Public business page displays its own photo plus individual offer photos.",
+    "Unclaimed offer detail displays the offer photo and readable price/terms.",
+    "Single theme control; no horizontal overflow in measured 320/390 layouts.",
+    "Business Account and offer editing support native pointer and keyboard activation.",
+    "Former and revised feeds were compared with the same fictional backend/account/offers/favorite."
+  ],
+  "limitations": [
+    "Physical iPhone/Safari upload and HEIC decoding remain unverified.",
+    "Production photo volume and private registry need coordinated backups and restore proof.",
+    "Orphan lifecycle cleanup is deferred until reference inventory/grace-period rules exist.",
+    "The unrelated derivative runtime sealing blocker remains open.",
+    "Website-choice grid uses canonical fictional samples. Real external photo retrieval passed; representative merchant website extraction remains a pilot check."
+  ],
+  "historical_verification": true
+}

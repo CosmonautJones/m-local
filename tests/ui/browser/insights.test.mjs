@@ -19,6 +19,7 @@ test('local activity stays separate from own merchant insights and hides fixture
   if(name==='local_activity')return rpc({...fixture(body.days,'Local Cafe'),warnings:[]});
  }});
  try {
+  ui.click('Insights');
   await until(()=>ui.document.body.textContent.includes('Own Kitchen'));
   ui.click('Explore local activity');
   await until(()=>ui.document.body.textContent.includes('Local Cafe'));
@@ -41,6 +42,7 @@ test('native Insights range, playback, freeze, stale-response isolation and reca
   return rpc(fixture(body.days));
  }}});
  try{
+  ui.click('Insights');
   await until(()=>ui.find('Fixture 30 days'),'initial recording');
   assert.equal(metric(ui,'Redemptions'),'30');assert.equal(ui.document.querySelector('.bi-progress').textContent,'Day 30 / 30');
   ui.click('7 days');await until(()=>ui.find('Fixture 7 days'),'7 day recording');
@@ -75,6 +77,7 @@ test('native Insights preserves malformed-response errors, retry, and previous d
   return rpc(fixture(body.days));
  }}});
  try{
+  ui.click('Insights');
   await until(()=>ui.text().includes('The metrics response is for a different period.'));
   assert.equal(ui.document.querySelector('.bi-metrics'),null);
   ui.click('Refresh');await until(()=>ui.find('Fixture 30 days'));assert.equal(metric(ui,'Redemptions'),'30');

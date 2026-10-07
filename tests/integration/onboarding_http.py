@@ -11,7 +11,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from services.email_codes import CodeStore
+from services.email_codes import CodeStore, business_revision
 
 
 def post(name, body, token=''):
@@ -52,6 +52,11 @@ def main():
     assert post('claim_offer', {'offer_id': active['id']}, users[0])['ok']
     draft = dict(name='Isolated Fixture Cafe', cuisine='Test', description='Fictional test only', address='123 Fixture St',
                  website='https://example.com', menu_text='Soup $8', menu_url='', image_url='', confirmed=True)
+    saved = post('save_business_draft', draft, users[1])
+    assert saved['ok'] and saved['status'] == 'pending_review'
+    assert not post('merchant_portal', {}, users[1])['ok']
+    actor = post('current_session', {}, users[1])['actor_id']
+    state.approve_business(actor, 'HTTP fixture reviewer', 'Verified fictional business authority', business_revision(state.draft(actor)))
     saved = post('save_business_draft', draft, users[1])
     assert saved['ok'] and saved['status'] == 'active'
     assert post('get_business_draft', {}, users[1])['name'] == draft['name']

@@ -18,8 +18,11 @@ import from datetime { datetime }
 import from zoneinfo { ZoneInfo }
 import from services.models { Restaurant, Location, MenuItem, Offer, Redemption, HasLocation, Serves, Publishes, ClaimedAs }
 import from services.qr_catalog { _ensure_seed }
+import from services.qr_auth { listing_visible }
 import from services.session { _actor_id }
-import from services.promo { OfferView, _view, _state, _find_offer, _restaurant_of, _lock, _unlock }
+import from services.promo { OfferView, _view, _state, _my_claim, _claim_status, _find_offer, _restaurant_of, _location_of, _lock, _unlock }
+import from services.context_models { AccessContextView }
+import from services.context { get_access_context }
 import from services.importer { import_restaurant }
 import from services.taste_sandbox { Company, make_companies }
 import from services.taste {
@@ -236,7 +239,7 @@ def _history(actor: str, now: float) -> list[Signal] {
     }
     for r in [root.shared -->[?:Restaurant]] {
         for o in [r ->:Publishes:->] {
-            for c in [o ->:ClaimedAs:->] {
+            for c in [o ->:ClaimedAs:->[?:Redemption, actor_id == actor]] {
                 if c.actor_id != actor or c.status not in ["claimed", "redeemed"] {
                     continue;
                 }
@@ -320,14 +323,29 @@ def _home(actor: str, price_range: str, window: str, diets: str, now: float) -> 
     eod = _end_of_today(now);
     candidates: list[Candidate] = [];
     views: dict[str, OfferView] = {};
-    places: dict[str, Restaurant] = {};
+    labels: dict[str, list[str]] = {};
     total = 0;
     for r in [root.shared -->[?:Restaurant]] {
+        visible = listing_visible(r.slug, r.source);
+        place_context: tuple[Restaurant, Location | None, AccessContextView] | None = None;
+        restaurant_labels: list[str] | None = None;
+        restaurant_categories: list[str] | None = None;
         for o in [r ->:Publishes:->] {
             if o.is_demo and not demo_mode(os.environ.get(DEMO_MODE_ENV, "")) { continue; }
-            v = _view(o, now, actor);
             starter_fixture = os.environ.get("MLOCAL_HOSTED_DATASET", "") == "1" and r.source == "demo-seed";
-            discoverable = o.status != "paused" and now < o.end_ts and not starter_fixture;
+            discoverable = visible and o.status != "paused" and now < o.end_ts and not starter_fixture;
+            saved: Redemption | None = None;
+            if not discoverable {
+                saved = _my_claim(o, actor, now);
+                if saved is None or _claim_status(saved, now) != "claimed" { continue; }
+            }
+            if place_context is None {
+                loc = _location_of(r);
+                context = get_access_context(jid(loc), now) if loc else AccessContextView();
+                place_context = (r, loc, context);
+            }
+            v = _view(o, now, actor, saved_claim=saved, place_context=place_context);
+            if not visible and v.my_status != "claimed" { continue; }
             if discoverable { total += 1; }
             # A live saved QR must remain reachable after offer edits or filter
             # changes. Only its owner bypasses discovery rules, until expiry.
@@ -350,12 +368,18 @@ def _home(actor: str, price_range: str, window: str, diets: str, now: float) -> 
             }
             oid = jid(o);
             views[oid] = v;
-            places[oid] = r;
+            if restaurant_labels is None { restaurant_labels = _place_labels(r); }
+            labels[oid] = restaurant_labels;
+            categories = categories_for(o.title, o.menu_item);
+            if not categories {
+                if restaurant_categories is None { restaurant_categories = _categories(r); }
+                categories = restaurant_categories;
+            }
             candidates.append(Candidate(
                 offer_id=oid,
                 place=r.slug,
                 title=o.title,
-                categories=_categories(r, o),
+                categories=categories,
                 dietary=o.dietary,
                 price_cents=o.price_cents,
                 regular_cents=o.regular_price_cents,
@@ -373,7 +397,7 @@ def _home(actor: str, price_range: str, window: str, diets: str, now: float) -> 
         items.append(FeedItem(
             offer=views[oid],
             place=r.candidate.place,
-            place_labels=_place_labels(places[oid]),
+            place_labels=labels[oid],
             categories=r.candidate.categories,
             price_cents=r.candidate.price_cents,
             regular_cents=r.candidate.regular_cents,

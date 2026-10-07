@@ -1,5 +1,6 @@
 """Public business details; claims stay in the existing offer detail flow."""
 import from "react" { useEffect }
+import from "./offer-image.jsx" { OfferImage }
 import from .ui { ui, formSecondary, formHint }
 import type from ..services.business_profile { BusinessProfileView }
 import type from ..services.promo { OfferView }
@@ -22,6 +23,7 @@ def BusinessOffer(item: OfferView, onOffer: Callable[[str], None], canOpenOffers
     controls: dict[str, any] = {"type": "button", "onClick": lambda { onOffer(item.id); }} if canOpenOffers else {};
     status = str(item.remaining) + " left · " + item.time_label if item.state == "active" else "Upcoming · " + item.time_label if item.state == "scheduled" else "Sold out" if item.state == "sold out" else item.state;
     return <@tag className="ml-business-offer" {**controls}>
+        {if item.offer_image_url { <OfferImage url={item.offer_image_url} width="100%" height={160} alt={item.title}/> }}
         <span className="ml-business-offer-line"><span className="ml-business-offer-title">{item.title}</span><span className="ml-business-price">{businessCash(item.price)}</span></span>
         {if item.description { <span style={{"fontSize": 14, "lineHeight": 1.5, "color": ui.text}}>{item.description}</span> }}
         <span style={formHint}>{status}</span>
@@ -36,6 +38,7 @@ def:pub BusinessProfile(
 ) -> JsxElement {
     has profile: BusinessProfileView | None = None,
         phase: str = "loading",
+        imageFailed: bool = False,
         attempt: int = 0,
         heading: Ref[HTMLElement] = Ref();
 
@@ -45,6 +48,7 @@ def:pub BusinessProfile(
         current = True;
         profile = None;
         phase = "loading";
+        imageFailed = False;
         async def load {
             try {
                 result = await getProfile(slug, offerId);
@@ -75,6 +79,7 @@ def:pub BusinessProfile(
             .ml-business-back{align-self:flex-start;border:0;background:none;color:var(--ml-accent);padding:8px 0;font:inherit;font-weight:750;cursor:pointer;text-align:left}
             .ml-business-hero{background:var(--ml-ticket);color:var(--ml-ticket-text);padding:28px;border-radius:22px;display:flex;flex-direction:column;align-items:flex-start;gap:18px}
             .ml-business-monogram{display:grid;place-items:center;min-width:60px;height:60px;padding:0 10px;border-radius:16px;background:var(--ml-maize);color:var(--ml-on-maize);font-size:25px;font-weight:850;box-sizing:border-box}
+            .ml-business-photo{width:100%;height:auto;aspect-ratio:3/2;object-fit:contain;border-radius:14px;background:var(--ml-sunken)}
             .ml-business-kicker{font-size:11px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase}
             .ml-business-description{font-size:17px;line-height:1.65;max-width:60ch;overflow-wrap:anywhere;white-space:pre-wrap}
             .ml-business-grid{display:grid;gap:26px}.ml-business-section{display:flex;flex-direction:column;gap:14px;min-width:0}
@@ -102,8 +107,9 @@ def:pub BusinessProfile(
         }}
         {if phase == "ready" and profile {
             <header className="ml-business-hero">
-                <div className="ml-business-monogram" aria-hidden="true">{initials}</div>
-                <div style={{"display": "flex", "flexDirection": "column", "gap": 10}}><p className="ml-business-kicker">Meet the business</p><h1 tabIndex={-1} ref={heading}>{profile.name}</h1></div>
+                {if profile.image_url and not imageFailed { <img className="ml-business-photo" decoding="async" src={profile.image_url} alt={profile.name + " business photo"} referrerPolicy="no-referrer" onError={lambda { imageFailed = True; }} /> }
+                else { <div className="ml-business-monogram" aria-hidden="true">{initials}</div> }}
+                <div style={{"display": "flex", "flexDirection": "column", "gap": 10}}><p className="ml-business-kicker">Local business</p><h1 tabIndex={-1} ref={heading}>{profile.name}</h1></div>
                 {if profile.cuisine or profile.neighborhood { <p style={{"fontSize": 15, "lineHeight": 1.5}}>{" · ".join([label for label in [profile.cuisine, profile.neighborhood] if label])}</p> }}
             </header>
             if profile.blurb { <p className="ml-business-description">{profile.blurb}</p> }

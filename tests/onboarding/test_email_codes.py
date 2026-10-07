@@ -1,8 +1,11 @@
 import concurrent.futures
 import json
+import secrets
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from services.email_codes import CodeStore, account_email
 
@@ -111,6 +114,36 @@ class EmailCodeTests(unittest.TestCase):
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
             outcomes = list(pool.map(attempt, range(8)))
         self.assertEqual(outcomes.count('fixture@umich.edu'), 1)
+
+    def test_concurrent_cold_start_never_observes_a_partial_sign_in_key(self):
+        started, release = threading.Event(), threading.Event()
+        generation_lock = threading.Lock()
+        first_generation = True
+        original = secrets.token_bytes
+        def generate(size):
+            nonlocal first_generation
+            with generation_lock:
+                wait = first_generation
+                first_generation = False
+            if wait:
+                started.set()
+                if not release.wait(10):
+                    raise TimeoutError('Key generation fixture was not released')
+            return original(size)
+        with tempfile.TemporaryDirectory() as directory, patch('services.email_codes.secrets.token_bytes', generate):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                first = pool.submit(CodeStore, Path(directory))
+                self.assertTrue(started.wait(10))
+                second = pool.submit(CodeStore, Path(directory))
+                try:
+                    ready = second.result(timeout=10)
+                finally:
+                    release.set()
+                resumed = first.result(timeout=10)
+                self.assertEqual(len(ready.key), 32)
+                self.assertEqual(ready.key, resumed.key)
+                self.assertEqual((Path(directory) / 'code.key').read_bytes(), ready.key)
+                self.assertEqual(list(Path(directory).glob('.code-key-*')), [])
 
 
 if __name__ == '__main__':

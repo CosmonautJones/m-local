@@ -9,7 +9,7 @@ import {validateHomeFeed} from '../client/feed-validation.mjs';
 const functions = new Set(['list_offers', 'get_offer', 'claim_offer', 'merchant_portal',
   'update_profile', 'save_offer', 'set_offer_status', 'resolve_claim', 'redeem_claim',
   'cancel_claim', 'offer_defaults', 'current_session', 'request_email_code', 'verify_email_code',
-  'get_business_draft', 'import_business_website', 'save_business_draft', 'get_business_profile',
+  'get_business_draft', 'import_business_website', 'upload_business_photo', 'import_business_photo', 'save_business_draft', 'get_business_profile',
   'get_account_profile', 'save_account_profile', 'merchant_insights', 'local_activity', 'list_places', 'nearby_places',
   'home_feed', 'taste_choices', 'save_taste', 'toggle_favorite', 'nearby_after']);
 
@@ -21,7 +21,8 @@ export function createShareProxy({ upstreamHost = 'localhost', upstreamPort = 82
     const read = ['GET', 'HEAD'].includes(req.method);
     const allowed = read && (path === '/' || path === '/index.html' || path === '/favicon.ico' || path === '/static/client.js'
       || /^\/assets\/[\w-]+\.(js|css|png|svg|ico|webp|woff2?)$/.test(path)
-      || /^\/static\/assets\/brand\/[\w-]+\.(png|ttf)$/.test(path))
+      || /^\/static\/assets\/brand\/[\w-]+\.(png|ttf)$/.test(path)
+      || /^\/static\/photos\/[a-f0-9]{32}\.jpg$/.test(path))
       || req.method === 'POST' && functions.has(path.replace(/^\/function\//, '')) && path.startsWith('/function/');
     res.setHeader('x-content-type-options', 'nosniff');
     res.setHeader('referrer-policy', 'no-referrer');
@@ -88,6 +89,7 @@ export function createShareProxy({ upstreamHost = 'localhost', upstreamPort = 82
       : (trustCloudflare&&typeof cloudflareIp==='string'&&isIP(cloudflareIp)?cloudflareIp:req.socket.remoteAddress);
     const retry=limit(client,path);
     if(retry){res.writeHead(429,{'content-type':'application/json','retry-after':String(retry)});res.end(JSON.stringify({ok:false,error:{code:'RATE_LIMITED',message:'Too many sign-in attempts. Please wait before retrying.'}}));return;}
+    const forward = body => {
     const upstream = http.request({ hostname: upstreamHost, port: upstreamPort,
       path: req.url, method: req.method,
       headers: { ...req.headers, host: `${upstreamHost}:${upstreamPort}` },
@@ -103,7 +105,36 @@ export function createShareProxy({ upstreamHost = 'localhost', upstreamPort = 82
     });
     req.on('aborted', () => upstream.destroy());
     res.on('close', () => { if (!res.writableEnded) upstream.destroy(); });
-    req.pipe(upstream);
+    if(body)upstream.end(body);else req.pipe(upstream);
+    };
+    if(req.method!=='POST'){forward();return;}
+    // Resized photo payloads get a separate bound; profile forms stay at 64 KiB.
+    // Buffer bounded RPC bodies
+    // so a chunked oversized request cannot partly execute at the upstream.
+    const maxBody=path==='/function/upload_business_photo'?1400000:64*1024;
+    let bytes=0, rejected=false;
+    const chunks=[];
+    const rejectBody=status=>{
+      clearTimeout(deadline);
+      rejected=true;chunks.length=0;
+      if(!res.headersSent){res.writeHead(status,{'content-type':'text/plain'});res.end(status===413?'Request is too large.':'Request took too long.');}
+      req.resume();
+    };
+    const deadline=setTimeout(()=>rejectBody(408),15000);
+    if(Number(req.headers['content-length'])>maxBody){rejectBody(413);return;}
+    req.on('data',chunk=>{
+      if(rejected)return;
+      bytes+=chunk.length;
+      if(bytes>maxBody){rejected=true;chunks.length=0;rejectBody(413);return;}
+      chunks.push(chunk);
+    });
+    req.on('end',()=>{
+      clearTimeout(deadline);
+      if(!rejected&&!res.writableEnded)forward(Buffer.concat(chunks));
+    });
+    req.on('aborted',()=>clearTimeout(deadline));
+    req.on('error',()=>{clearTimeout(deadline);res.destroy();});
+    res.on('close',()=>clearTimeout(deadline));
   });
 }
 

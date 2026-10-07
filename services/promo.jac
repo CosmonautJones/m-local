@@ -9,13 +9,16 @@ worker processes on one machine only; several machines would need a shared lock.
 """
 
 import os;
+import from services.photo_reference { image_reference }
 import fcntl;
-import tempfile;
 import re;
 import sys;
 
 import time;
 import secrets;
+import hashlib;
+import json;
+import from services.qr_auth { listing_visible }
 import from datetime { datetime, timedelta }
 import from zoneinfo { ZoneInfo }
 import from services.models {
@@ -42,15 +45,13 @@ import from services.qr { new_qr_payload, valid_qr_payload }
 import from services.money { money_to_cents }
 import from services.session { _actor_id, _merchant_for_actor }
 import from services.onboarding { student_can_claim }
+import from services.email_codes { store, mutation_lock_path }
 import from services.context_models { AccessContextView }
 import from services.context { get_access_context }
 
 
-glob LOCK_PATH: str = os.path.join(tempfile.gettempdir(), "m-local-mutations.lock");
-
-
 def _lock -> int {
-    fd = os.open(LOCK_PATH, os.O_CREAT | os.O_RDWR, 384);
+    fd = os.open(mutation_lock_path(), os.O_CREAT | os.O_RDWR, 384);
     try {
         fcntl.flock(fd, fcntl.LOCK_EX);
         commit();
@@ -103,6 +104,7 @@ obj OfferView {
         menu_item: str = "",
         is_demo: bool = False,
         image_url: str = "",
+        offer_image_url: str = "",
         fits: bool = True,
         reasons: list[str] = [],
         my_qr_payload: str = "",
@@ -307,17 +309,17 @@ def _set_claim_status(c: Redemption, status: str, now: float) {
 }
 
 
-def _state(o: Offer, now: float) -> str {
-    if o.status == "paused" {
-        return "paused";
-    }
+def _state(o: Offer, now: float, remaining: int | None = None) -> str {
     if now >= o.end_ts {
         return "expired";
+    }
+    if o.status == "paused" {
+        return "paused";
     }
     if now < o.start_ts {
         return "scheduled";
     }
-    if _remaining(o, now) <= 0 {
+    if (remaining if remaining is not None else _remaining(o, now)) <= 0 {
         return "sold out";
     }
     return "active";
@@ -413,12 +415,21 @@ def _view(
     actor_id: str = "",
     budget: float | None = None,
     window: str = "any",
-    wanted: list[str] = []
+    wanted: list[str] = [],
+    saved_claim: Redemption | None = None,
+    place_context: tuple[Restaurant, Location | None, AccessContextView] | None = None
 ) -> OfferView {
-    r = _restaurant_of(o);
-    loc = _location_of(r) if r else None;
-    state = _state(o, now);
+    r: Restaurant | None = None;
+    loc: Location | None = None;
+    if place_context is None {
+        r = _restaurant_of(o);
+        loc = _location_of(r) if r else None;
+        context = get_access_context(jid(loc), now) if loc else AccessContextView();
+    } else {
+        (r, loc, context) = place_context;
+    }
     remaining = _remaining(o, now);
+    state = _state(o, now, remaining);
     (fits, reasons) = _explain(o, state, remaining, budget, window, wanted, now);
     if state == "active" {
         tlabel = f"Until {_clock(o.end_ts)} · {_span(o.end_ts - now)} left";
@@ -435,6 +446,7 @@ def _view(
         description=o.description,
         restaurant=public_name(r.name) if r else "",
         image_url=r.image_url if r else "",
+        offer_image_url=o.image_url,
         cuisine=r.cuisine if r else "",
         location_id=jid(loc) if loc else "",
         address=loc.address if loc else "",
@@ -454,11 +466,11 @@ def _view(
         dietary=o.dietary,
         menu_item=o.menu_item,
         is_demo=o.is_demo,
-        access_context=get_access_context(jid(loc), now) if loc else AccessContextView(),
+        access_context=context,
         fits=fits,
         reasons=reasons
     );
-    c = _my_claim(o, actor_id, now);
+    c = saved_claim if saved_claim is not None else _my_claim(o, actor_id, now);
     if c is not None {
         v.my_claim_id = jid(c);
         v.my_status = _claim_status(c, now);
@@ -476,7 +488,8 @@ def _view(
 
 def _my_claim(o: Offer, actor_id: str, now: float) -> Redemption | None {
     if not actor_id { return None; }
-    mine = [c for c in [o ->:ClaimedAs:->] if c.actor_id == actor_id and c.qr_payload];
+    wanted_actor = actor_id;
+    mine = [c for c in [o ->:ClaimedAs:->[?:Redemption, actor_id == wanted_actor]] if c.actor_id == actor_id and c.qr_payload];
     mine.sort(key=lambda (c: Redemption) -> tuple[int, float, str] {
         return (1 if _claim_status(c, now) in ["claimed", "redeemed"] else 0, c.claimed_ts, jid(c));
     }, reverse=True);
@@ -516,6 +529,9 @@ def _claim(offer_id: str, actor_id: str, now: float) -> ActionResult {
     }
     r = _restaurant_of(o);
     if r is None { return ActionResult(message="This offer has no restaurant."); }
+    if not listing_visible(r.slug, r.source) {
+        return ActionResult(message="This business is not available for new claims.");
+    }
     o.qr_ready = True;
     expires = min(now + CLAIM_HOLD_MINUTES * 60, o.end_ts);
     c = Redemption(actor_id=actor_id, restaurant_slug=r.slug,
@@ -612,9 +628,17 @@ def _save_offer(
     terms: str,
     dietary: str,
     menu_item: str,
-    now: float
+    now: float,
+    create_key: str = "",
+    image_url: str | None = None
 ) -> ActionResult {
+    if not offer_id and create_key and re.fullmatch(r"[A-Za-z0-9_-]{20,80}", create_key) is None {
+        return ActionResult(message="Refresh the app and try publishing again.");
+    }
     errors: list[str] = [];
+    photo = "";
+    try { if image_url is not None { photo = image_reference(image_url.strip(), _actor_id()); } }
+    except ValueError as photo_error { errors.append(str(photo_error)); }
     p = -1;
     rp = -1;
     try {
@@ -659,6 +683,18 @@ def _save_offer(
     if [tag for tag in tags if tag not in DIET_TAGS] {
         errors.append("dietary tags must be vegetarian, vegan, gluten-free, or halal");
     }
+    digest = "";
+    if not offer_id and create_key {
+        digest = hashlib.sha256(json.dumps([title.strip(), description.strip(), p, rp, st, en, qty,
+            eligibility.strip(), terms.strip(), sorted(tags), menu_item.strip(), photo]).encode()).hexdigest();
+        for existing in [r ->:Publishes:->] {
+            if existing.create_key != create_key { continue; }
+            if existing.create_digest != digest {
+                return ActionResult(message="This offer was already published with different details. Cancel this form and open it from Offers to edit.");
+            }
+            return ActionResult(ok=True, message="Offer already published.", code=jid(existing));
+        }
+    }
     o: Offer | None = None;
     if offer_id {
         o = _owned_offer(r, offer_id);
@@ -674,7 +710,8 @@ def _save_offer(
         return ActionResult(ok=False, message="Fix: " + "; ".join(errors) + ".");
     }
     if o is None {
-        o = Offer(title=title.strip(), created_ts=now, is_demo=r.is_demo, qr_ready=True);
+        o = Offer(title=title.strip(), created_ts=now, is_demo=r.is_demo, qr_ready=True,
+            create_key=create_key, create_digest=digest);
         r +>:Publishes():+> o;
     }
     o.title = title.strip();
@@ -690,6 +727,7 @@ def _save_offer(
     o.terms = terms.strip();
     o.dietary = tags;
     o.menu_item = menu_item.strip();
+    if image_url is not None { o.image_url = photo; }
     for e in [edge o ->:Features:->] {
         del e;
     }
@@ -755,6 +793,7 @@ def:pub list_offers(
     eod = _end_of_today(now);
     out: list[OfferView] = [];
     for r in [root.shared -->[?:Restaurant]] {
+        visible = listing_visible(r.slug, r.source);
         for o in [r ->:Publishes:->] {
             if o.is_demo and not samples_visible() { continue; }
             v = _view(o, now, _actor_id(), budget, window, wanted);
@@ -764,6 +803,7 @@ def:pub list_offers(
                 out.append(v);
                 continue;
             }
+            if not visible { continue; }
             if o.status == "paused" or now >= o.end_ts { continue; }
             if budget is not None and o.price_cents / 100 > budget { continue; }
             if window == "now" and o.start_ts > now { continue; }
@@ -791,10 +831,12 @@ def:pub get_offer(
     }
     now = time.time();
     v = _view(o, now, _actor_id(), _parse_budget(max_price), window, _parse_diets(diets));
+    r = _restaurant_of(o);
     # A live hold stays readable. A redeemed claim does not keep a paused or ended offer public.
     if v.my_status == "claimed" {
         return v;
     }
+    if r is None or not listing_visible(r.slug, r.source) { return None; }
     if o.status == "paused" or now >= o.end_ts {
         return None;
     }
@@ -837,6 +879,7 @@ def:protect merchant_portal() -> MerchantView {
 }
 
 
+# Jac 0.37.23 stringifies omitted RPC defaults; a string sentinel keeps the current photo.
 def:protect update_profile(
     name: str,
     cuisine: str,
@@ -844,7 +887,8 @@ def:protect update_profile(
     address: str,
     neighborhood: str,
     entrance_note: str,
-    note_date: str
+    note_date: str,
+    image_url: str | None = "__keep_photo__"
 ) -> MerchantView {
     fd = _lock();
     try {
@@ -853,24 +897,38 @@ def:protect update_profile(
         if r is None {
             view = MerchantView(ok=False, message="This account does not own a restaurant.");
         } else {
+            loc = _location_of(r);
             errors: list[str] = [];
             for (value, label, limit, required) in [
                 (name, "name", 120, True), (cuisine, "cuisine", 80, False),
-                (blurb, "description", 2000, False), (address, "address", 240, True),
+                (blurb, "description", 1000, False), (address, "address", 240, True),
                 (neighborhood, "neighborhood", 120, False),
                 (entrance_note, "entrance note", 500, False), (note_date, "note date", 80, False)
             ] {
                 error = _text_error(value, label, limit, required);
                 if error { errors.append(error); }
             }
+            photo = r.image_url;
+            try { if image_url is not None and image_url != "__keep_photo__" { photo = image_reference(image_url.strip(), _actor_id()); } }
+            except ValueError as photo_error { errors.append(str(photo_error)); }
             if errors {
                 view = _portal(r, time.time(), "Fix: " + "; ".join(errors) + ".");
                 view.ok = False;
+            } elif name.strip() not in [r.name, public_name(r.name)] or address.strip() != (loc.address if loc is not None else "") {
+                view = _portal(r, time.time(), "Name or address changes need review. Open your business profile to submit them.");
+                view.ok = False;
             } else {
-                r.name = name.strip();
+                # Keep the intended edits before touching the graph. A private
+                # store failure cannot leave a newer public/stale private pair.
+                try { store().update_business_details(_actor_id(), cuisine.strip(), blurb.strip(), photo); }
+                except ValueError as error {
+                    view = _portal(r, time.time(), str(error));
+                    view.ok = False;
+                    return view;
+                }
                 r.cuisine = cuisine.strip();
                 r.blurb = blurb.strip();
-                loc = _location_of(r);
+                r.image_url = photo;
                 if loc is None {
                     loc = Location(address="");
                     r +>:HasLocation():+> loc;
@@ -901,7 +959,9 @@ def:protect save_offer(
     eligibility: str,
     terms: str,
     dietary: str,
-    menu_item: str
+    menu_item: str,
+    create_key: str = "",
+    image_url: str | None = "__keep_photo__"
 ) -> ActionResult {
     fd = _lock();
     try {
@@ -909,6 +969,8 @@ def:protect save_offer(
         r = _merchant();
         if r is None {
             result = ActionResult(ok=False, message="This account does not own a restaurant.");
+        } elif not offer_id and not create_key {
+            result = ActionResult(message="Refresh the app before publishing a new offer.");
         } else {
             result = _save_offer(
                 r,
@@ -924,7 +986,9 @@ def:protect save_offer(
                 terms,
                 dietary,
                 menu_item,
-                time.time()
+                time.time(),
+                create_key,
+                None if image_url == "__keep_photo__" else image_url
             );
         }
     } finally {

@@ -1,0 +1,35 @@
+{
+  "status": "passed_matching_runtime_disposable_recovery",
+  "run_url": "https://github.com/CosmonautJones/m-local/actions/runs/37411638598",
+  "run_head_revision": "b0f2321016ba004b3a77db6fe05828080c755cd3",
+  "ci_conclusion": "success",
+  "recovery_summary": {
+    "status": "passed",
+    "checks": 71,
+    "elapsed_seconds": 221.171,
+    "runtime_version": "jac 0.37.23  (Linux x86_64)",
+    "runtime_bin_sha256": "2c3c697616b08516caf01704571e7e7020f4b294cd2bef7f04e8ef1ceec9d6ad",
+    "source_input_manifest_sha256": "a965bac8f51913cdf18d12ccce756034358d9829819f7d5227b38bac6ec56f84",
+    "postgres_version": "postgres (PostgreSQL) 16.15 (Ubuntu 16.15-1.pgdg24.04+2)",
+    "postgres_binary_sha256": "3a089a86625851a42ea1561dcdffa30569c24879c4eb6eb7be9055a72172e431",
+    "postgres_distribution_sha256": "3a8102c7b2e819b70a8bdd0f8b25f7223490333f1d4f798a37afe7a23cd66054",
+    "github_sha": "41f7abde549ff9416e1582b8266d0b0d40c21775",
+    "restore_success": true,
+    "restart_success": true,
+    "actual_smtp": false,
+    "canonical_source_entry_path_preserved": true,
+    "physical_copy_scope": "cold physical PostgreSQL cluster copy; matching Jac/runtime version only",
+    "private_state_scope": "onboarding.sqlite3/photo-ownership.sqlite3 via sqlite3.Connection.backup; code.key/jwt_secret/JPEGs copied",
+    "release_acceptance": false
+  },
+  "fixture_sha256": "dfc316e600884d8ec44bbf49a61dc58d7206cb02721658842441ba54b614b56c",
+  "wrapper_sha256": "24ffd323fd21c424bad0f1ee377e4ab112264557b75b0ecd7b561a2343312f78",
+  "independent_review": "ACCEPT: all 65 static labels exactly once plus six expected dynamic HTTP verification checks; canonical/runtime/database identity, four actors, claim snapshots, distinct photo associations and bytes, single-use redemption and owned process cleanup checked",
+  "limitations": [
+    "No public deployment or fresh-host portability proof",
+    "No scheduled backup or RPO/RTO acceptance",
+    "No real SMTP or physical device coverage",
+    "No sustained scaling acceptance"
+  ],
+  "raw_logs_retained": false
+}

@@ -31,6 +31,28 @@ def summarize(records, now="2026-03-08T12:00", days=7, is_demo=False):
 
 
 class AnalyticsTests(unittest.TestCase):
+    def test_year_of_history_preserves_daily_cohorts_and_totals(self):
+        now = stamp("2026-03-08T12:00")
+        records = []
+        for index in range(10000):
+            claimed = now - ((index % 365) + .25) * 86400
+            records.append(claim(str(index), f"private-person-{index % 470}",
+                                 claimed_ts=claimed, redeemed_ts=claimed + 600,
+                                 expires_ts=claimed + 1200))
+        view = summarize(records, days=365)
+        self.assertEqual(view["totals"]["claims"], 10000)
+        self.assertEqual(view["totals"]["cohort_redeemed"], 10000)
+        self.assertEqual(view["totals"]["redemptions"], 10000)
+        self.assertEqual(view["totals"]["unique_customers"], 470)
+        self.assertEqual(view["totals"]["value_cents"], 5000000)
+        self.assertEqual(sum(frame["daily"]["claims"] for frame in view["frames"]), 10000)
+        for frame in view["frames"]:
+            self.assertEqual(frame["daily"]["claims"], frame["daily"]["cohort_redeemed"])
+            self.assertEqual(frame["daily"]["pending"], 0)
+            self.assertEqual(sum(frame["totals"][key] for key in
+                                 ("cohort_redeemed", "cancelled", "expired", "pending", "unknown_outcomes")),
+                             frame["totals"]["claims"])
+
     def test_all_history_and_duplicates_count_once_and_never_export_people(self):
         records = [claim(str(i), f"private-person-{i}") for i in range(41)]
         view = summarize(records + [records[0]])
