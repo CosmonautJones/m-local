@@ -32,10 +32,13 @@ const failureCodes=new Set(['ROUTE_DENIED','BODY_TOO_LARGE','BODY_DEADLINE','ONB
 const maxResponseBytes=8*1024*1024,maxDeliveryBytes=16*1024*1024;
 const guestSession={authenticated:false,actor_id:'',role:'guest',restaurant_id:'',display_name:'',
   is_demo:false,email_verified:false,business_account:false,catalog_activity:false};
+const guestMetadata=['_jac_type','_jac_id','_jac_archetype','_jac_type_id'];
 
 function validGuestSession(value) {
   return value!==null&&typeof value==='object'&&!Array.isArray(value)&&
-    Object.keys(value).length===Object.keys(guestSession).length&&
+    (Object.keys(value).length===Object.keys(guestSession).length||
+      (Object.keys(value).length===Object.keys(guestSession).length+guestMetadata.length&&
+        guestMetadata.every(name=>typeof value[name]==='string')))&&
     Object.entries(guestSession).every(([name,expected])=>value[name]===expected);
 }
 
