@@ -44,6 +44,10 @@ The installed Linux x86_64 binaries match the official v0.37.23 published checks
 Published checksum sources: [jac](https://github.com/jaseci-labs/jac/releases/download/v0.37.23/jac-0.37.23-linux-x86_64.sha256)
 and [jacpython](https://github.com/jaseci-labs/jac/releases/download/v0.37.23/jac-0.37.23-linux-x86_64-jacpython.sha256).
 Each receipt binds the binary hashes and the exact fixture/application inputs.
+Earlier receipts identify their recorded Git HEAD as context; their actual input
+manifests are the source authority. The final full-app runner additionally rejects
+any copied input that differs from the tested Git blob, normalizing only shell
+CRLF to LF before its hash comparison.
 The runtime's extracted payload is verified during its normal bootstrap. Both
 `jac-core-cheatsheet` and `jac-types` were read before the test-only Jac entry/node
 were written.
@@ -67,7 +71,8 @@ bash scripts/test-stock-topology-app.sh --require-hold-cap --receipt .jac/releas
 Receipt paths are created exclusively; existing receipts are never overwritten.
 The default full-app receipt name includes source SHA and manifest digest and adds
 a unique suffix if needed. The source manifest is captured before instrumentation,
-then checked afterward with only the declared disposable entry allowed to differ.
+checked against the exact Git commit blobs, then checked afterward with only the
+declared disposable entry allowed to differ.
 The repository SHA must also stay unchanged throughout the proof. These scripts refuse inherited
 `JAC_DB_URL`/`JAC_DEV_SOURCE`, create private databases under `/var/tmp`, scrub mail
 credentials and inherited native signing-state overrides, and stop only their
@@ -81,21 +86,27 @@ never kill an unrelated listener to make them available.
 The ordinary serialized app races and minimal native faults pass. An exclusive
 single-backend launch still needs a receipt on the final integrated source,
 including the fixed gateway and new hold cap. It also needs fault injection on
-actual M-Local publication/claim paths, complete native 5xx followed by clean
+actual M-Local publication/claim/redemption paths, complete native 5xx followed by clean
 readback, and accepted-COMMIT/lost-response reconciliation using the application
 publication key. Minimal-node fault proof does not close those application gates.
 The current verdict is **not hosting certified**.
 
 The full-app runner now prepares a test-only entry in its disposable copy, wraps
 PgStore.commit with `stock_topology_app_hook.py`, and injects each actual app fault
-once only after the Offer or Redemption row has been flushed. The default runner
+once only after the Offer or Redemption row has been flushed. Redemption updates
+target one unique claim anchor and its transitioned `redeemed` status, so the
+initial lock transaction cannot consume the fault on an existing held claim. The default runner
 includes rollback 57P01/40001/08006 and accepted-COMMIT acknowledgement loss on
-publication and claim, plus publication process death before/after COMMIT. It
+publication, claim and redemption, plus publication and redemption process death
+before/after COMMIT. It
 also closes the actual PgWire TCP socket before COMMIT in each mutation path,
-leaving the official store to classify its own transport error and reconnect.
+leaving the official store to classify its own transport error and reconnect;
+the receipt must record an observed stock `PgWireError` with SQLSTATE `08006`.
 It checks independent durable rows, clean readback after complete native errors,
-publication-key and claim/QR reconciliation, and gateway closure plus a restart
-of both processes after transport uncertainty. `--skip-faults` is available for a
+publication-key and claim/QR reconciliation, every reconciled publication after
+restart, every reconciled held claim/QR before cancellation after restart, every
+reconciled redemption's durable single use after restart, and gateway closure
+plus a restart of both processes after transport uncertainty. `--skip-faults` is available for a
 bounded normal-path diagnostic and cannot close the topology fault gate. These
 new cases are implemented but await the final combined-candidate run; the earlier
 20-check receipt does not cover them.

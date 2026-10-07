@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 import argparse
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -57,6 +58,25 @@ def parallel(functions):
         return [job.result(timeout=60) for job in jobs]
 
 
+def assert_copy_matches_git(inputs, source_sha):
+    """Bind copied bytes to committed blobs, including declared shell LF normalization."""
+    queries = ''.join(source_sha + ':' + name + '\n' for name in inputs).encode()
+    output = subprocess.check_output(['git', '-C', str(ROOT), 'cat-file', '--batch'],
+                                     input=queries, timeout=30)
+    blobs = io.BytesIO(output)
+    for name, copied_hash in inputs.items():
+        header = blobs.readline().split()
+        if len(header) != 3 or header[1] != b'blob':
+            raise RuntimeError('Copied input is not a committed blob: ' + name)
+        data = blobs.read(int(header[2]))
+        if blobs.read(1) != b'\n':
+            raise RuntimeError('Git blob batch framing failed')
+        if name.endswith('.sh'):
+            data = data.replace(b'\r\n', b'\n')
+        if hashlib.sha256(data).hexdigest() != copied_hash:
+            raise RuntimeError('Copied input differs from tested Git commit: ' + name)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--require-hold-cap', action='store_true',
@@ -85,9 +105,10 @@ def main():
     private_dir(app)
     private_dir(cache)
     private_dir(cache / 'tmp')
+    source_sha = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip()
     copy_application(ROOT, app)
     inputs = input_manifest(app)
-    source_sha = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip()
+    assert_copy_matches_git(inputs, source_sha)
     source_digest = hashlib.sha256(stable_json(inputs)).hexdigest()
     evidence = args.receipt or ROOT / 'docs/review/stock-topology' / ('serialized-app-' + source_sha[:12] + '-' + source_digest[:12] + '.json')
     if not args.receipt and evidence.exists():
@@ -121,6 +142,7 @@ def main():
     receipt = dict(schema=1, verdict='INCOMPLETE', checks=checks, workspace=str(workspace),
         candidate_sha=source_sha,
         source_manifest_sha256=source_digest,
+        git_blob_inputs_verified=True, git_blob_shell_normalization='CRLF to LF only',
         manifest_scope='unmodified candidate copy before test-only instrumentation',
         receipt_path=str(evidence),
         source_manifest=inputs, version=version, jac_sha256=digest(jac),
