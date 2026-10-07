@@ -1,0 +1,27 @@
+[Unit]
+Description=M-Local guarded release runner (requires approved runtime/host evidence)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mlocal
+Group=mlocal
+WorkingDirectory=/srv/m-local/app
+EnvironmentFile=/etc/m-local/private.env
+ExecStart=/bin/bash /srv/m-local/app/scripts/release-run.sh --package /protected-releases/current-package --config /etc/m-local/release.json --evidence /etc/m-local/release-evidence.json
+# Fail closed. Operators reconcile uncertain outcomes before coordinated restart.
+Restart=no
+KillMode=control-group
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/m-local /var/cache/m-local
+Environment=JAC_CACHE_HOME=/var/cache/m-local
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target
