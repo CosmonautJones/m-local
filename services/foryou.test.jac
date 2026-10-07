@@ -6,7 +6,9 @@ to the internal helpers. Privacy between real accounts is checked over HTTP."""
 import from services.promo { _claim, _redeem, list_offers }
 import from services.session { _merchant_for_actor }
 import from services.models { samples_visible }
-import from unittest.mock { patch }
+import from services.hosted_dataset { ensure_hosted_dataset }
+import json;
+import from unittest.mock { patch, mock_open }
 import from jaclang.data.serializer { Serializer }
 
 def _reset -> TasteProfile {
@@ -19,6 +21,17 @@ def _reset -> TasteProfile {
     fresh = _profile(True);
     assert fresh is not None;
     return fresh as TasteProfile;
+}
+
+
+def _hosted_catalog_fixture -> any {
+    # Unit graphs provide a small catalog; keep the real hosted loader/importer
+    # active without depending on the large JSON excluded by code-only isolation.
+    records = [{"id": "osm:node:999876", "name": "Unit catalog cafe", "category": "cafe",
+        "source_type": "node", "source_id": "999876", "source_url": "https://www.openstreetmap.org/node/999876",
+        "lat": 42.28, "lon": -83.74, "coordinate_method": "osm_node",
+        "retrieved_at": "2026-09-27T00:00:00+00:00", "address": {}, "quality_flags": []}];
+    return patch.dict(ensure_hosted_dataset.__globals__, {"open": mock_open(read_data=json.dumps(records))});
 }
 
 
@@ -248,7 +261,7 @@ test "production home omits a demo offer the caller has claimed or redeemed" {
 test "hosted dataset replaces starter fixture discovery without deleting starter records" {
     _ensure_seed();
     original = [jid(r) for r in [root.shared -->[?:Restaurant]] if r.source == "demo-seed"];
-    with patch.dict(os.environ, {"MLOCAL_HOSTED_DATASET": "1", "MLOCAL_DEMO_MODE": "1"}) {
+    with _hosted_catalog_fixture(), patch.dict(os.environ, {"MLOCAL_HOSTED_DATASET": "1", "MLOCAL_DEMO_MODE": "1"}) {
         home = _home("", "", "any", "", time.time());
         assert home.show_samples;
         assert not [item for item in home.items if item.offer.restaurant.endswith(" (Demo)")];
@@ -272,7 +285,7 @@ test "hosted dataset cannot override disabled sample discovery favorites or dire
         assert _toggle_favorite(demo.slug, now).ok;
         assert _toggle_favorite(real.slug, now).ok;
     }
-    with patch.dict(os.environ, {"MLOCAL_DEMO_MODE": "0", "MLOCAL_HOSTED_DATASET": "1"}) {
+    with _hosted_catalog_fixture(), patch.dict(os.environ, {"MLOCAL_DEMO_MODE": "0", "MLOCAL_HOSTED_DATASET": "1"}) {
         quiet = _home("", "", "any", "", now);
         assert not quiet.show_samples;
         assert not [i for i in quiet.items if i.offer.is_demo];
@@ -287,7 +300,7 @@ test "hosted dataset cannot override disabled sample discovery favorites or dire
 }
 
 test "explicit sample visibility overrides demo fallback and hosted fixtures" {
-    with patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "0", "MLOCAL_DEMO_MODE": "1", "MLOCAL_HOSTED_DATASET": "1"}) {
+    with _hosted_catalog_fixture(), patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "0", "MLOCAL_DEMO_MODE": "1", "MLOCAL_HOSTED_DATASET": "1"}) {
         assert not samples_visible();
         assert not _home("", "", "any", "", time.time()).show_samples;
     }
@@ -312,7 +325,7 @@ test "disabled sample taste responses preserve stored favorites and restore them
     p +>:Keeps():+> Favorite(slug="preserved-unlisted-favorite", since_ts=now + 1);
     original = _favorite_slugs(p);
     with patch.dict(taste_choices.__globals__, {"_actor_id": lambda () -> str { return "taste-owner"; }}) {
-        with patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "0", "MLOCAL_DEMO_MODE": "1", "MLOCAL_HOSTED_DATASET": "1"}) {
+        with _hosted_catalog_fixture(), patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "0", "MLOCAL_DEMO_MODE": "1", "MLOCAL_HOSTED_DATASET": "1"}) {
             choices = taste_choices();
             saved = save_taste("pizza", "", "");
             refused = toggle_favorite(slug=demo.slug);
@@ -342,7 +355,7 @@ test "disabled sample offer lookup cannot toggle a real parent favorite" {
     unmarked = Offer(title="Unmarked child", is_demo=False, start_ts=now - 60, end_ts=now + 3600, quantity=3);
     real +>:Publishes():+> sample;
     demo +>:Publishes():+> unmarked;
-    with patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "0", "MLOCAL_DEMO_MODE": "1", "MLOCAL_HOSTED_DATASET": "1"}) {
+    with _hosted_catalog_fixture(), patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "0", "MLOCAL_DEMO_MODE": "1", "MLOCAL_HOSTED_DATASET": "1"}) {
         assert not toggle_favorite(offer_id=jid(sample)).ok, "Hidden sample offers cannot create favorites through their real parent";
         assert not toggle_favorite(offer_id=jid(unmarked)).ok, "A sample parent hides even an unmarked child";
         assert _favorite_slugs(p) == [];
