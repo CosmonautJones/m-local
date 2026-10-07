@@ -5,7 +5,7 @@ repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 candidate="${1:-$(git -C "$repo" rev-parse HEAD)}"
 evidence="${2:-$repo/.jac/release-experience-evidence}"
 base_port="${3:-18920}"
-if [[ -n "${JAC_DB_URL:-}" || -n "${JAC_DEV_SOURCE:-}" || "$(id -u)" -eq 0 ]]; then
+if [[ -n "${JAC_DB_URL:-}" || -n "${JAC_DATA_PATH:-}" || -n "${JAC_DEV_SOURCE:-}" || -n "${JACPATH:-}" || "$(id -u)" -eq 0 ]]; then
   echo 'Use an unprivileged Linux user without inherited graph/source overrides.' >&2
   exit 2
 fi
@@ -17,7 +17,7 @@ git -C "$repo" archive "$candidate" | tar -x -C "$fixture_root/source"
 # The harness is explicit additional evidence input when reviewing an older
 # candidate. Its copied bytes are hashed separately by the Python fixture.
 cp "$repo/tests/ui/release_experience_live.py" "$fixture_root/source/tests/ui/release_experience_live.py"
-cp "$repo/tests/ui/release_sample_fixture.jac" "$fixture_root/source/tests/ui/release_sample_fixture.jac"
+cp "$repo/tests/ui/release_sample_fixture.py" "$fixture_root/source/tests/ui/release_sample_fixture.py"
 cd "$fixture_root/source"
 export JAC_CACHE_HOME="$fixture_root/cache"
 unset PYTHONPATH

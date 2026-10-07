@@ -58,7 +58,7 @@ class SampleFixtureGuardTests(unittest.TestCase):
             self.refused(self.environment)
 
     def test_external_persistence_overrides_refused_before_jac_import(self):
-        for name in ("JAC_DB_URL", "JAC_DATA_PATH", "JAC_DEV_SOURCE"):
+        for name in ("JAC_DB_URL", "JAC_DATA_PATH", "JAC_DEV_SOURCE", "JACPATH"):
             with self.subTest(name=name):
                 self.refused(dict(self.environment, **{name: "unsafe-test-override"}))
 
