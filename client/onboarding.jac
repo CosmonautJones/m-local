@@ -66,7 +66,7 @@ def:pub EmailOnboarding(
         mounted: Ref[bool] = Ref(True), inFlight: Ref[bool] = Ref(False),
         codeRef: Ref[HTMLInputElement] = Ref(), emailRef: Ref[HTMLInputElement] = Ref(),
         revision: Ref[int] = Ref(0), previousKind: Ref[str] = Ref(kind);
-    quiet = {"border": 0, "background": "transparent", "padding": "6px 0", "minHeight": 36, "color": "var(--ml-accent)", "font": "700 13px Figtree, system-ui", "cursor": "pointer", "textDecoration": "underline", "textUnderlineOffset": 3};
+    quiet = {"border": 0, "background": "transparent", "padding": "6px 0", "minHeight": 44, "color": "var(--ml-accent)", "font": "700 13px Figtree, system-ui", "cursor": "pointer", "textDecoration": "underline", "textUnderlineOffset": 3};
 
     useEffect(lambda {
         mounted.current = True;
@@ -157,7 +157,7 @@ def:pub EmailOnboarding(
         <style>{".ml-auth button:focus-visible,.ml-auth select:focus-visible,.ml-auth input:focus-visible{outline:3px solid var(--ml-focus);outline-offset:3px}.ml-auth button:disabled{opacity:.55;cursor:default}.ml-auth select{max-width:100%}"}</style>
         <header style={{"display": "flex", "alignItems": "flex-start", "justifyContent": "space-between", "gap": 16}}>
             <div style={{**stack, "gap": 8}}>
-                {(<select aria-label="Account type" value={kind} disabled={busy} onChange={lambda (e: ChangeEvent) { onSwitchAudience(e.target.value); }} style={{"font": "700 13px Figtree, system-ui", "color": "var(--ml-muted)", "border": "1px solid var(--ml-border)", "borderRadius": 6, "background": "var(--ml-bg)", "padding": "7px 9px"}}><option value="student">U-M student</option><option value="business">Business</option></select>) if not challenge else None}
+                {(<select aria-label="Account type" value={kind} disabled={busy} onChange={lambda (e: ChangeEvent) { onSwitchAudience(e.target.value); }} style={{"font": "700 13px Figtree, system-ui", "color": "var(--ml-muted)", "border": "1px solid var(--ml-border)", "borderRadius": 6, "background": "var(--ml-bg)", "padding": "7px 9px", "minHeight": 44}}><option value="student">U-M student</option><option value="business">Business</option></select>) if not challenge else None}
                 <h3 style={{"fontSize": 26, "lineHeight": 1.2, "margin": 0}}>{"Check your email" if challenge else "Create your account" if mode == "signup" else "Sign in"}</h3>
             </div>
             <button style={{**quiet, "whiteSpace": "nowrap", "color": "var(--ml-muted)"}} type="button" disabled={busy} onClick={onCancel}>{cancelLabel}</button>
@@ -168,7 +168,7 @@ def:pub EmailOnboarding(
             {(<label style={label}>U-M email
                 <div style={{"display": "flex", "border": "1px solid var(--ml-border)", "borderRadius": 10, "overflow": "hidden", "minWidth": 0}}>
                     <input ref={inputRef or emailRef} aria-label="U-M uniqname" aria-describedby="umich-email-help" style={{**inputStyle, "border": 0, "borderRadius": 0, "flex": 1}} placeholder="uniqname" autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={False} pattern="[A-Za-z][A-Za-z0-9]{1,31}" maxLength={32} value={value} onChange={lambda (e: ChangeEvent) { value = e.target.value; }} required={True} disabled={busy}/>
-                    <span style={{"padding": "13px 10px", "background": "var(--ml-sunken)", "color": "var(--ml-muted)", "fontWeight": 500, "whiteSpace": "nowrap"}}>@umich.edu</span>
+                    <span style={{"padding": "13px 10px", "background": "var(--ml-sunken)", "color": "var(--ml-text)", "fontWeight": 500, "whiteSpace": "nowrap"}}>@umich.edu</span>
                 </div><span id="umich-email-help" style={hint}>Use your uniqname. No university password needed.</span>
             </label>) if kind == "student" else <label style={label}>Work email<input ref={inputRef or emailRef} style={inputStyle} placeholder="you@business.com" type="email" autoComplete="email" maxLength={254} value={value} onChange={lambda (e: ChangeEvent) { value = e.target.value; }} required={True} disabled={busy}/></label>}
             <Notice>{message}</Notice>

@@ -64,7 +64,7 @@ export async function app({role='student',verified=false,audience='student',item
  w.addEventListener('error',e=>errors.push(e.message));
  w.eval(executable);
  const initialTitle=item.my_claim_id&&['claimed','redeemed'].includes(item.my_status)?item.my_title:item.title;
- try{await until(()=>[initialTitle,'Welcome to M-Local','Offers are on their way','Could not load offers.','Sign in to M-Local','List your business','YOUR BUSINESS','Business offers'].some(text=>w.document.body.textContent.includes(text)),'initial app render');}
+ try{await until(()=>[initialTitle,'Welcome to M-Local','Finding deals...','Offers are on their way','Could not load offers.','Sign in to M-Local','List your business','YOUR BUSINESS','Business offers'].some(text=>w.document.body.textContent.includes(text)),'initial app render');}
  catch(error){dom.window.close();throw error;}
  return {window:w,document:w.document,calls,errors,text:()=>w.document.body.textContent,
   find(text){return [...w.document.querySelectorAll('*')].find(n=>n.textContent===text&&n.children.length===0);},

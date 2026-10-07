@@ -441,6 +441,7 @@ def:pub app -> JsxElement {
 
     async can with entry {
         epoch = sessionEpoch.current;
+        selectionRevision = detailRequest.current;
         pending = readPublicOfferIntent();
         restored: SessionView | None = None;
         try {
@@ -456,10 +457,10 @@ def:pub app -> JsxElement {
         if epoch == sessionEpoch.current {
             sessionReady = True;
             if restored is not None and restored.authenticated and restored.role == "student" { await loadOffers("", "any", []); }
-            if pending and (restored is None or not restored.authenticated or restored.role == "student") {
+            if epoch == sessionEpoch.current and pending and (restored is None or not restored.authenticated or restored.role == "student") {
                 audience = "student";
                 if restored is None or not restored.authenticated { await loadOffers("", "any", []); }
-                if epoch == sessionEpoch.current { await openOffer(pending); }
+                if epoch == sessionEpoch.current and selectionRevision == detailRequest.current { await openOffer(pending); }
             }
         }
         if epoch == sessionEpoch.current and restored is not None and restored.authenticated and restored.role == "merchant" {
@@ -521,12 +522,13 @@ def:pub app -> JsxElement {
     async def finishSignIn(fresh: SessionView) {
         pending = readPublicOfferIntent();
         clearPrivate(); session = fresh; authOpen = False;
+        epoch = sessionEpoch.current; selectionRevision = detailRequest.current;
         freshAudience = audienceForSession(fresh);
         if freshAudience { audience = freshAudience; }
         businessOpen = fresh.role == "business";
         if fresh.role == "student" {
             tab = "discover"; await refresh();
-            if pending { await openOffer(pending); }
+            if pending and epoch == sessionEpoch.current and selectionRevision == detailRequest.current { await openOffer(pending); }
         } else { clearPublicOfferIntent(); }
         if fresh.role == "merchant" { tab = "merchant"; await openMerchant(); }
     }
