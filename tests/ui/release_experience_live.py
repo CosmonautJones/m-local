@@ -270,6 +270,12 @@ def main():
                                            "credential": {"type": "password", "password": merchant_password}})
             merchant = post(native, "/user/login", {"identity": {"type": "email", "value": merchant_email},
                                                      "credential": {"type": "password", "password": merchant_password}})
+            # Native bootstrap must precede extra fixture restaurants: a nonempty
+            # shared catalog deliberately prevents automatic demo initialization.
+            initial_feed = Api(native).call("home_feed")
+            check(any(row["place"] == "arbor-leaf-kitchen" and row["offer"]["state"] == "active"
+                      for row in initial_feed["items"]),
+                  "native initial catalog contains the active sample before mixed fixture setup")
             stop_process(backend)
             environment["MLOCAL_RELEASE_BROWSER_FIXTURE"] = "1"
             run_logged("private mixed sample graph fixture", ["bash", "scripts/python.sh", "-c",
