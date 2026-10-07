@@ -48,8 +48,11 @@ authority. Keep unfinished PRs draft and bind each receipt to its tested source.
 ## Launch restrictions awaiting approval
 
 The proposal is one backend and one serialized gateway, without overlap during
-replacement. Every request reaching the backend, including readiness, traverses
-the same lane. Operators quiesce traffic and stop both processes before offline
+replacement. Once the gateway exists, every request reaching the backend,
+including ongoing readiness, traverses the same serialized lane. Before gateway
+creation only, the launcher may poll bounded private `/healthz/ready` metadata
+to await native startup; this probe performs no graph RPC and admits no public
+traffic. Operators quiesce traffic and stop both processes before offline
 operations. An incomplete upstream response closes the lane until both restart.
 No regional scaling, two-replica safety, measured capacity or production readiness
 claim follows from this proposal. Final stock-runtime evidence and actual host

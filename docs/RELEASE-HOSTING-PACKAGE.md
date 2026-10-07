@@ -112,6 +112,10 @@ cat /var/tmp/m-local-rc-build/archive-sha256.txt
 The output includes `package-manifest.json`, `build-receipt.json`,
 `official-checksums.json`, and `offline-package.tar.gz`. These engineering
 artifacts contain no approval, live keys, onboarding database or recovery set.
+The full tracked source also includes existing `data/research` contact material.
+Keep the engineering archive private until #41's retention/publication decision;
+do not publish that archive or include contact contents in public evidence.
+Preserve human-owned research while its owner decides the release policy.
 The lower-level commands below remain available for an already tested build.
 
 ```bash
@@ -246,6 +250,16 @@ listener can leave Linux TCP `TIME_WAIT` sockets that the conservative bind
 guard still refuses. Keep traffic closed and wait until that check succeeds;
 do not weaken the guard, overlap instances or infer a surviving child solely
 from a bind refusal. Listener closure and bind-free readiness are separate checks.
+
+```bash
+python3 -c 'import json; from deploy.release.package import require_free_ports; require_free_ports(json.load(open("/etc/m-local/release.json")))'
+```
+
+SQLite backup is verified by checksums of the actual backup files and complete
+schema/row equality at the quiesced recovery point. Its backup API can change
+database page/header bytes while retaining every row; the original source-file
+hash is not an appropriate hash for that new backup. Signing keys and photos
+must retain their original bytes, and restore must match the sealed backup bytes.
 
 ```bash
 python3 deploy/release/package.py inventory --config /etc/m-local/release.json \

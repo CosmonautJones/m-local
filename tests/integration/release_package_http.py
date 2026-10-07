@@ -2,6 +2,7 @@
 import argparse
 from datetime import datetime, timedelta
 import getpass
+import hashlib
 import importlib.util
 import json
 import os
@@ -9,6 +10,7 @@ from pathlib import Path
 import secrets
 import signal
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -102,6 +104,20 @@ def main():
         with socket.socket() as probe:
             probe.settimeout(.5)
             return probe.connect_ex(('127.0.0.1', port)) != 0
+
+    def sqlite_fingerprint(path):
+        # SQLite's backup API can change page/header bytes without changing
+        # schema or row values. Compare the complete logical content privately;
+        # never print its rows or hashes into the public engineering receipt.
+        with sqlite3.connect(path.as_uri() + '?mode=ro', uri=True) as db:
+            db.execute('PRAGMA query_only=ON')
+            if db.execute('PRAGMA quick_check').fetchone() != ('ok',):
+                raise RuntimeError('Disposable SQLite integrity failed')
+            schema = db.execute('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name,tbl_name,sql').fetchall()
+            rows = {}
+            for name, in db.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"):
+                rows[name] = sorted(repr(row) for row in db.execute('SELECT * FROM "' + name.replace('"', '""') + '"'))
+            return hashlib.sha256(repr((schema, rows)).encode()).hexdigest()
 
     def interrupted(signum, frame):
         raise SystemExit(128 + signum)
@@ -281,9 +297,13 @@ def main():
 
             production('packaged-startup')
             backup = workspace / 'recovery-set'
+            sqlite_names = ('onboarding.sqlite3', 'photo-ownership.sqlite3')
+            before_backup_sqlite = {name: sqlite_fingerprint(onboarding / name) for name in sqlite_names}
             pkg.coordinated_backup(config, backup, args.package)
             pkg.verify_recovery_set(backup)
             check(True, 'actual PostgreSQL graph identity and private stores produce a complete verified recovery set')
+            check(all(sqlite_fingerprint(backup / 'private' / name) == before_backup_sqlite[name] for name in sqlite_names),
+                'SQLite backup retains every original schema and row value')
             # Preserve the entire original source/stores and original database.
             # Recreate only the same canonical source path and restore into the
             # separate, empty private database; no original data is deleted.
@@ -292,7 +312,13 @@ def main():
             pkg.install_source(args.package, app)
             os.environ['MLOCAL_RECOVERY_DB_URL'] = connection_base + 'package_restored'
             pkg.coordinated_restore(backup, config, args.package)
-            check(pkg.state_inventory(config) == original_inventory, 'logical restore retains all original private bytes and SQLite row counts')
+            restored_inventory = pkg.state_inventory(config)
+            check(restored_inventory['sqlite'] == original_inventory['sqlite']
+                and restored_inventory['photos'] == original_inventory['photos']
+                and all(restored_inventory['files'][name] == original_inventory['files'][name] for name in ('code.key', 'jwt_secret'))
+                and all(restored_inventory['files'][name]['sha256'] == pkg.digest(backup / 'private' / name)
+                    and sqlite_fingerprint(onboarding / name) == before_backup_sqlite[name] for name in sqlite_names),
+                'logical restore retains exact backup bytes all SQLite schema and rows and original keys and photos')
             environment['JAC_DB_URL'] = connection_base + 'package_restored'
             os.environ.update(environment)
             production('packaged-restored-startup', redeem_held=True)
