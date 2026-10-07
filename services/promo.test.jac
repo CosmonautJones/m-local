@@ -642,6 +642,64 @@ test "failed mutation releases its lock without committing an abandoned draft" {
 }
 
 
+def _hold_limit_fixture(slug: str, now: float) -> list[Offer] {
+    restaurant = Restaurant(slug=slug, name="Hold limit fixture", source="manual");
+    root.shared ++> restaurant;
+    offers: list[Offer] = [];
+    for number in range(3) {
+        offer = Offer(title=f"Limit offer {number}", start_ts=now - 60,
+            end_ts=now + 3600, quantity=5, qr_ready=True, terms="Original promise");
+        restaurant +>:Publishes():+> offer;
+        offers.append(offer);
+    }
+    return offers;
+}
+
+
+test "sample restaurant cannot expose an unmarked offer through list detail or claim" {
+    now = time.time();
+    offers = _hold_limit_fixture("sample-parent-projection", now);
+    restaurant = _restaurant_of(offers[0]) as Restaurant;
+    restaurant.is_demo = True;
+    assert not offers[0].is_demo;
+    with patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "0", "MLOCAL_DEMO_MODE": ""}) {
+        assert jid(offers[0]) not in [view.id for view in list_offers()];
+        assert get_offer(jid(offers[0])) is None;
+        blocked = _claim(jid(offers[0]), "sample-parent-student", now);
+        assert not blocked.ok and "not available" in blocked.message;
+        assert _remaining(offers[0], now) == 5;
+    }
+}
+
+
+test "sample restaurant labels an unmarked offer without rewriting stored flags" {
+    now = time.time();
+    offers = _hold_limit_fixture("sample-parent-label", now);
+    restaurant = _restaurant_of(offers[0]) as Restaurant;
+    restaurant.is_demo = True;
+    assert _view(offers[0], now).is_demo;
+    assert not offers[0].is_demo;
+}
+
+
+test "samples off preserves a legitimate owner's paused claim and original snapshot" {
+    now = time.time();
+    offers = _hold_limit_fixture("legitimate-saved-no-samples", now);
+    held = _claim(jid(offers[0]), "legitimate-saved-student", now);
+    assert held.ok;
+    offers[0].status = "paused";
+    offers[0].terms = "Changed terms";
+    with patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "0", "MLOCAL_DEMO_MODE": ""}) {
+        with patch.dict(get_offer.__globals__, {"_actor_id": lambda () -> str { return "legitimate-saved-student"; }}) {
+            view = get_offer(jid(offers[0])) as OfferView;
+            assert view.my_status == "claimed" and view.my_qr_payload == held.qr_payload;
+            assert view.my_terms == "Original promise";
+            assert jid(offers[0]) in [item.id for item in list_offers()];
+        }
+    }
+}
+
+
 def _raise_lock_test_error() {
     raise ValueError("Simulated refresh failure while acquiring mutation lock");
 }
