@@ -56,6 +56,33 @@ def free_port():
         return sock.getsockname()[1]
 
 
+def owned_listener_ports(process):
+    """Observe only this fixture's process group; unrelated listeners are allowed."""
+    inodes = set()
+    for directory in Path('/proc').iterdir():
+        if not directory.name.isdecimal():
+            continue
+        try:
+            if os.getpgid(int(directory.name)) != process.pid:
+                continue
+            for descriptor in (directory / 'fd').iterdir():
+                try:
+                    target = os.readlink(descriptor)
+                    if target.startswith('socket:['):
+                        inodes.add(target[8:-1])
+                except FileNotFoundError:
+                    pass
+        except ProcessLookupError:
+            pass
+    ports = set()
+    for protocol in ('tcp', 'tcp6'):
+        for row in (Path('/proc/net') / protocol).read_text().splitlines()[1:]:
+            fields = row.split()
+            if fields[3] == '0A' and fields[9] in inodes:
+                ports.add(int(fields[1].rsplit(':', 1)[1], 16))
+    return ports
+
+
 def post(origin, path, payload):
     request = urllib.request.Request(origin + path, json.dumps(payload).encode(),
         {'Content-Type': 'application/json'}, method='POST')
@@ -376,8 +403,16 @@ def main():
                              'environment signing fallback mismatch', ('JAC_SERVE_AUTH_SECRET',))
                 configuration.write_bytes(original_configuration + b'\n[serve.auth]\nsecret = " ' + original_signing_bytes.strip() + b' "\n')
                 PHASE = 'supported preflight native production readiness'
-                start({**production, 'JAC_SERVE_AUTH_SECRET': '   ', 'JAC_SERVE_AUTH_ALGORITHM': '   '}, guarded=True)
+                _, production_log = start({**production, 'JAC_SERVE_AUTH_SECRET': '   ', 'JAC_SERVE_AUTH_ALGORITHM': '   '}, guarded=True)
                 ready()
+                mode_log = production_log.read_text(errors='replace')
+                check('Server ready (no client)' in mode_log and 'Watching for changes' not in mode_log
+                      and 'Mode: Development (with HMR)' not in mode_log and 'VITE v' not in mode_log,
+                      'supported preflight runs production backend mode without development watchers or Vite')
+                owned_ports = owned_listener_ports(active)
+                check(port in owned_ports, 'supported preflight owns the requested native listening port')
+                check(not ({8000, 8001} - {port}) & owned_ports,
+                      'supported preflight creates no owned default development listeners')
                 with urllib.request.urlopen(origin + '/healthz/ready', timeout=5) as response:
                     check(response.status == 200 and json.load(response).get('ready') is True,
                           'supported preflight reaches canonical native JSON readiness')
