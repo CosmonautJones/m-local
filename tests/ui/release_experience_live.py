@@ -152,6 +152,7 @@ def main():
         raise TimeoutError("Owned fixture readiness deadline")
     phase = "install"
     completed = False
+    redemption_transition_ms = None
     started = time.monotonic()
     try:
         run_logged("private fixture dependency install", [str(jac), "install", "--no-npm"], app, environment,
@@ -258,9 +259,12 @@ def main():
                 merchant_page.get_by_label("Choose a QR image", exact=True).set_input_files(str(qr_path))
                 expect(merchant_page.get_by_role("button", name="Confirm redemption", exact=True)).to_be_visible()
                 check(student.call("get_offer", offer_id=sample["id"])["my_status"] == "claimed", "local QR image decoding previews native claim without redeeming")
+                redemption_started = time.monotonic()
                 merchant_page.get_by_role("button", name="Confirm redemption", exact=True).click()
                 expect(merchant_page.get_by_text("Redeemed", exact=False).first).to_be_visible()
-                expect(page.get_by_text("Your saved claim was redeemed.", exact=True)).to_be_visible(timeout=25000)
+                expect(page.get_by_text("Your saved claim was redeemed.", exact=True)).to_be_visible(timeout=5000)
+                redemption_transition_ms = round((time.monotonic() - redemption_started) * 1000, 2)
+                check(redemption_transition_ms <= 5000, "actual merchant redemption reaches the visible student claim within five seconds")
                 check(page.locator('[data-testid="claim-qr"]').count() == 0, "visible held-claim polling observes actual redemption and removes QR")
                 phase = "availability changes during native inbox verification"
                 for mode in ("sold out", "expired"):
@@ -357,7 +361,8 @@ def main():
             stop_process(process)
         stop_private_postgres(workspace)
         receipt = {**binding, "status": "passed" if completed else "failed", "checks": checks, "passed": len(checks), "phase": phase,
-                   "seconds": round(time.monotonic() - started, 2), "owned_processes_stopped": True,
+                   "seconds": round(time.monotonic() - started, 2), "redemption_transition_ms": redemption_transition_ms,
+                   "owned_processes_stopped": True,
                    "private_postgres_stopped": True}
         (args.evidence / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
         print("Retained private fixture: " + str(workspace), flush=True)
