@@ -1,15 +1,36 @@
 // Compiled UI checks with synthetic RPC responses. No real auth, DB or camera evidence.
 import {createRequire} from 'node:module';
-import {readFileSync,readdirSync} from 'node:fs';
-import {resolve} from 'node:path';
+import {readdirSync,realpathSync,statSync} from 'node:fs';
+import {extname,isAbsolute,relative,resolve,sep} from 'node:path';
 const root=resolve(process.env.MLOCAL_UI_APP_ROOT || resolve(import.meta.dirname,'../../..'));
 const runtimeRequire=createRequire(resolve(process.env.MLOCAL_UI_TEST_MODULES || `${root}/.jac/ui-test-runtime/node_modules`, '../package.json'));
 const {JSDOM,VirtualConsole}=runtimeRequire('jsdom');
 const clientRequire=createRequire(`${root}/.jac/client/package.json`);
-const {transformSync}=clientRequire('esbuild');
+const {build}=clientRequire('esbuild');
 const dist=resolve(root,'.jac/client/dist');
-const bundle=readFileSync(resolve(dist,readdirSync(dist).find(n=>/^client\..*\.js$/.test(n))),'utf8');
-const executable=transformSync(bundle,{format:'iife',target:'es2022'}).code;
+// Rebundle the emitted local graph for jsdom, retaining lazy dynamic-module
+// initialization and shared module identity. No scanner code is replaced.
+// Real network chunk loading remains a separate native-browser acceptance gate.
+export async function compileBrowserBundle(entry,compiledRoot) {
+ const allowed=realpathSync(compiledRoot);
+ const result=await build({entryPoints:[entry],bundle:true,write:false,format:'iife',platform:'browser',target:'es2022',logLevel:'silent',
+  plugins:[{name:'contained-compiled-chunks',setup(builder){
+   builder.onResolve({filter:/.*/},args=>{
+    if(args.kind!=='entry-point'&&!args.path.startsWith('.')&&!isAbsolute(args.path))throw new Error('Compiled UI imports must resolve to local compiled chunks.');
+    const path=realpathSync(resolve(args.resolveDir,args.path)),fromRoot=relative(allowed,path);
+    if(fromRoot==='..'||fromRoot.startsWith('..'+sep)||isAbsolute(fromRoot))throw new Error('Compiled UI imports must stay within the compiled output directory.');
+    if(!statSync(path).isFile()||!['.js','.mjs'].includes(extname(path)))throw new Error('Compiled UI imports must resolve to JavaScript files.');
+    return {path};
+   });
+  }}]
+ });
+ return result.outputFiles[0].text;
+}
+let executablePromise;
+function compiledClient() {
+ if(!executablePromise){const entry=resolve(dist,readdirSync(dist).find(n=>/^client\..*\.js$/.test(n)));executablePromise=compileBrowserBundle(entry,dist);}
+ return executablePromise;
+}
 export const qr='mlocal:v1:'+'A'.repeat(43);
 export function offer(extra={}) {return {
  id:'fixture-offer',title:'Current bowl',description:'Fictional UI test meal',restaurant:'Fixture Kitchen',
@@ -62,7 +83,7 @@ export async function app({role='student',verified=false,audience='student',item
   return rpc(results[name]);
  };
  w.addEventListener('error',e=>errors.push(e.message));
- w.eval(executable);
+ try{w.eval(await compiledClient());}catch(error){dom.window.close();throw error;}
  const initialTitle=item.my_claim_id&&['claimed','redeemed'].includes(item.my_status)?item.my_title:item.title;
  try{await until(()=>[initialTitle,'Welcome to M-Local','Finding deals...','Offers are on their way','Could not load offers.','Sign in to M-Local','List your business','YOUR BUSINESS','Business offers'].some(text=>w.document.body.textContent.includes(text)),'initial app render');}
  catch(error){dom.window.close();throw error;}
