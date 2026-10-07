@@ -11,6 +11,33 @@ from unittest.mock import patch
 
 
 class ReleaseExperienceDiagnosticsTests(unittest.TestCase):
+    def test_readiness_exports_only_fixed_categories_and_numeric_measurements(self):
+        source = Path(__file__).with_name("release_experience_live.py")
+        definition = next(node for node in ast.parse(source.read_text()).body
+                          if isinstance(node, ast.FunctionDef) and node.name == "readiness_diagnostic_summary")
+        namespace = {"json": json}
+        exec(compile(ast.Module(body=[definition], type_ignores=[]), str(source), "exec"), namespace)
+        private = "PRIVATE-IDENTITY-TOKEN-AND-STORE-SENTINEL"
+        attempts = [{"label": "gateway-samples-restored", "seconds": 300.5, "attempts": 80,
+                     "statuses": {"503": 79, private: 1},
+                     "categories": {"client_timeout": 1, private: 1}, "message": private},
+                    {"label": private, "attempts": 1, "seconds": 1}]
+        probe = {"gateway_stopped_before_native_probe": True, "native_health": {"status": 200, "ready": True, "seconds": .2, "body": private},
+                 "native_feed": {"status": 200, "ok": True, "shape_valid": True, "seconds": 7.5, "body": private}}
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            (workspace / "gateway-samples-restored.log").write_text("\n".join([
+                json.dumps({"kind": "mlocal_ingress_failure", "code": "UPSTREAM_DEADLINE", "route": "readiness", "status": 503, "message": private}),
+                json.dumps({"kind": "mlocal_ingress_failure", "code": private, "route": "readiness", "status": 503}),
+                private]))
+            exported = namespace["readiness_diagnostic_summary"](workspace, attempts, probe)
+        self.assertNotIn(private, json.dumps(exported))
+        self.assertEqual(exported["attempts"][0]["statuses"], {"503": 79})
+        self.assertEqual(exported["attempts"][0]["categories"], {"client_timeout": 1})
+        self.assertEqual(exported["gateway_events"]["gateway-samples-restored"], {"UPSTREAM_DEADLINE": 1})
+        self.assertTrue(exported["post_failure"]["gateway_stopped_before_native_probe"])
+        self.assertEqual(exported["post_failure"]["native_feed"], {"status": 200, "seconds": 7.5, "ok": True, "shape_valid": True})
+
     def test_private_messages_and_credentials_are_not_exported(self):
         source = Path(__file__).with_name("release_experience_live.py")
         definition = next(node for node in ast.parse(source.read_text()).body

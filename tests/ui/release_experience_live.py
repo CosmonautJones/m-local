@@ -55,6 +55,54 @@ def scanner_chunk(url):
     return path.startswith(("/assets/", "/static/assets/")) and bool(re.search(r"/assets/(?:assets/)?index-[A-Za-z0-9_-]+\.js$", path))
 
 
+def readiness_diagnostic_summary(workspace, attempts, post_failure):
+    """Export only fixed readiness categories; raw native/gateway logs stay private."""
+    labels = {"native-setup", "native", "gateway", "native-samples-disabled", "gateway-samples-disabled",
+              "native-samples-restored", "gateway-samples-restored"}
+    codes = {"QUEUE_FULL", "QUEUE_DEADLINE", "QUEUE_ABORTED", "SERIALIZATION_CLOSED", "UPSTREAM_DEADLINE",
+             "UPSTREAM_FAILURE", "UPSTREAM_5XX", "READINESS_FAILED", "DELIVERY_LIMIT", "DELIVERY_DEADLINE"}
+    categories = {"client_timeout", "transport_error", "invalid_json", "not_ready", "ready", "process_exit"}
+    summary = {"attempts": [], "gateway_events": {}, "post_failure": {}}
+    for row in attempts:
+        if row.get("label") not in labels:
+            continue
+        summary["attempts"].append({"label": row["label"], "seconds": float(row["seconds"]),
+            "attempts": int(row["attempts"]),
+            "statuses": {key: int(value) for key, value in row.get("statuses", {}).items()
+                         if key in {str(number) for number in range(100, 600)}},
+            "categories": {key: int(value) for key, value in row.get("categories", {}).items() if key in categories}})
+    for label in sorted(labels):
+        if not label.startswith("gateway"):
+            continue
+        path = workspace / (label + ".log")
+        if not path.is_file():
+            continue
+        counts = {}
+        for line in path.read_text(errors="replace").splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if (isinstance(event, dict) and event.get("kind") == "mlocal_ingress_failure"
+                    and event.get("route") == "readiness" and event.get("code") in codes):
+                code = event["code"]
+                counts[code] = counts.get(code, 0) + 1
+        summary["gateway_events"][label] = counts
+    if post_failure:
+        summary["post_failure"]["gateway_stopped_before_native_probe"] = post_failure.get("gateway_stopped_before_native_probe") is True
+        for label in ("native_health", "native_feed"):
+            row = post_failure.get(label, {})
+            exported = {}
+            for name in ("status", "seconds"):
+                if isinstance(row.get(name), (int, float)) and not isinstance(row[name], bool):
+                    exported[name] = row[name]
+            for name in ("ready", "ok", "shape_valid", "client_timeout", "transport_error", "invalid_json"):
+                if isinstance(row.get(name), bool):
+                    exported[name] = row[name]
+            summary["post_failure"][label] = exported
+    return summary
+
+
 def capture_qr_controls(browser, app, workspace, payload, actual_svg):
     """Private controls use the same payload, size and library as the product."""
     renderer = "const fs=require('node:fs'),{createRequire}=require('node:module');const pkg=createRequire(process.argv[1]+'/.jac/client/configs/package.json');const React=pkg('react'),{renderToStaticMarkup}=pkg('react-dom/server'),{QRCodeSVG}=pkg('qrcode.react');process.stdout.write(renderToStaticMarkup(React.createElement(QRCodeSVG,{value:fs.readFileSync(0,'utf8'),size:240,level:'M',marginSize:4,bgColor:'#FFFFFF',fgColor:'#000000'})));"
@@ -206,6 +254,8 @@ def main():
     binding = {"source_sha256": hashlib.sha256(stable_json(manifest)).hexdigest(), "files": manifest,
                "source_ref": args.source_ref, "gateway_ref": args.gateway_ref, "workspace": str(workspace), "jac": "0.37.23"}
     binding["axe_sha256"] = hashlib.sha256(args.axe.read_bytes()).hexdigest()
+    binding["browser_helper_sha256"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    binding["mixed_sample_helper_sha256"] = hashlib.sha256(Path(__file__).with_name("release_sample_fixture.py").read_bytes()).hexdigest()
     (args.evidence / "source-binding.json").write_text(json.dumps(binding, indent=2) + "\n")
     environment = scrub_environment(jac, cache, app / ".jac/onboarding")
     # The browser runner imports Playwright from another private venv. Native
@@ -216,10 +266,11 @@ def main():
     environment.update(MLOCAL_ENV="development", MLOCAL_DEMO_MODE="1", MLOCAL_SHOW_SAMPLES="1",
                        MLOCAL_HOSTED_DATASET="0", MLOCAL_DEPLOYMENT_TOPOLOGY="single-instance-serialized",
                        MLOCAL_APP_REPLICAS="1", MLOCAL_BACKEND_PORT=str(port(args.base_port)),
-                       PORT=str(port(args.base_port + 1)), MLOCAL_INGRESS="restricted-edge")
+                       PORT=str(port(args.base_port + 1)), MLOCAL_INGRESS="restricted-edge",
+                       MLOCAL_INGRESS_EVENT_LOG="stderr")
     native = "http://127.0.0.1:" + str(args.base_port)
     origin = "http://127.0.0.1:" + str(args.base_port + 1)
-    processes, checks = [], []
+    processes, checks, process_labels, readiness_attempts, readiness_post_failure = [], [], {}, [], {}
     def interrupted(signum, _frame):
         raise SystemExit(128 + signum)
     for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
@@ -233,19 +284,75 @@ def main():
             process = subprocess.Popen(command, cwd=app, env=environment, stdin=subprocess.DEVNULL,
                                        stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         processes.append(process)
+        process_labels[process] = label
         return process
+    def native_failure_probe():
+        # Called only after stopping every owned gateway process. The private
+        # native store has one exclusive writer, with no public-lane bypass.
+        readiness_post_failure["gateway_stopped_before_native_probe"] = True
+        for label, path, body in (("native_health", "/healthz/ready", None), ("native_feed", "/function/home_feed", b"{}")):
+            row, began = {}, time.monotonic()
+            request = urllib.request.Request(native + path, body,
+                {"Content-Type": "application/json"} if body is not None else {}, method="POST" if body is not None else "GET")
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    row["status"] = response.status
+                    raw = response.read(4 * 1024 * 1024 + 1)
+                    reply = json.loads(raw) if len(raw) <= 4 * 1024 * 1024 else None
+                    if label == "native_health":
+                        row["ready"] = isinstance(reply, dict) and reply.get("ready") is True
+                    else:
+                        row["ok"] = isinstance(reply, dict) and reply.get("ok") is True
+                        result = reply.get("data", {}).get("result") if row["ok"] else None
+                        row["shape_valid"] = isinstance(result, dict) and isinstance(result.get("items"), list) and isinstance(result.get("favorites"), list)
+            except urllib.error.HTTPError as error:
+                row["status"] = error.code
+            except (TimeoutError, socket.timeout):
+                row["client_timeout"] = True
+            except ValueError:
+                row["invalid_json"] = True
+            except (OSError, urllib.error.URLError):
+                row["transport_error"] = True
+            row["seconds"] = round(time.monotonic() - began, 3)
+            readiness_post_failure[label] = row
     def ready(process, url, predicate):
+        began = time.monotonic()
+        row = {"label": process_labels[process], "attempts": 0, "statuses": {}, "categories": {}, "seconds": 0}
+        readiness_attempts.append(row)
+        def category(name):
+            row["categories"][name] = row["categories"].get(name, 0) + 1
+            row["seconds"] = round(time.monotonic() - began, 3)
         deadline = time.monotonic() + 300
         while time.monotonic() < deadline:
+            row["attempts"] += 1
             if process.poll() is not None:
+                category("process_exit")
                 raise RuntimeError("Owned fixture process exited: " + url)
             try:
                 with urllib.request.urlopen(url, timeout=3) as response:
+                    status = str(response.status)
+                    row["statuses"][status] = row["statuses"].get(status, 0) + 1
                     if predicate(json.load(response)):
+                        category("ready")
                         return
-            except (OSError, ValueError, urllib.error.URLError):
-                pass
+                    category("not_ready")
+            except urllib.error.HTTPError as error:
+                status = str(error.code)
+                row["statuses"][status] = row["statuses"].get(status, 0) + 1
+                category("not_ready")
+            except (TimeoutError, socket.timeout):
+                category("client_timeout")
+            except ValueError:
+                category("invalid_json")
+            except (OSError, urllib.error.URLError):
+                category("transport_error")
             time.sleep(.25)
+        row["seconds"] = round(time.monotonic() - began, 3)
+        if url == origin + "/healthz":
+            for owned in processes:
+                if process_labels[owned].startswith("gateway"):
+                    stop_process(owned)
+            native_failure_probe()
         raise TimeoutError("Owned fixture readiness deadline")
     phase = "install"
     completed = False
@@ -526,6 +633,7 @@ def main():
                    "seconds": round(time.monotonic() - started, 2), "redemption_transition_ms": redemption_transition_ms,
                    "student_scanner_requests": student_scanner_requests, "scanner_chunk_responses": scanner_chunk_responses,
                    "qr_diagnostics": qr_diagnostics,
+                   "readiness_diagnostics": readiness_diagnostic_summary(workspace, readiness_attempts, readiness_post_failure),
                    "owned_processes_stopped": True,
                    "private_postgres_stopped": True}
         (args.evidence / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
