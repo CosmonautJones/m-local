@@ -231,3 +231,23 @@ context. Idle keepalive sockets count toward the cap. Budget every worker and
 API instance against the actual database limit before changing production
 topology. Backpressure prevents overload from becoming database exhaustion;
 it does not prove the capacity target.
+
+## Official 0.37.23 concurrent identity-schema initialization
+
+The fresh combined `c2cb926` local shared-onboarding rehearsal failed before
+onboarding requests: two simultaneous native cold starts against an empty,
+disposable PostgreSQL database raced identity table creation. The official
+runtime returned SQLSTATE `23505`, `pg_type_typname_nsp_index`, for
+`identity_lookups`. The original failed rehearsal and private native logs remain
+retained; no runtime fork, database reset or automatic retry was substituted.
+
+The supported rollout initializes a database with one exclusive native server.
+Concurrent replacement/cold starts remain prohibited. The shared-onboarding
+fixture first starts and fully stops one schema bootstrap server, explicitly
+proves onboarding keys/accounts are still absent, then starts both isolated
+APIs for its existing simultaneous key creation, OTP consumption, resend,
+activation and quota races. It never serializes those request assertions.
+This fixture tests shared onboarding after database initialization; it does
+not certify simultaneous native schema creation, multiple production writers
+or scaling. A runtime fix and fresh reproduction are required before those
+topologies can be reconsidered.
