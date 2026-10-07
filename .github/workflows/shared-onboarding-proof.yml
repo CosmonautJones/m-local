@@ -2,35 +2,30 @@ name: Shared native onboarding proof
 
 on:
   push:
+    branches: [codex/release-readiness, 'release/**']
+  pull_request:
     branches: [codex/release-readiness]
-    paths:
-      - '.github/workflows/shared-onboarding-proof.yml'
-      - 'scripts/test-shared-onboarding.sh'
-      - 'tests/integration/shared_onboarding_http.py'
-      - 'tests/integration/smtp_sink.py'
-      - 'tests/integration/test_smtp_sink.py'
-      - 'tests/integration/recovery_http.py'
-      - 'services/**'
-      - 'main.jac'
-      - 'jac.toml'
-      - '.jac-version'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: shared-native-onboarding-proof
+  group: shared-native-onboarding-proof-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  source-share:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report tracked source-byte composition
+        run: python3 scripts/check-jac-share.py
   shared-onboarding:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: Report tracked source-byte composition
-        run: python3 scripts/check-jac-share.py
       - name: Install pinned Jac
         run: bash scripts/setup.sh
       - name: Check the disposable TLS mail sink
