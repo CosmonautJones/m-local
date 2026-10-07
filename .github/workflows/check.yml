@@ -67,3 +67,12 @@ jobs:
         run: npm install --prefix .jac/ui-test-runtime --no-save --package-lock=false jsdom@26.1.0
       - name: Check compiled onboarding and phone flows
         run: node --test tests/ui/browser/*.test.mjs
+      - name: Preserve exact-source test inventory and compiled artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-check-evidence-${{ github.sha }}
+          path: |
+            .jac/release-core-binding.json
+            .jac/release-test-inventory.json
+            dist/*.jab
