@@ -1222,12 +1222,12 @@ def:pub app -> JsxElement {
     return <View style={[styles.screen, {"height": viewport.height}]}>
         <UiFoundation />
         <View style={[styles.frame, {"maxWidth": 1040} if shown == "insights" else {}]}>
-            <ScrollView style={[styles.scroll, {"height": viewport.height}]}>
+            <ScrollView style={[styles.scroll, {"minHeight": 0}]}>
                 <View testID="app-masthead" style={styles.masthead}><BrandLogo />{LogoutLink()}</View>
                 {body}
             </ScrollView>
             {(
-                <View testID="app-tabbar" style={styles.tabbar}>
+                <View testID="app-tabbar" style={[styles.tabbar, {"position": "relative", "flexShrink": 0}]}>
                     {TabButton("discover", "Offers") if not company else <View style={styles.hidden} />}
                     {TabButton("merchant", "Offers") if role == "merchant" else <View style={styles.hidden} />}
                     {TabButton("redeem", "Scan QR") if role == "merchant" else <View style={styles.hidden} />}
