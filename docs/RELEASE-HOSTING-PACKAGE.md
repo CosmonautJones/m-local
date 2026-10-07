@@ -54,7 +54,7 @@ container layer is insufficient. Keep these components together:
 | Email, accounts, business owners, approvals, drafts, challenges and quotas | `MLOCAL_ONBOARDING_DIR/onboarding.sqlite3`, outside source on the durable volume. |
 | Email code signing | The existing 32-byte `code.key` in that directory; never silently regenerate it. |
 | Photo ownership | Matching `photo-ownership.sqlite3` in the same private directory. |
-| Native JWT signing | Existing canonical app `.jac/data/jwt_secret`, or the original effective `JAC_DATA_PATH/jwt_secret`; preserve the configured location and original effective key. |
+| Native JWT signing | Existing canonical app `.jac/data/jwt_secret`, or the original effective `<JAC_DATA_PATH>/.jac/data/jwt_secret`; preserve the configured base, resulting location and original effective key. |
 | Uploaded photos | Existing canonical app `assets/photos/`; restore with ownership and graph associations. |
 | Application identity | The **resolved absolute `main.jac` path**, source SHA, runtime, dependencies and layout. |
 
@@ -65,8 +65,11 @@ path can keep sign-in working while graph ownership fails. Determine and retain
 the deployed canonical path before migration. A symlink is not a migration.
 Provision/mount the whole durable layout so canonical native state and photos
 are inside the real durable root; do not use data symlinks.
-If the current host uses `JAC_DATA_PATH`, record that original directory in
-optional `native_data_dir` and its existing `jwt_secret` in `native_signing_file`.
+If the current host uses `JAC_DATA_PATH`, preserve that original **base** setting.
+Official Jac appends `.jac/data` to it. Record the resulting existing directory
+`<JAC_DATA_PATH>/.jac/data` in optional `native_data_dir` and its existing
+`jwt_secret` in `native_signing_file`. Do not set `JAC_DATA_PATH` to that resulting
+signing directory: Jac would append `.jac/data` again.
 Keep the same explicit environment setting. The launcher rejects a path mismatch;
 it never chooses a new signing store. Any `JAC_SERVE_AUTH_SECRET` or configured
 serve-auth secret must match the preserved original effective key, as verified

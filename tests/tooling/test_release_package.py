@@ -189,6 +189,43 @@ class ReleasePackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "existing canonical paths"):
             PACKAGE.validate_config(config)
 
+    def test_launcher_accepts_preserved_native_base_override(self):
+        app = self.root / "canonical"
+        base = self.root / "state/existing-native-base"
+        config = self.config(app)
+        config["native_data_dir"] = str(base / ".jac/data")
+        config["native_signing_file"] = str(base / ".jac/data/jwt_secret")
+        manifest = {"dependencies": {"archive": "libraries.tar"}, "build": {"artifact": "fixture.jab"},
+                    "runtime": {"jac": "fixture", "jacpython": "fixture"}}
+        with patch.object(PACKAGE, "verify_package", return_value=manifest), \
+             patch.object(PACKAGE, "require_launch_evidence"), \
+             patch.object(PACKAGE, "state_inventory"), \
+             patch.object(PACKAGE, "verify_installed_source"), \
+             patch.object(PACKAGE, "acquire_lock", side_effect=RuntimeError("PASSED_SIGNING_POLICY")), \
+             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://localhost/disposable", "JAC_DATA_PATH": str(base),
+                                    "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "PASSED_SIGNING_POLICY"):
+                PACKAGE.launch(self.root / "package", config, {})
+
+    def test_launcher_rejects_signing_directory_misused_as_native_base(self):
+        app = self.root / "canonical"
+        base = self.root / "state/existing-native-base"
+        config = self.config(app)
+        config["native_data_dir"] = str(base / ".jac/data")
+        config["native_signing_file"] = str(base / ".jac/data/jwt_secret")
+        manifest = {"dependencies": {"archive": "libraries.tar"}, "build": {"artifact": "fixture.jab"},
+                    "runtime": {"jac": "fixture", "jacpython": "fixture"}}
+        with patch.object(PACKAGE, "verify_package", return_value=manifest), \
+             patch.object(PACKAGE, "require_launch_evidence"), \
+             patch.object(PACKAGE, "state_inventory"), \
+             patch.object(PACKAGE, "verify_installed_source"), \
+             patch.object(PACKAGE, "acquire_lock", side_effect=RuntimeError("UNEXPECTED_LOCK_ATTEMPT")) as lock, \
+             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://localhost/disposable", "JAC_DATA_PATH": str(base / ".jac/data"),
+                                    "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "JAC_DATA_PATH differs"):
+                PACKAGE.launch(self.root / "package", config, {})
+            lock.assert_not_called()
+
     def test_secret_values_never_in_inventory(self):
         config = self.config(self.root / "canonical")
         onboarding = Path(config["onboarding_dir"])

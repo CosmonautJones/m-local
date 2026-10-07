@@ -662,8 +662,10 @@ def launch(package, config, evidence):
     environment.update(MLOCAL_ENV="production", MLOCAL_PUBLIC_INGRESS="restricted", MLOCAL_DEPLOYMENT_TOPOLOGY="single-instance-serialized",
                        MLOCAL_APP_REPLICAS="1", MLOCAL_DURABLE_ROOT=config["durable_root"], MLOCAL_ONBOARDING_DIR=config["onboarding_dir"],
                        MLOCAL_BACKEND_PORT=str(config["backend_port"]), PORT=str(config["gateway_port"]), MLOCAL_INGRESS_EVENT_LOG="stderr")
-    effective_data = Path(environment.get("JAC_DATA_PATH", str(app / ".jac/data")))
-    if not effective_data.is_absolute() or effective_data.resolve() / "jwt_secret" != Path(config["native_signing_file"]):
+    # Official authcrypt.project_data_dir treats JAC_DATA_PATH as a base and
+    # appends .jac/data. It is not the signing-directory setting itself.
+    native_base = Path(environment.get("JAC_DATA_PATH", "").strip() or str(app))
+    if not native_base.is_absolute() or (native_base / ".jac/data/jwt_secret").resolve() != Path(config["native_signing_file"]):
         raise ReleaseError("JAC_DATA_PATH differs from the recorded original native signing state; preserve the existing path and key")
     # Node/gateway provenance and explicit trusted edge are host capabilities.
     if environment.get("MLOCAL_INGRESS") not in {"render", "funnel", "restricted-edge"}:
