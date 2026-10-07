@@ -180,7 +180,8 @@ def main():
     parser.add_argument("--base-port", type=int, default=18900)
     parser.add_argument("--axe", type=Path, default=Path("/var/tmp/m-local-experience-ui/node_modules/axe-core/axe.min.js"))
     args = parser.parse_args()
-    if sys.platform != "linux" or os.geteuid() == 0 or os.environ.get("JAC_DB_URL") or os.environ.get("JAC_DEV_SOURCE"):
+    if (sys.platform != "linux" or os.geteuid() == 0
+            or any(os.environ.get(name) for name in ("JAC_DB_URL", "JAC_DATA_PATH", "JAC_DEV_SOURCE", "JACPATH"))):
         raise RuntimeError("Use an unprivileged Linux fixture without inherited live database/source overrides")
     source = args.source.resolve()
     if not source.is_dir() or not (source / "main.jac").is_file():
@@ -210,6 +211,8 @@ def main():
     # The browser runner imports Playwright from another private venv. Native
     # installation must resolve every dependency into this app's own venv.
     environment.pop("PYTHONPATH", None)
+    environment.pop("JAC_DATA_PATH", None)
+    environment.pop("JACPATH", None)
     environment.update(MLOCAL_ENV="development", MLOCAL_DEMO_MODE="1", MLOCAL_SHOW_SAMPLES="1",
                        MLOCAL_HOSTED_DATASET="0", MLOCAL_DEPLOYMENT_TOPOLOGY="single-instance-serialized",
                        MLOCAL_APP_REPLICAS="1", MLOCAL_BACKEND_PORT=str(port(args.base_port)),
