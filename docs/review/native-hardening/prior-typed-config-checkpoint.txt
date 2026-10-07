@@ -1,0 +1,50 @@
+PASS fixture helpers import only the tested source copy
+RUN private dependency installation
+PASS invalid production configuration actual server process exits unsuccessfully
+PASS invalid production configuration leaves no owned serving child or listener
+PASS invalid production configuration reports actionable setting names
+PASS invalid production configuration does not disclose supplied secret values
+PASS development server reaches authenticated-session and catalog readiness
+PASS native register reproduces unverified email identity admission
+PASS unverified native registration has no student or merchant authority
+PASS native identity has legitimate saved preferences without onboarding
+PASS email request delivers only to local TLS sink
+PASS internal passwordless provisioning remains usable
+PASS merchant submission remains private pending manual approval
+PASS manual approval foundation activates one owned merchant
+PASS merchant creates dedicated preservation offer
+PASS merchant creates dedicated preservation offer
+PASS native root owns real pending and redeemed claims
+PASS merchant redeems one preserved claim once
+PASS disposable fixture simulates missing onboarding without erasing native graph
+PASS email request delivers only to local TLS sink
+PASS eight concurrent collision attempts issue no replacement session
+PASS repeated collision challenge remains denied
+PASS original native credentials remain usable after collision attempts
+PASS original native login preserves the exact root identity
+PASS preexisting native preferences survive missing-onboarding collision
+PASS pending claim identity credential and snapshots are preserved
+PASS redeemed history remains single use
+PASS merchant ownership remains unchanged
+PASS original onboarding and signing keys are unchanged
+PASS email request delivers only to local TLS sink
+PASS eight returning sign-in attempts consume once and retain the owned root
+PASS returning email proof preserves saved account kind and name
+PASS intended ingress denies native/private POST /user/register
+PASS intended ingress denies native/private POST /user/login
+PASS intended ingress denies native/private POST /user/register/challenge
+PASS intended ingress denies native/private POST /graph/data
+PASS intended ingress denies native/private POST /docs
+PASS intended ingress denies native/private POST /admin
+PASS restricted public ingress allows passwordless request
+PASS restricted public ingress allows internal passwordless provisioning
+PASS valid production configuration reaches session and catalog readiness
+PASS valid production startup preserves the preexisting native token and root
+PASS writable unmounted production state actual server process exits unsuccessfully
+PASS writable unmounted production state leaves no owned serving child or listener
+PASS writable unmounted production state reports actionable setting names
+PASS writable unmounted production state does not disclose supplied secret values
+PASS owned local TLS SMTP fixture closes
+PASS all owned API gateway PostgreSQL processes and listener stop
+PASS copied source input manifest is unchanged throughout the native proof
+{"check_labels": ["fixture helpers import only the tested source copy", "invalid production configuration actual server process exits unsuccessfully", "invalid production configuration leaves no owned serving child or listener", "invalid production configuration reports actionable setting names", "invalid production configuration does not disclose supplied secret values", "development server reaches authenticated-session and catalog readiness", "native register reproduces unverified email identity admission", "unverified native registration has no student or merchant authority", "native identity has legitimate saved preferences without onboarding", "email request delivers only to local TLS sink", "internal passwordless provisioning remains usable", "merchant submission remains private pending manual approval", "manual approval foundation activates one owned merchant", "merchant creates dedicated preservation offer", "merchant creates dedicated preservation offer", "native root owns real pending and redeemed claims", "merchant redeems one preserved claim once", "disposable fixture simulates missing onboarding without erasing native graph", "email request delivers only to local TLS sink", "eight concurrent collision attempts issue no replacement session", "repeated collision challenge remains denied", "original native credentials remain usable after collision attempts", "original native login preserves the exact root identity", "preexisting native preferences survive missing-onboarding collision", "pending claim identity credential and snapshots are preserved", "redeemed history remains single use", "merchant ownership remains unchanged", "original onboarding and signing keys are unchanged", "email request delivers only to local TLS sink", "eight returning sign-in attempts consume once and retain the owned root", "returning email proof preserves saved account kind and name", "intended ingress denies native/private POST /user/register", "intended ingress denies native/private POST /user/login", "intended ingress denies native/private POST /user/register/challenge", "intended ingress denies native/private POST /graph/data", "intended ingress denies native/private POST /docs", "intended ingress denies native/private POST /admin", "restricted public ingress allows passwordless request", "restricted public ingress allows internal passwordless provisioning", "valid production configuration reaches session and catalog readiness", "valid production startup preserves the preexisting native token and root", "writable unmounted production state actual server process exits unsuccessfully", "writable unmounted production state leaves no owned serving child or listener", "writable unmounted production state reports actionable setting names", "writable unmounted production state does not disclose supplied secret values", "owned local TLS SMTP fixture closes", "all owned API gateway PostgreSQL processes and listener stop", "copied source input manifest is unchanged throughout the native proof"], "checks": 48, "elapsed_seconds": 193.485, "external_email_delivery": false, "github_sha": "", "jacpython_bin_sha256": "198225fb91707f48461f3fec1684d444ab0fd7b5a1e0913f0a0a8f11c9d02542", "local_tls_smtp": true, "mounted_volume_fixture": true, "native_register_reproduction": true, "official_release_checksums_verified": true, "production_config_process_checks": true, "provider_durability_acceptance": false, "public_ingress_native_post_denied": true, "release_acceptance": false, "runtime_bin_sha256": "2c3c697616b08516caf01704571e7e7020f4b294cd2bef7f04e8ef1ceec9d6ad", "runtime_version": "jac 0.37.23  (Linux x86_64)", "sink_deliveries": 4, "source_input_manifest_sha256": "85579998a0ed9971e7091554e900307fa269609f98279172e0af53be9fa3c810", "status": "passed", "transaction_safety_or_capacity_acceptance": false}
