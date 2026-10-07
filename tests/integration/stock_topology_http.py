@@ -29,6 +29,16 @@ from recovery_http import digest, private_dir, scrub_environment, stop_process
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def verify_stock_binaries(jac):
+    expected = {
+        jac: '2c3c697616b08516caf01704571e7e7020f4b294cd2bef7f04e8ef1ceec9d6ad',
+        Path(str(jac) + 'python'): '198225fb91707f48461f3fec1684d444ab0fd7b5a1e0913f0a0a8f11c9d02542',
+    }
+    for binary, checksum in expected.items():
+        if digest(binary) != checksum:
+            raise RuntimeError('Fixture requires the official Linux x86_64 Jac0.37.23 published binaries')
+
+
 def rpc(origin, function, **params):
     req = urllib.request.Request(origin + '/function/' + function,
         json.dumps(params).encode(), {'Content-Type': 'application/json'}, method='POST')
@@ -63,6 +73,7 @@ def main():
     version = subprocess.check_output([str(jac), '--version'], text=True, timeout=30).strip()
     if version.split()[:2] != ['jac', '0.37.23']:
         raise RuntimeError('Use official Jac 0.37.23')
+    verify_stock_binaries(jac)
     os.umask(0o077)
     workspace = Path(tempfile.mkdtemp(prefix='m-local-stock-topology.', dir='/var/tmp'))
     app, cache = workspace / 'app', workspace / 'cache'

@@ -31,6 +31,7 @@ from zoneinfo import ZoneInfo
 from recovery_http import (Api, copy_application, digest, input_manifest,
                            private_dir, run_logged, scrub_environment, stable_json, stop_process)
 from stock_topology_app_faults import verify_actual_faults
+from stock_topology_http import verify_stock_binaries
 
 ROOT = Path(__file__).resolve().parents[2]
 NATIVE_PORT, GATEWAY_PORT = 18880, 18881
@@ -71,6 +72,7 @@ def main():
     version = subprocess.check_output([str(jac), '--version'], text=True, timeout=30).strip()
     if version.split()[:2] != ['jac', '0.37.23']:
         raise RuntimeError('Official Jac0.37.23 required')
+    verify_stock_binaries(jac)
     node = shutil.which('node')
     if not node:
         raise RuntimeError('Node is required for the actual ingress')
@@ -233,6 +235,9 @@ def main():
         check(all(int(row[1]) == 1 for row in counts), 'independent database observer finds no duplicate cold restaurant slug')
         check(int(rows("SELECT COUNT(*) FROM anchors WHERE arch_type='CatalogBootstrap'")[0][0]) == 1,
               'one durable cold catalog bootstrap')
+        with urllib.request.urlopen(gateway + '/healthz', timeout=30) as health:
+            check(health.headers.get_content_type() == 'application/json' and json.load(health).get('ready') is True,
+                  'serialized public readiness verifies actual native JSON readiness and feed')
         check(merchant.call('current_session')['role'] == 'merchant', 'native preserved merchant identity owns fixture catalog')
         check(all(student.call('current_session')['role'] == 'student' for student in students),
               '50distinct disposable native students are recognized')
@@ -309,6 +314,8 @@ def main():
               'redemption stays single-use after restart')
         check(merchant.call('save_offer', **post)['code'] == offer_id,
               'publication key retains original offer after restart')
+        with urllib.request.urlopen(gateway + '/healthz', timeout=30) as health:
+            check(json.load(health).get('ready') is True, 'serialized readiness remains meaningful after restart')
         receipt['verdict'] = 'BOUNDED_SERIALIZED_APP_RACES_PASS_NOT_HOSTING_CERTIFIED'
     except BaseException as error:
         receipt['failure_type'], receipt['failure'] = type(error).__name__, str(error)
