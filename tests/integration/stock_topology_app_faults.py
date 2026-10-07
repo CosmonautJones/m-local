@@ -5,7 +5,6 @@ import os
 import secrets
 import urllib.error
 import urllib.request
-from uuid import UUID
 from zoneinfo import ZoneInfo
 
 
