@@ -30,6 +30,14 @@ const failureCodes=new Set(['ROUTE_DENIED','BODY_TOO_LARGE','BODY_DEADLINE','ONB
 // A process-wide budget, rather than one large buffer per accepted socket.
 // HTTP completion must not depend on a browser continuing to read its socket.
 const maxResponseBytes=8*1024*1024,maxDeliveryBytes=16*1024*1024;
+const guestSession={authenticated:false,actor_id:'',role:'guest',restaurant_id:'',display_name:'',
+  is_demo:false,email_verified:false,business_account:false,catalog_activity:false};
+
+function validGuestSession(value) {
+  return value!==null&&typeof value==='object'&&!Array.isArray(value)&&
+    Object.keys(value).length===Object.keys(guestSession).length&&
+    Object.entries(guestSession).every(([name,expected])=>value[name]===expected);
+}
 
 function createObserver(eventSink) {
   const failures=Object.fromEntries([...failureCodes].map(code=>[code,0]));
@@ -73,17 +81,19 @@ export function createShareProxy({upstreamHost='localhost',upstreamPort=8200,
   trustCloudflare=true,trustFunnel=false,healthCheck=false,
   deploymentTopology=process.env.MLOCAL_DEPLOYMENT_TOPOLOGY||'',
   secureProductionIngress=false,maxQueuedRequests=32,queueWaitMs=10000,maxConnections=96,
-  upstreamDeadlineMs,readinessDeadlineMs=5000,
+  upstreamDeadlineMs,readinessDeadlineMs=5000,startupCatalogCheck=false,
   eventSink=process.env.MLOCAL_INGRESS_EVENT_LOG==='stderr' ? event=>console.error(JSON.stringify(event)) : undefined,
 }={}) {
   if(!['','single-instance-serialized'].includes(deploymentTopology))throw new Error('Invalid deployment topology.');
   if(typeof secureProductionIngress!=='boolean')throw new Error('Invalid secure ingress policy.');
+  if(typeof startupCatalogCheck!=='boolean')throw new Error('Invalid startup catalog policy.');
   if(!Number.isInteger(maxConnections)||maxConnections<1||maxConnections>256)throw new Error('Invalid ingress connection limit.');
   if(upstreamDeadlineMs!==undefined&&(!Number.isInteger(upstreamDeadlineMs)||upstreamDeadlineMs<1||upstreamDeadlineMs>80000))throw new Error('Invalid upstream deadline.');
   if(!Number.isInteger(readinessDeadlineMs)||readinessDeadlineMs<1||readinessDeadlineMs>5000)throw new Error('Invalid readiness deadline.');
   const lane=deploymentTopology==='single-instance-serialized'?createSerializedIngress({maxQueuedRequests,queueWaitMs}):null;
+  if(startupCatalogCheck&&(!lane||!healthCheck))throw new Error('Startup catalog acceptance requires serialized readiness.');
   const observer=createObserver(eventSink),limit=createOnboardingLimit();
-  let deliveryBytes=0;
+  let deliveryBytes=0,catalogState=startupCatalogCheck?'pending':'disabled';
 
   function deliver(response,res,route,deadlineMs) {
     if(res.destroyed){response.resume();return;}
@@ -153,6 +163,25 @@ export function createShareProxy({upstreamHost='localhost',upstreamPort=8200,
     return task(undefined);
   }
 
+  async function jsonProbe(path,{signal,deadlineMs,maxBytes=64*1024}={}) {
+    const post=path.startsWith('/function/');
+    let body='',bytes=0,overflow=false,status,type;
+    await dispatch(active=>upstreamRequest({path,method:post?'POST':'GET',
+      headers:{'accept-encoding':'identity',...(post?{'content-type':'application/json','content-length':'2'}:{})}},
+      {body:post?'{}':undefined,signal:active,deadlineMs,onResponse:response=>{
+        status=response.statusCode;type=response.headers['content-type'];response.setEncoding('utf8');
+        response.on('data',chunk=>{
+          bytes+=Buffer.byteLength(chunk,'utf8');
+          if(bytes>maxBytes){overflow=true;body='';}
+          else if(!overflow)body+=chunk;
+        });
+      }}),{signal,deadlineMs});
+    // Even an oversized or invalid response drains completely before the lane
+    // can admit another operation. Never log response bodies or parser errors.
+    if(overflow||status!==200||typeof type!=='string'||!/^application\/json(?:;|$)/i.test(type))return null;
+    try{return JSON.parse(body);}catch{return null;}
+  }
+
   const proxy=http.createServer((req,res)=>{
     const path=req.url.split('?')[0],route=routeLabel(path);
     const read=['GET','HEAD'].includes(req.method);
@@ -186,48 +215,23 @@ export function createShareProxy({upstreamHost='localhost',upstreamPort=8200,
       // full response; the lane's deadline latches closed if that never ends.
       const deadline=setTimeout(()=>finish(false),readinessDeadlineMs);
       res.on('close',()=>clearTimeout(deadline));
+      if(startupCatalogCheck&&catalogState!=='passed'){finish(false);return;}
       (async()=>{
-        let nativeBody='',nativeBytes=0,nativeStatus,nativeType;
         // Official Jac 0.37.23 registers this native route. A 200 app shell or
         // incomplete/misconfigured response is not evidence of readiness.
-        await dispatch(signal=>upstreamRequest({path:'/healthz/ready',method:'GET',headers:{'accept-encoding':'identity'}},
-          {signal,deadlineMs:readinessDeadlineMs,onResponse:response=>{
-            nativeStatus=response.statusCode;nativeType=response.headers['content-type'];
-            response.setEncoding('utf8');
-            response.on('data',chunk=>{
-              nativeBytes+=Buffer.byteLength(chunk,'utf8');
-              if(nativeBytes>64*1024){finish(false);nativeBody='';}
-              else if(!finished)nativeBody+=chunk;
-            });
-          }}),
-          {signal:waiting.signal,deadlineMs:readinessDeadlineMs});
+        const native=await jsonProbe('/healthz/ready',{signal:waiting.signal,deadlineMs:readinessDeadlineMs});
         if(finished)return;
-        let runtimeReady=false;
-        try {
-          runtimeReady=nativeStatus===200&&typeof nativeType==='string'&&
-            /^application\/json(?:;|$)/i.test(nativeType)&&JSON.parse(nativeBody)?.ready===true;
-        }catch{ /* invalid native readiness is unready */ }
-        if(!runtimeReady){finish(false);return;}
-        let body='',status;
-        await dispatch(signal=>upstreamRequest({path:'/function/home_feed',method:'POST',
-          headers:{'content-type':'application/json','content-length':'2','accept-encoding':'identity'}},
-          {body:'{}',signal,deadlineMs:readinessDeadlineMs,onResponse:response=>{
-            status=response.statusCode;response.setEncoding('utf8');
-            response.on('data',chunk=>{
-              if(body.length+chunk.length>4*1024*1024){finish(false);body='';}
-              else if(!finished)body+=chunk;
-            });
-          }}),{signal:waiting.signal,deadlineMs:readinessDeadlineMs});
+        if(native?.ready!==true){finish(false);return;}
+        const reply=await jsonProbe('/function/current_session',{signal:waiting.signal,deadlineMs:readinessDeadlineMs});
         if(finished)return;
-        try {
-          const reply=JSON.parse(body);
-          if(status!==200||reply?.ok!==true){finish(false);return;}
-          validateHomeFeed(reply?.data?.result);finish(true);
-        }catch{finish(false);}
+        finish(reply?.ok===true&&validGuestSession(reply?.data?.result));
       })().catch(error=>{observer.fail(failureCodes.has(error.code)?error.code:'UPSTREAM_FAILURE','readiness',503);finish(false);});
       return;
     }
     if(!allowed){fail('ROUTE_DENIED',403,'This endpoint is not available.');return;}
+    if(startupCatalogCheck&&catalogState!=='passed'&&req.method==='POST'){
+      req.resume();fail('READINESS_FAILED',503,'M-Local is starting or unavailable.');return;
+    }
     const cloudflareIp=req.headers['cf-connecting-ip'],funnelIp=req.headers['x-forwarded-for'];
     const loopback=['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
     const client=trustFunnel
@@ -278,7 +282,19 @@ export function createShareProxy({upstreamHost='localhost',upstreamPort=8200,
     req.on('error',()=>{clearTimeout(deadline);res.destroy();});
     res.on('close',()=>clearTimeout(deadline));
   });
+  if(startupCatalogCheck)proxy.once('listening',()=>{
+    (async()=>{
+      const native=await jsonProbe('/healthz/ready',{deadlineMs:readinessDeadlineMs});
+      if(native?.ready!==true)throw new Error('Startup metadata refused.');
+      const reply=await jsonProbe('/function/home_feed',{deadlineMs:upstreamDeadlineMs??30000,maxBytes:4*1024*1024});
+      if(reply?.ok!==true)throw new Error('Startup catalog refused.');
+      validateHomeFeed(reply?.data?.result);
+      if(lane.status().closed)throw new Error('Startup lane closed.');
+      catalogState='passed';
+    })().catch(()=>{catalogState='failed';observer.fail('READINESS_FAILED','readiness',503);});
+  });
   proxy.ingressStatus=()=>({failures:observer.status(),serialization:lane?.status()??{enabled:false},
+    startupCatalog:catalogState,
     delivery:{bytes:deliveryBytes,maxBytes:maxDeliveryBytes,maxResponseBytes}});
   // Bound sockets and partially received requests as well as queued bodies.
   proxy.maxConnections=maxConnections;

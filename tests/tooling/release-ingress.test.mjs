@@ -60,14 +60,16 @@ test('serialization holds every upstream request until its entire response ends'
   assert.deepEqual(seen,['/static/client.js','/function/claim_offer']);
 });
 
-test('readiness ready and anonymous feed probes use the same serialized gate',async t=>{
+test('readiness metadata and guest application probes use the same serialized gate',async t=>{
   const seen=[];
   let finishFirst;
   const {origin}=await serve(t,(req,res)=>{
     seen.push(req.url);
     if(req.url==='/function/claim_offer'){res.writeHead(200);res.write('{}');finishFirst=()=>res.end();}
     else if(req.url==='/healthz/ready'){res.writeHead(200,{'content-type':'application/json'});res.end('{"ready":true}');}
-    else res.end(JSON.stringify({ok:true,data:{result:emptyFeed}}));
+    else {res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,data:{result:{
+      authenticated:false,actor_id:'',role:'guest',restaurant_id:'',display_name:'',is_demo:false,
+      email_verified:false,business_account:false,catalog_activity:false}}}));}
   },{deploymentTopology:'single-instance-serialized',healthCheck:true});
   const first=await fetch(origin+'/function/claim_offer',{method:'POST',body:'{}'});
   const ready=fetch(origin+'/healthz');
@@ -77,7 +79,7 @@ test('readiness ready and anonymous feed probes use the same serialized gate',as
   const response=await ready;
   assert.equal(response.status,200);
   assert.deepEqual(await response.json(),{ready:true});
-  assert.deepEqual(seen,['/function/claim_offer','/healthz/ready','/function/home_feed']);
+  assert.deepEqual(seen,['/function/claim_offer','/healthz/ready','/function/current_session']);
 });
 
 test('queue saturation and waiting deadline never forward rejected work',async t=>{
