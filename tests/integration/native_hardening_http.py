@@ -72,7 +72,7 @@ def owned_listener_ports(process):
                         inodes.add(target[8:-1])
                 except FileNotFoundError:
                     pass
-        except ProcessLookupError:
+        except (ProcessLookupError, FileNotFoundError):
             pass
     ports = set()
     for protocol in ('tcp', 'tcp6'):
