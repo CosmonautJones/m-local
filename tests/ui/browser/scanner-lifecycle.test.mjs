@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
+import {mkdir,mkdtemp,rm,writeFile} from 'node:fs/promises';
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
+import {tmpdir} from 'node:os';
+import {compileBrowserBundle} from './harness.mjs';
 
 // Exercise the actual QR React bridge and controller, with controllable scanner
 // import/camera boundaries. This does not claim physical-camera or network proof.
@@ -59,6 +62,32 @@ function fixture({load,requestStream,decodeStream,decodeImage}={}){
     close(){this.unmount();w.close();}
   };
 }
+
+test('compiled UI harness initializes an emitted dynamic chunk only when requested and shares its module once',async()=>{
+  const directory=await mkdtemp(resolve(tmpdir(),'m-local-ui-chunks-'));
+  const dom=new JSDOM('<!doctype html><div></div>',{runScripts:'outside-only'});
+  try{
+    await writeFile(resolve(directory,'entry.js'),'window.scannerLoads=0;window.loadScanner=()=>import("./scanner.js");');
+    await writeFile(resolve(directory,'scanner.js'),'window.scannerLoads++;export const reader={kind:"emitted-scanner-fixture"};');
+    dom.window.eval(await compileBrowserBundle(resolve(directory,'entry.js'),directory));
+    assert.equal(dom.window.scannerLoads,0,'guest initialization leaves the dynamic chunk uninitialized');
+    const first=await dom.window.loadScanner(),second=await dom.window.loadScanner();
+    assert.equal(first.reader.kind,'emitted-scanner-fixture');assert.equal(first,second);assert.equal(dom.window.scannerLoads,1);
+  }finally{dom.window.close();await rm(directory,{recursive:true,force:true});}
+});
+
+test('compiled UI harness rejects a dynamic chunk outside the declared compiled output directory',async()=>{
+  const privateRoot=await mkdtemp(resolve(tmpdir(),'m-local-ui-chunk-boundary-'));
+  const directory=resolve(privateRoot,'dist');await mkdir(directory);
+  try{
+    await writeFile(resolve(directory,'entry.js'),'window.loadScanner=()=>import("../outside.js");');
+    // The outside file exists so this checks containment, rather than discovery.
+    const outside=resolve(directory,'../outside.js');
+    await writeFile(outside,'export const forbidden=true;',{flag:'wx'});
+    try{await assert.rejects(compileBrowserBundle(resolve(directory,'entry.js'),directory),/stay within the compiled output directory/);}
+    finally{await rm(outside);}
+  }finally{await rm(privateRoot,{recursive:true,force:true});}
+});
 
 test('the real scanner dependency is absent from the initial QR bundle and available as a dynamic chunk',async()=>{
   const bundled=await build({entryPoints:[qrSource],outdir:resolve(root,'.jac/scanner-test-bundle'),
