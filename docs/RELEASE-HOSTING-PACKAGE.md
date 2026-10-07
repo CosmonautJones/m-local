@@ -93,6 +93,21 @@ Run in **WSL/Linux Bash**, using the pinned repository wrappers for build and
 tests. Commit the final reviewed candidate first; dirty sources are refused.
 Use a fresh output directory outside source. This command performs no hosting.
 
+The complete, reproducible package driver builds the committed source, verifies
+official runtime fingerprints, seals the installed libraries and creates both
+the expanded package and its portable archive:
+
+```bash
+bash scripts/build-release-package.sh /var/tmp/m-local-rc-build
+python3 deploy/release/package.py verify --package /var/tmp/m-local-rc-build/release
+cat /var/tmp/m-local-rc-build/archive-sha256.txt
+```
+
+The output includes `package-manifest.json`, `build-receipt.json`,
+`official-checksums.json`, and `offline-package.tar.gz`. These engineering
+artifacts contain no approval, live keys, onboarding database or recovery set.
+The lower-level commands below remain available for an already tested build.
+
 ```bash
 source scripts/runtime.sh
 bash scripts/check.sh
@@ -272,6 +287,32 @@ runtime transaction safety, remote durability or hosted acceptance. Run it with
 ```bash
 python3 -m unittest discover -s tests/tooling -p test_release_package.py
 ```
+
+The separate `release-package-proof.yml` executes the complete package against
+actual native Jac accounts, a real approved fixture business/offer/held claim,
+an owned JPEG and a local TLS mail sink. It proves configured production
+readiness, public native-path denial, original authenticated actors/QR/snapshot,
+supervisor termination, coordinated logical backup and empty-database restore at
+the same canonical source path, then authenticated restarted readback. It keeps
+the original database and private source/stores intact. Run that procedure only
+on a new private disposable mounted volume, using compatible PostgreSQL tools:
+
+```bash
+source scripts/runtime.sh
+export JAC_BIN
+bash scripts/python.sh tests/integration/release_package_http.py \
+  --package /var/tmp/m-local-rc-build/release --tools / \
+  --durable-base /absolute/new/disposable-mounted-volume \
+  --receipt /absolute/new/private-package-proof.json
+```
+
+`--tools /` selects installed `/usr/lib/postgresql/16` tools; an extracted tools
+root is also supported. This fixture creates its own local databases and email
+recipients. Its private synthetic launch assertions never provide real rollout
+approval, hosted topology acceptance or transaction certification. CI retains
+only small source-bound engineering receipts; it excludes keys, recovery sets,
+raw native logs and the large archive. Record the actual terminal receipt before
+claiming this proof passed; preserved failed or interrupted runs are not passes.
 
 Independent review also required, and the regressions verify: refusing a live
 listener even after the local lock is free; never labeling a backup with an
