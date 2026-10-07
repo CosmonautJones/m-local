@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "scope": "independent read-only configuration-policy review",
+  "tested_guard_sha": "ddbf7c27faef29c086870f5b63fef770b184e87b",
+  "guard_source_sha256": "d0fd475825b589141c998642ed474081c3da49ff339435e4eff049b4354f28f9",
+  "fixture": {
+    "disposable_guard_unit_state": true,
+    "dedicated_mount_stand_in": true,
+    "native_server_started": false,
+    "live_database_selected": false,
+    "real_email_sent": false,
+    "installed_runtime_modified": false
+  },
+  "cases": [
+    {
+      "setting": "JAC_DATA_PATH",
+      "guard_problem_count": 0,
+      "tested_guard_sha": "ddbf7c27faef29c086870f5b63fef770b184e87b",
+      "guard_source_sha256": "d0fd475825b589141c998642ed474081c3da49ff339435e4eff049b4354f28f9",
+      "official_runtime_path_is_absolute": false,
+      "effective_path_matches_validated": false
+    },
+    {
+      "setting": "MLOCAL_ONBOARDING_DIR",
+      "guard_problem_count": 0,
+      "tested_guard_sha": "ddbf7c27faef29c086870f5b63fef770b184e87b",
+      "guard_source_sha256": "d0fd475825b589141c998642ed474081c3da49ff339435e4eff049b4354f28f9",
+      "effective_path_matches_validated": false
+    },
+    {
+      "case": "TOML_algorithm_whitespace",
+      "tested_guard_sha": "ddbf7c27faef29c086870f5b63fef770b184e87b",
+      "guard_source_sha256": "d0fd475825b589141c998642ed474081c3da49ff339435e4eff049b4354f28f9",
+      "guard_problem_count": 0,
+      "official_jwt_failure": "JWTError"
+    },
+    {
+      "case": "empty_environment_secret_falls_back_to_TOML",
+      "tested_guard_sha": "ddbf7c27faef29c086870f5b63fef770b184e87b",
+      "guard_source_sha256": "d0fd475825b589141c998642ed474081c3da49ff339435e4eff049b4354f28f9",
+      "guard_problem_count": 0,
+      "effective_key_matches_preserved": false
+    }
+  ],
+  "interpretation": "The old guard approved a different effective state path/signing key or an unsupported TOML algorithm. Owners were notified; corrected guard/launcher and fresh native evidence are required.",
+  "limitations": [
+    "source-bound guard plus official authcrypt/AuthSettings helpers, not hosted/native-server acceptance",
+    "no provider durability, SSO, inbox, device or runtime-transaction acceptance"
+  ]
+}
