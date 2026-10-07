@@ -357,6 +357,77 @@ class ReleasePackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "escapes"):
             PACKAGE.verify_dependencies(archive)
 
+    def test_dependency_archive_accepts_actual_jac_client_metadata_location(self):
+        # Official 0.37.23 generates configs/package.json, not client/package.json.
+        for name in (".jac/venv/lib", ".jac/client/node_modules"):
+            path = self.source / name
+            path.mkdir(parents=True)
+            (path / "library.js").write_text("tested library")
+        metadata = self.source / ".jac/client/configs/package.json"
+        metadata.parent.mkdir(parents=True)
+        metadata.write_text('{"dependencies":{}}')
+        archive = self.root / "actual-layout.tar"
+        PACKAGE.create_dependencies(self.source, archive)
+        with tarfile.open(archive) as stream:
+            self.assertIn(".jac/client/configs/package.json", stream.getnames())
+            self.assertNotIn(".jac/client/package.json", stream.getnames())
+
+    def test_reviewed_public_dependency_pem_is_packaged_and_verified(self):
+        for name in PACKAGE.DEPENDENCY_ROOTS:
+            path = self.source / name
+            if name.endswith(".json"):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('{"dependencies":{}}')
+            else:
+                path.mkdir(parents=True)
+        name = ".jac/venv/lib/python3.14/site-packages/certifi/cacert.pem"
+        public = self.source / name
+        public.parent.mkdir(parents=True)
+        public.write_bytes(b"-----BEGIN CERTIFICATE-----\nPUBLIC-FIXTURE\n-----END CERTIFICATE-----\n")
+        policy = {name: PACKAGE.digest(public)}
+        archive = self.root / "public-library.tar"
+        with patch.object(PACKAGE, "PUBLIC_DEPENDENCY_PEMS", policy, create=True):
+            PACKAGE.create_dependencies(self.source, archive)
+            PACKAGE.verify_dependencies(archive)
+        with tarfile.open(archive) as stream:
+            self.assertEqual(stream.extractfile(name).read(), public.read_bytes())
+
+    def test_public_dependency_pem_cannot_hide_unreviewed_private_bytes(self):
+        for name in PACKAGE.DEPENDENCY_ROOTS:
+            path = self.source / name
+            if name.endswith(".json"):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('{"dependencies":{}}')
+            else:
+                path.mkdir(parents=True)
+        name = ".jac/venv/lib/python3.14/site-packages/certifi/cacert.pem"
+        public = self.source / name
+        public.parent.mkdir(parents=True)
+        public.write_bytes(b"reviewed-public-fixture")
+        policy = {name: PACKAGE.digest(public)}
+        public.write_bytes(b"-----BEGIN PRIVATE KEY-----\nDISPOSABLE-TEST-BYTES\n-----END PRIVATE KEY-----\n")
+        archive = self.root / "private-rejected.tar"
+        with patch.object(PACKAGE, "PUBLIC_DEPENDENCY_PEMS", policy, create=True):
+            with self.assertRaises(ValueError):
+                PACKAGE.create_dependencies(self.source, archive)
+        self.assertNotIn(b"DISPOSABLE-TEST-BYTES", archive.read_bytes())
+
+    def test_supplied_archive_public_pem_requires_reviewed_bytes(self):
+        archive = self.root / "forged-public-library.tar"
+        name = ".jac/venv/lib/python3.14/site-packages/certifi/cacert.pem"
+        with tarfile.open(archive, "w") as stream:
+            for root in PACKAGE.DEPENDENCY_ROOTS:
+                member = tarfile.TarInfo(root)
+                member.type = tarfile.DIRTYPE if not root.endswith(".json") else tarfile.REGTYPE
+                stream.addfile(member, io.BytesIO(b""))
+            member = tarfile.TarInfo(name)
+            content = b"-----BEGIN PRIVATE KEY-----\nDISPOSABLE-TEST-BYTES\n"
+            member.size = len(content)
+            stream.addfile(member, io.BytesIO(content))
+        with patch.object(PACKAGE, "PUBLIC_DEPENDENCY_PEMS", {name: "0" * 64}):
+            with self.assertRaisesRegex(ValueError, "reviewed fingerprint"):
+                PACKAGE.verify_dependencies(archive)
+
     def test_dependency_install_and_rollback_preserve_keys_and_safe_links(self):
         for name in PACKAGE.DEPENDENCY_ROOTS:
             path = self.source / name

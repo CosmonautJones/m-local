@@ -30,7 +30,15 @@ MANAGED = {"main.jac", "theme.jac", "jac.toml", ".jac-version", "services", "cli
 REQUIRED_CASES = {"all_rpc_serialized", "readiness_serialized", "exclusive_backend", "concurrent_claim",
                   "concurrent_redemption", "disconnect", "commit_failure", "unknown_commit",
                   "next_request_cache", "restart_convergence"}
-DEPENDENCY_ROOTS = (".jac/venv/lib", ".jac/client/node_modules", ".jac/client/package.json")
+DEPENDENCY_ROOTS = (".jac/venv/lib", ".jac/client/node_modules", ".jac/client/configs/package.json")
+# Reviewed public trust material from the tested dependency inventory. Exact
+# bytes are required: a filename or PEM label cannot establish public content.
+PUBLIC_DEPENDENCY_PEMS = {
+    ".jac/venv/lib/python3.14/site-packages/certifi/cacert.pem": "9cc2a774b5198dcff14d9be1e66091f538975d867ce029a96bce15a55dfd730f",
+    ".jac/venv/lib/python3.14/site-packages/pip/_vendor/certifi/cacert.pem": "bbc7e9c01d7551bb8a159b5dedd989b8ee3ce105aff522b68eb1b01bf854cab0",
+    ".jac/venv/lib/python3.14/site-packages/botocore/cacert.pem": "ed93d6346236d4f0278f617f5245091f37d001806a49ce42ce0ad5bec858d28e",
+    ".jac/venv/lib/python3.14/site-packages/litellm/proxy/auth/public_key.pem": "02cd2f76b5167a06c3c2195a22138a18e3c5c5b7fb141dc752d21f240e32c677",
+}
 
 
 class ReleaseError(ValueError):
@@ -122,7 +130,8 @@ def dependency_member_safe(member):
     allowed = any(member.name == root or member.name.startswith(root + "/") for root in DEPENDENCY_ROOTS)
     if not allowed or name.is_absolute() or ".." in name.parts or not (member.isfile() or member.isdir() or member.issym()):
         raise ReleaseError("Dependency archive contains an unsupported path or file type")
-    if any(part in PRIVATE_NAMES or part.startswith(".env") or part.endswith((".pem", ".p12", ".key")) for part in name.parts):
+    reviewed_public = member.name in PUBLIC_DEPENDENCY_PEMS and member.isfile()
+    if not reviewed_public and any(part in PRIVATE_NAMES or part.startswith(".env") or part.endswith((".pem", ".p12", ".key")) for part in name.parts):
         raise ReleaseError("Dependency archive contains a private filename requiring review")
     if member.issym():
         resolved = posixpath.normpath(posixpath.join(posixpath.dirname(member.name), member.linkname))
@@ -138,6 +147,9 @@ def verify_dependencies(archive):
             if member.name in seen:
                 raise ReleaseError("Dependency archive has duplicate paths")
             seen.add(member.name)
+            if member.name in PUBLIC_DEPENDENCY_PEMS:
+                if member.size > 1024 * 1024 or hashlib.sha256(stream.extractfile(member).read()).hexdigest() != PUBLIC_DEPENDENCY_PEMS[member.name]:
+                    raise ReleaseError("Public dependency trust material differs from its reviewed fingerprint")
         if not all(any(name == root or name.startswith(root + "/") for name in seen) for root in DEPENDENCY_ROOTS):
             raise ReleaseError("Dependency archive lacks tested Python, npm or generated client metadata")
 
@@ -153,6 +165,8 @@ def create_dependencies(source, output):
     with tarfile.open(output, "w") as stream:
         def validate(member):
             dependency_member_safe(member)
+            if member.name in PUBLIC_DEPENDENCY_PEMS and digest(source / member.name) != PUBLIC_DEPENDENCY_PEMS[member.name]:
+                raise ReleaseError("Public dependency trust material differs from its reviewed fingerprint")
             return member
         for name in DEPENDENCY_ROOTS:
             stream.add(source / name, arcname=name, filter=validate)
@@ -675,7 +689,8 @@ def launch(package, config, evidence):
         raise ReleaseError("Explicit durable PostgreSQL JAC_DB_URL is required")
     environment.update(MLOCAL_ENV="production", MLOCAL_PUBLIC_INGRESS="restricted", MLOCAL_DEPLOYMENT_TOPOLOGY="single-instance-serialized",
                        MLOCAL_APP_REPLICAS="1", MLOCAL_DURABLE_ROOT=config["durable_root"], MLOCAL_ONBOARDING_DIR=config["onboarding_dir"],
-                       MLOCAL_BACKEND_PORT=str(config["backend_port"]), PORT=str(config["gateway_port"]), MLOCAL_INGRESS_EVENT_LOG="stderr")
+                       MLOCAL_BACKEND_PORT=str(config["backend_port"]), PORT=str(config["gateway_port"]),
+                       MLOCAL_INGRESS_EVENT_LOG="stderr", MLOCAL_DOMAIN_EVENT_LOG="stderr")
     # Official authcrypt.project_data_dir treats JAC_DATA_PATH as a base and
     # appends .jac/data. It is not the signing-directory setting itself.
     raw_native_base = environment.get("JAC_DATA_PATH", "")

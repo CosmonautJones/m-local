@@ -111,7 +111,14 @@ sha256sum /var/tmp/m-local-tested-libraries.tar
 ```
 
 This includes only tested Python libraries, npm modules and generated client
-metadata. It rejects private state, unsafe links and archive traversal. Generated
+metadata at official 0.37.23's `.jac/client/configs/package.json` location.
+Four public vendored PEM assets (three CA bundles and LiteLLM's public key)
+have exact path and SHA-256 fingerprints in `PUBLIC_DEPENDENCY_PEMS`.
+Both archive creation and verification require those reviewed bytes; unknown
+PEMs, private keys, changed content and symlinks at those paths are refused.
+Dependency updates that change these assets require a new public-content review
+and fingerprint update before packaging.
+It rejects private state, unsafe links and archive traversal. Generated
 compiler caches carrying a source namespace are not copied. Source switching
 creates local virtualenv metadata using the exact packaged bundled CPython with
 `--without-pip`, then installs the tested libraries without overwriting
@@ -177,6 +184,7 @@ MLOCAL_DEMO_STUDENTS=[] MLOCAL_HOSTED_DATASET=false
 MLOCAL_INGRESS=restricted-edge
 MLOCAL_TRUSTED_HTTPS_EDGE=1
 MLOCAL_INGRESS_EVENT_LOG=stderr
+MLOCAL_DOMAIN_EVENT_LOG=stderr
 ```
 
 Do not enable import-model credentials as a hosting prerequisite; paid model
