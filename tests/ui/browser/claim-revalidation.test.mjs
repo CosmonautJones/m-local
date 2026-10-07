@@ -11,10 +11,10 @@ function claimClock(){
    w.setInterval=(fn,delay)=>{const id=next++;timers.set(id,{fn,delay});return id;};
    w.clearInterval=id=>timers.delete(id);
   },
-  tick(){for(const t of [...timers.values()])if(t.delay===15000)t.fn();},
+  tick(){for(const t of [...timers.values()])if(t.delay===3000)t.fn();},
   visible(value){visible=value;w.document.dispatchEvent(new w.Event('visibilitychange'));},
   online(value){online=value;w.dispatchEvent(new w.Event(value?'online':'offline'));},
-  count(){return [...timers.values()].filter(t=>t.delay===15000).length;}
+  count(){return [...timers.values()].filter(t=>t.delay===3000).length;}
  };
 }
 
@@ -23,7 +23,7 @@ for(const status of ['redeemed','expired'])test(`a visible held claim refreshes 
  const ui=await app({item:held(),configureWindow:clock.configureWindow,intercept(name){if(name==='get_offer'&&changed)return rpc(held({my_status:status,my_qr_payload:'',my_expires_ts:Date.now()/1000-1}));}});
  try{
   ui.click('Saved bowl');await until(()=>ui.document.querySelector('[data-testid="claim-qr"]'));
-  assert.equal(clock.count(),1);
+  assert.equal(clock.count(),1,'held claims must refresh within three seconds');
   changed=true;clock.tick();await until(()=>ui.text().includes(status==='redeemed'?'Your saved claim was redeemed.':'Your hold has expired.'));
   assert.equal(ui.document.querySelector('[data-testid="claim-qr"]'),null);
   assert.ok(ui.document.querySelector('[role="status"],[role="alert"]'));

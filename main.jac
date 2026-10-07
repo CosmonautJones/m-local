@@ -343,7 +343,7 @@ def:pub app -> JsxElement {
         "enabled": sessionReady and session is not None and session.authenticated and session.role == "student" and selected != "" and detail is not None and detail.my_status == "claimed" and not authOpen and not profileOpen and tab == "discover",
         "onRefresh": lambda { return refreshHeldClaim(); },
         "busy": busy or detailLoading,
-        "interval": 15000
+        "interval": 3000
     });
 
     def publicOffer(o: OfferView) -> OfferView {
