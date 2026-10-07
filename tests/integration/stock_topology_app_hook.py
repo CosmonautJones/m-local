@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import socket
 
 from jaclang.data.pgwire import PgWireError
 from jaclang.data.store import PgStore
@@ -44,7 +45,14 @@ def install_fault_hook() -> None:
             return original(store)
         control.unlink()
         mode = fault['mode']
-        if mode in ('accepted_ack_loss', 'process_death_after_commit'):
+        if mode == 'transport_loss_before_commit':
+            # TEST ONLY physical transport interruption. Keep stock PgWire and
+            # PgStore error classification/reconnection logic intact; their own
+            # COMMIT attempt now observes the closed TCP socket and emits08006.
+            store._conn._sock.shutdown(socket.SHUT_RDWR)
+            store._conn._sock.close()
+            action = 'TCP_SOCKET_CLOSED_BEFORE_COMMIT'
+        elif mode in ('accepted_ack_loss', 'process_death_after_commit'):
             original(store)
             action = 'COMMIT'
         elif mode == 'process_death_before_commit':
@@ -58,6 +66,8 @@ def install_fault_hook() -> None:
         previous = json.loads(events.read_text()) if events.exists() else []
         previous.append(receipt)
         events.write_text(json.dumps(previous, indent=2) + '\n')
+        if mode == 'transport_loss_before_commit':
+            return original(store)
         if mode.startswith('process_death'):
             os._exit(77 if mode == 'process_death_before_commit' else 78)
         raise PgWireError({'C': fault['sqlstate'], 'M': 'TEST ONLY actual app commit fault'})

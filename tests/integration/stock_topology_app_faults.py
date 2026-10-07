@@ -37,6 +37,7 @@ def verify_actual_faults(workspace, merchant, student, public, rows, durable,
                          restart_both, check, receipt):
     recorded = receipt.setdefault('actual_app_faults', [])
     modes = (('rollback', '57P01'), ('rollback', '40001'), ('rollback', '08006'),
+             ('transport_loss_before_commit', '08006'),
              ('accepted_ack_loss', '08006'))
 
     def count(arch, field, value):

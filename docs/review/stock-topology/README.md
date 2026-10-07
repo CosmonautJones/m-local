@@ -84,6 +84,8 @@ PgStore.commit with `stock_topology_app_hook.py`, and injects each actual app fa
 once only after the Offer or Redemption row has been flushed. The default runner
 includes rollback 57P01/40001/08006 and accepted-COMMIT acknowledgement loss on
 publication and claim, plus publication process death before/after COMMIT. It
+also closes the actual PgWire TCP socket before COMMIT in each mutation path,
+leaving the official store to classify its own transport error and reconnect.
 checks independent durable rows, clean readback after complete native errors,
 publication-key and claim/QR reconciliation, and gateway closure plus a restart
 of both processes after transport uncertainty. `--skip-faults` is available for a
