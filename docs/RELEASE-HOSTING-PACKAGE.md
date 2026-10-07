@@ -241,6 +241,11 @@ Close ingress and stop **all** app and CLI/private-store writers. Verify
 termination, including other hosts. The package obtains the exclusive local
 deployment lock and refuses an active package launcher. Quiescence is required
 so graph, approval, signing and media state share one recovery point.
+The configured backend and gateway ports must also be bind-free. A closed
+listener can leave Linux TCP `TIME_WAIT` sockets that the conservative bind
+guard still refuses. Keep traffic closed and wait until that check succeeds;
+do not weaken the guard, overlap instances or infer a surviving child solely
+from a bind refusal. Listener closure and bind-free readiness are separate checks.
 
 ```bash
 python3 deploy/release/package.py inventory --config /etc/m-local/release.json \
@@ -295,11 +300,17 @@ python3 -m unittest discover -s tests/tooling -p test_release_package.py
 ```
 
 The separate `release-package-proof.yml` executes the complete package against
-actual native Jac accounts, a real approved fixture business/offer/held claim,
+actual native Jac accounts, a real approved fixture business/offer/held and redeemed claims,
 an owned JPEG and a local TLS mail sink. It proves configured production
 readiness, public native-path denial, original authenticated actors/QR/snapshot,
 supervisor termination, coordinated logical backup and empty-database restore at
-the same canonical source path, then authenticated restarted readback. It keeps
+the same canonical source path, then authenticated restarted readback,
+exactly-once redemption of the restored held QR, and a further restart proving
+both spent QR credentials remain unusable and are absent from student detail.
+The isolated drill uses distinct private port pairs after each preceding process
+group and listener closes. Port selection preserves the canonical path, original
+keys and currently selected database; recovery explicitly selects the separate
+empty restore database. It keeps
 the original database and private source/stores intact. Run that procedure only
 on a new private disposable mounted volume, using compatible PostgreSQL tools:
 

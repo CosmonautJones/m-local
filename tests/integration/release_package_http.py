@@ -127,7 +127,16 @@ def main():
         connection_base = 'postgresql://' + quote(environment['PGUSER'], safe='') + '@127.0.0.1:' + environment['PGPORT'] + '/'
         environment['JAC_DB_URL'] = connection_base + 'package_original'
         os.environ.update(environment)
-        backend_port, gateway_port = free_port(), free_port()
+        used_ports = set()
+
+        def next_port():
+            port = free_port()
+            while port in used_ports:
+                port = free_port()
+            used_ports.add(port)
+            return port
+
+        backend_port, gateway_port = next_port(), next_port()
         config = dict(canonical_entry=str(app / 'main.jac'), durable_root=str(workspace), onboarding_dir=str(onboarding),
             native_signing_file=str(app / '.jac/data/jwt_secret'), photos_dir=str(app / 'assets/photos'),
             backend_port=backend_port, gateway_port=gateway_port, topology='single-instance-serialized', replicas=1)
@@ -183,6 +192,8 @@ def main():
             check(historical_claim.get('ok') and merchant.call('redeem_claim', qr_payload=historical_claim['qr_payload']).get('ok'),
                 'separate original student has a redeemed claim before backup')
             stop_process(dev)
+            check(not process_group_alive(dev) and closed(backend_port),
+                'seed TERM stops its complete group and native listener before packaged launch')
             keys = {name: pkg.digest(path) for name, path in {'code': onboarding / 'code.key', 'jwt': app / '.jac/data/jwt_secret'}.items()}
             original_inventory = pkg.state_inventory(config)
             pkg.install_source(args.package, app, dry_run=True)
@@ -208,7 +219,13 @@ def main():
             os.environ.update(environment)
 
             def production(label, held=True, redeem_held=False):
-                nonlocal phase
+                nonlocal phase, backend_port, gateway_port
+                # A closed Linux TCP listener can leave TIME_WAIT sockets. Keep
+                # the conservative production bind guard and use fresh distinct
+                # private test ports, after proving the preceding group closed.
+                backend_port, gateway_port = next_port(), next_port()
+                config.update(backend_port=backend_port, gateway_port=gateway_port)
+                config_file.write_text(json.dumps(config))
                 phase = label + ' meaningful readiness'
                 proc = start([str(args.package / 'runtime/jacpython'), '-c',
                     'import runpy,sys;sys.argv.pop(0);runpy.run_path(sys.argv[0],run_name="__main__")',
@@ -225,11 +242,12 @@ def main():
                 detail = Api(api.origin, student_token).call('get_offer', offer_id=offer['code'])
                 check(detail.get('my_claim_id') == claim['claim_id'] and detail.get('my_terms') == 'Original package terms'
                     and detail.get('my_status') == ('claimed' if held else 'redeemed')
-                    and (not held or detail.get('my_qr_payload') == claim['qr_payload']),
+                    and detail.get('my_qr_payload') == (claim['qr_payload'] if held else ''),
                     label + ' preserves original claim identity status and snapshot')
                 historical_detail = Api(api.origin, historical_token).call('get_offer', offer_id=offer['code'])
                 check(historical_detail.get('my_claim_id') == historical_claim['claim_id']
-                    and historical_detail.get('my_status') == 'redeemed' and historical_detail.get('my_terms') == 'Original package terms',
+                    and historical_detail.get('my_status') == 'redeemed' and historical_detail.get('my_terms') == 'Original package terms'
+                    and historical_detail.get('my_qr_payload') == '',
                     label + ' preserves original redeemed claim identity and snapshot')
                 check(not merchant_api.call('redeem_claim', qr_payload=historical_claim['qr_payload']).get('ok'),
                     label + ' refuses another redemption of original redeemed QR')
