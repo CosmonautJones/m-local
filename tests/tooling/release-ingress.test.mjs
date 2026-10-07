@@ -175,6 +175,16 @@ test('paused deliveries share one fixed memory budget across client connections'
   const {origin,proxy}=await serve(t,(_req,res)=>{
     res.writeHead(200,{'content-length':String(size)});res.end(Buffer.alloc(size,97));
   },{deploymentTopology:'single-instance-serialized',upstreamDeadlineMs:1000,eventSink:event=>events.push(event)});
+  // Hold downstream finish deterministically. Kernel socket-buffer sizes can
+  // otherwise deliver a complete body before an application pauses its reader.
+  // The native response and serialized completion path remain unchanged.
+  const pendingEnds=[];
+  proxy.on('request',(req,res)=>{
+    if(req.url!=='/static/client.js')return;
+    const end=res.end;
+    res.end=function(...args){pendingEnds.push(()=>end.apply(res,args));return res;};
+  });
+  t.after(()=>{for(const finish of pendingEnds)finish();});
   for(let i=0;i<4;i++) {
     const request=http.get(origin+'/static/client.js');
     request.on('error',()=>{});
@@ -270,4 +280,24 @@ test('failure events and counters omit request bodies, credentials, IPs and quer
 
 test('invalid selected topology is rejected instead of silently parallel serving',()=>{
   assert.throws(()=>createShareProxy({deploymentTopology:'single-instance-threaded'}),/topology/i);
+});
+
+test('install metadata exposes only the exact public manifest and authored brand icons',async t=>{
+  const reached=[];
+  const {origin}=await serve(t,(req,res)=>{reached.push(req.url);res.end('public asset');});
+  for(const path of ['/static/assets/manifest.webmanifest','/static/assets/brand/app-icon.svg',
+                    '/static/assets/brand/app-icon-192.png','/static/assets/brand/app-icon-512.png']) {
+    const response=await fetch(origin+path);
+    assert.equal(response.status,200,path);
+    assert.equal(await response.text(),'public asset');
+  }
+  const head=await fetch(origin+'/static/assets/manifest.webmanifest',{method:'HEAD'});
+  assert.equal(head.status,200);
+  const before=reached.length;
+  for(const path of ['/static/assets/package.json','/static/assets/manifest.private.webmanifest',
+                    '/static/assets/.env','/static/assets/%2e%2e/.env']) {
+    assert.equal((await fetch(origin+path)).status,403,path);
+  }
+  assert.equal((await fetch(origin+'/static/assets/manifest.webmanifest',{method:'POST'})).status,403);
+  assert.equal(reached.length,before,'private/static alternatives never reach native');
 });
