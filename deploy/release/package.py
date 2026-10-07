@@ -487,9 +487,25 @@ def pg_environment(url):
         raise ReleaseError("PostgreSQL URL format or port is invalid; no connection settings were logged") from None
     if parsed.scheme not in {"postgres", "postgresql"} or not parsed.hostname or not parsed.path.strip("/") or parsed.query or parsed.fragment:
         raise ReleaseError("Use an explicit PostgreSQL URL without query options; configure TLS through PostgreSQL environment settings")
+    # Official Jac 0.37.23 decodes credentials but keeps the database path
+    # literal. Refuse forms libpq would interpret differently rather than
+    # silently selecting another durable identity/graph namespace.
+    database = parsed.path[1:]
+    user, password = unquote(parsed.username or ""), unquote(parsed.password or "")
+    if (not user or any(char in parsed.hostname for char in ("%", ",", "/"))
+            or any(char.isspace() for char in parsed.hostname)
+            or not database or any(char in database for char in ("%", "/", "="))
+            or any(ord(char) < 32 or ord(char) == 127 for char in database)
+            or "\x00" in user or "\x00" in password):
+        raise ReleaseError("PostgreSQL URL requires an explicit role, one host and one literal database name; ambiguous target refused")
     env = os.environ.copy()
-    env.update(PGHOST=parsed.hostname, PGPORT=str(port), PGDATABASE=unquote(parsed.path[1:]),
-               PGUSER=unquote(parsed.username or ""), PGPASSWORD=unquote(parsed.password or ""), PGCONNECT_TIMEOUT="10")
+    # Service files and hostaddr override explicit environment settings;
+    # PGOPTIONS can change the session role. Preserve reviewed TLS settings,
+    # but use only the URL's credentials, never an ambient password file.
+    for name in ("PGSERVICE", "PGSERVICEFILE", "PGHOSTADDR", "PGOPTIONS"):
+        env.pop(name, None)
+    env.update(PGHOST=parsed.hostname, PGPORT=str(port), PGDATABASE=database,
+               PGUSER=user, PGPASSWORD=password, PGPASSFILE=os.devnull, PGCONNECT_TIMEOUT="10")
     return env
 
 

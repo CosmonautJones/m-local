@@ -315,6 +315,34 @@ class ReleasePackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "without query"):
             PACKAGE.pg_environment("postgresql://operator:SECRET_PASSWORD@localhost/db?options=unreviewed")
 
+    def test_explicit_database_target_cannot_be_redirected_by_inherited_libpq_settings(self):
+        with patch.dict(os.environ, {"PGSERVICE": "unrelated_service", "PGSERVICEFILE": "/unrelated/services",
+                                     "PGHOSTADDR": "192.0.2.10", "PGOPTIONS": "-c role=unrelated",
+                                     "PGPASSFILE": "/unrelated/passwords",
+                                     "PGSSLMODE": "verify-full", "PGSSLROOTCERT": "/reviewed/ca.pem"}):
+            env = PACKAGE.pg_environment("postgresql://original_role:original_password@127.0.0.1:15432/original_graph")
+        for key in ("PGSERVICE", "PGSERVICEFILE", "PGHOSTADDR", "PGOPTIONS"):
+            self.assertNotIn(key, env)
+        self.assertEqual((env["PGHOST"], env["PGPORT"], env["PGDATABASE"], env["PGUSER"]),
+                         ("127.0.0.1", "15432", "original_graph", "original_role"))
+        self.assertEqual((env["PGSSLMODE"], env["PGSSLROOTCERT"]), ("verify-full", "/reviewed/ca.pem"))
+        self.assertEqual(env["PGPASSFILE"], os.devnull)
+
+    def test_database_mapping_refuses_ambiguous_native_and_libpq_targets(self):
+        for url in ("postgresql://localhost/graph", "postgresql://user@localhost/graph%20other",
+                    "postgresql://user@localhost//graph", "postgresql://user@localhost/graph/other",
+                    "postgresql://user@host1,host2/graph", "postgresql://user@%2Flocal%2Fsocket/graph",
+                    "postgresql://user@localhost/host=other dbname=another"):
+            with self.subTest(url=url):
+                with self.assertRaises(ValueError) as error:
+                    PACKAGE.pg_environment(url)
+                self.assertNotIn(url, str(error.exception))
+
+    def test_encoded_credentials_match_the_official_native_mapping_without_changing_database(self):
+        env = PACKAGE.pg_environment("postgresql://original%40role:password%40value@localhost/original_graph")
+        self.assertEqual((env["PGUSER"], env["PGPASSWORD"], env["PGDATABASE"]),
+                         ("original@role", "password@value", "original_graph"))
+
     def test_artifact_requires_exact_source_and_digest_receipt(self):
         artifact = self.root / "fixture.jab"
         artifact.write_bytes(b"compiled application fixture")
@@ -331,7 +359,7 @@ class ReleasePackageTests(unittest.TestCase):
         with patch.object(PACKAGE, "verify_recovery_set", return_value=receipt), \
              patch.object(PACKAGE, "verify_package", return_value=manifest), \
              patch.object(PACKAGE, "pg_command", return_value="17") as command, \
-             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://localhost/serving", "MLOCAL_RECOVERY_DB_URL": "postgresql://localhost/recovery"}):
+             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/serving", "MLOCAL_RECOVERY_DB_URL": "postgresql://jac@localhost/recovery"}):
             with self.assertRaisesRegex(ValueError, "application tables"):
                 PACKAGE.coordinated_restore(self.root / "backup", config, self.root / "bundle")
         self.assertEqual(command.call_count, 1)

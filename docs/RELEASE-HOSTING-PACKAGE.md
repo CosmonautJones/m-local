@@ -49,6 +49,14 @@ private backend, stop-before-start behavior and persistent mounts are still
 provider capability gates. Do not run its existing live-deploy command as a
 substitute for these checks.
 
+Official Jac 0.37.23 uses a plain PostgreSQL wire socket. Its native driver does
+not negotiate database TLS and ignores URL query options. `PGSSLMODE` and
+`PGSSLROOTCERT` configure the separate libpq backup/recovery clients, not Jac's
+native connection. Select a protected same-host/loopback database route whose
+network and storage policy the operator verifies. A remote provider requiring
+direct database TLS remains blocked until a supported transport is separately
+proved; setting libpq TLS variables does not resolve that gate.
+
 ## Persistent inventory and migration
 
 Use a dedicated, real writable Linux volume; a writable folder or overlay
@@ -237,9 +245,18 @@ TLS/SMTP/device acceptance.
 Supply official, compatible `pg_dump`, `pg_restore` and `psql` clients. The
 embedded Jac distribution is not a substitute. Record client/server versions,
 required roles/extensions and provider TLS settings separately in protected
-operator records. Configure PostgreSQL SSL using `PGSSLMODE`/`PGSSLROOTCERT`.
+operator records. Configure libpq client SSL using `PGSSLMODE`/`PGSSLROOTCERT`;
+this does not add TLS to the official Jac native driver.
 The tool passes credentials in process environment, never command arguments
-or public receipts. PostgreSQL is selected only by explicit URLs.
+or public receipts. PostgreSQL is selected only by explicit URLs with an
+explicit role, one host and one literal database component. Query options,
+encoded host/database names, multiple hosts, extra path components and database
+names containing `=` or control characters are refused before connection.
+Credentials are decoded as in the pinned native driver. Recovery commands
+remove inherited `PGSERVICE`, `PGSERVICEFILE`, `PGHOSTADDR` and `PGOPTIONS`, and
+disable ambient password-file fallback; reviewed libpq TLS settings remain.
+An unsupported existing database URL requires an operator-reviewed preservation
+plan, not renaming, deleting or silently remapping its graph/identity database.
 
 Close ingress and stop **all** app and CLI/private-store writers. Verify
 termination, including other hosts. The package obtains the exclusive local
