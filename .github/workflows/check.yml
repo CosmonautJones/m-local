@@ -54,6 +54,10 @@ jobs:
       - name: Verify coordinated recovery and recovered restart
         timeout-minutes: 22
         run: bash scripts/test-recovery.sh
+      - name: Verify redacted domain failures and local SMTP quota events
+        timeout-minutes: 17
+        run: |
+          if [[ -f scripts/test-monitoring.sh ]]; then bash scripts/test-monitoring.sh; fi
       - name: Test deployment source and data separation
         run: python3 -m unittest discover -s tests/tooling -p 'test_*.py'
       - name: Build compiled app and client dependencies
@@ -75,4 +79,5 @@ jobs:
           path: |
             .jac/release-core-binding.json
             .jac/release-test-inventory.json
+            .jac/release-native/monitoring.json
             dist/*.jab

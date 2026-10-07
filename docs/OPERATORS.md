@@ -23,6 +23,11 @@ Keep native server and SMTP/database diagnostic logs private: these can contain
 sensitive runtime information. Never attach them raw to issues or public CI.
 Keep release and backup receipts separately; backups include live keys and data.
 
+Enable `MLOCAL_DOMAIN_EVENT_LOG=stderr` for fixed, redacted email, claim and
+redemption failure events, including HTTP-200 failure envelopes. These observe
+application outcomes before native transaction finalization; they do not prove
+COMMIT. Successes are silent. See `RELEASE-MONITORING.md` for the exact schema.
+
 The existing gateway bounds sockets (96 by default), headers, partial requests,
 bodies, queue size (32), queued wait (10 seconds), ordinary upstream completion
 (30 seconds), import completion (75 seconds), and readiness (5 seconds). Email
@@ -44,6 +49,8 @@ delivery to both operators with a controlled drill before opening traffic.
 | Unexpected native 5xx/`UPSTREAM_5XX` | Any mutation failure, or three within five minutes | Preserve protected logs and source SHA; verify persistence/next-request state; do not blind-retry publication/redemption. |
 | `QUEUE_FULL`/`QUEUE_DEADLINE` | Five within five minutes | Investigate latency and overload; keep one backend and fail closed; do not add replicas. |
 | OTP rate limits | Sustained global saturation or unexpected volume | Check abuse/shared-IP configuration without exposing addresses or disabling quotas. |
+| `SMTP_DELIVERY_FAILED` or domain `OPERATION_FAILED` | Any delivery failure; repeated claim/redeem failures | Preserve protected diagnostics; investigate without exposing codes or identity and without blind retry. |
+| `MAIL_QUOTA_NEAR` / `MAIL_QUOTA_REACHED` | 80% / all reserved hourly or daily mail capacity | Review abuse and mail capacity; counts are reserved attempts, and the last accepted request can emit reached. Keep quotas active. |
 | SQLite integrity, key/photo ownership or volume error | Any error | Close onboarding/uploads/serving as appropriate; preserve storage; never regenerate keys or delete accounts. |
 | Backup | Missed approved interval, failed checksum or retrieval | Preserve last complete set, block rollout, investigate age and measure RPO. |
 | Capacity | Disk below 20% free or unexplained DB/cache growth | Investigate with read-only tools; never clear graph/onboarding/photos to recover space. |
