@@ -32,6 +32,18 @@ def result(envelope):
     return data.get('result') if isinstance(data, dict) else None
 
 
+def lost_mutation_response(status, envelope):
+    """The active socket failure is 502; the closed lane refuses later work with 503."""
+    if envelope.get('ok') is not False:
+        return False
+    if status == 0:
+        return envelope.get('transport_lost') is True
+    error = envelope.get('error')
+    code = error.get('code') if isinstance(error, dict) else None
+    return ((status == 502 and code == 'UPSTREAM_FAILURE') or
+            (status == 503 and code == 'SERIALIZATION_CLOSED'))
+
+
 def verify_actual_faults(workspace, merchant, student, public, rows, durable,
                          restart_both, check, receipt):
     recorded = receipt.setdefault('actual_app_faults', [])
@@ -82,7 +94,7 @@ def verify_actual_faults(workspace, merchant, student, public, rows, durable,
         recorded.append(row)
         observed_fault(mode, row)
         if mode.startswith('process_death'):
-            check(status in (0, 503), 'actual native process death loses the publication response')
+            check(lost_mutation_response(status, envelope), 'actual native process death loses the publication response')
             check(committed == (1 if mode == 'process_death_after_commit' else 0),
                   'independent database observes correct publication before/after process death')
             closed_status, _ = rpc(public, 'home_feed')
@@ -130,7 +142,7 @@ def verify_actual_faults(workspace, merchant, student, public, rows, durable,
         recorded.append(row)
         observed_fault(mode, row)
         if mode.startswith('process_death'):
-            check(status in (0, 503), 'actual native process death loses the claim response')
+            check(lost_mutation_response(status, envelope), 'actual native process death loses the claim response')
             check(committed == (1 if mode == 'process_death_after_commit' else 0),
                   'independent database observes correct held claim before/after process death')
             check(rpc(public, 'home_feed')[0] == 503,
@@ -193,7 +205,7 @@ def verify_actual_faults(workspace, merchant, student, public, rows, durable,
         recorded.append(row)
         observed_fault(mode, row)
         if mode.startswith('process_death'):
-            check(status in (0, 503), 'actual native process death loses the redemption response')
+            check(lost_mutation_response(status, envelope), 'actual native process death loses the redemption response')
             check(stored['status'] == ('redeemed' if mode == 'process_death_after_commit' else 'claimed'),
                   'independent database observes correct redemption before/after process death')
             check(rpc(public, 'home_feed')[0] == 503,
