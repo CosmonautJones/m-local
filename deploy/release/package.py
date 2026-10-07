@@ -701,8 +701,7 @@ def launch(package, config, evidence):
     state_inventory(config)
     verify_installed_source(package, config, require_marker=True)
     environment = os.environ.copy()
-    if not environment.get("JAC_DB_URL", "").startswith(("postgres://", "postgresql://")):
-        raise ReleaseError("Explicit durable PostgreSQL JAC_DB_URL is required")
+    pg_environment(environment.get("JAC_DB_URL", ""))
     environment.update(MLOCAL_ENV="production", MLOCAL_PUBLIC_INGRESS="restricted", MLOCAL_DEPLOYMENT_TOPOLOGY="single-instance-serialized",
                        MLOCAL_APP_REPLICAS="1", MLOCAL_DURABLE_ROOT=config["durable_root"], MLOCAL_ONBOARDING_DIR=config["onboarding_dir"],
                        MLOCAL_BACKEND_PORT=str(config["backend_port"]), PORT=str(config["gateway_port"]),
@@ -839,6 +838,7 @@ def main():
             result = verify_recovery_set(args.backup)
         elif args.action == "preflight":
             validate_config(config)
+            pg_environment(os.environ.get("JAC_DB_URL", ""))
             manifest = verify_package(args.package)
             state = state_inventory(config)
             require_launch_evidence(config, manifest, read_json(args.evidence) if args.evidence else {})

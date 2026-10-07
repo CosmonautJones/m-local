@@ -204,10 +204,30 @@ class ReleasePackageTests(unittest.TestCase):
              patch.object(PACKAGE, "state_inventory"), \
              patch.object(PACKAGE, "verify_installed_source"), \
              patch.object(PACKAGE, "acquire_lock", side_effect=RuntimeError("PASSED_SIGNING_POLICY")), \
-             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://localhost/disposable", "JAC_DATA_PATH": str(base),
+             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/disposable", "JAC_DATA_PATH": str(base),
                                     "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
             with self.assertRaisesRegex(RuntimeError, "PASSED_SIGNING_POLICY"):
                 PACKAGE.launch(self.root / "package", config, {})
+
+    def test_launcher_refuses_an_unrecoverable_database_target_before_lock_or_children(self):
+        app = self.root / "canonical"
+        app.mkdir()
+        (app / "jac.toml").write_text('[project]\nentry-point="main"\n')
+        manifest = {"dependencies": {"archive": "libraries.tar"}, "build": {"artifact": "fixture.jab"},
+                    "runtime": {"jac": "fixture", "jacpython": "fixture"}}
+        with patch.object(PACKAGE, "verify_package", return_value=manifest), \
+             patch.object(PACKAGE, "require_launch_evidence"), \
+             patch.object(PACKAGE, "state_inventory"), \
+             patch.object(PACKAGE, "verify_installed_source"), \
+             patch.object(PACKAGE, "acquire_lock", side_effect=RuntimeError("UNEXPECTED_LOCK")) as lock, \
+             patch.object(PACKAGE.subprocess, "Popen") as spawn, \
+             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://role:SECRET_VALUE@localhost/db%20other",
+                                    "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "ambiguous target refused") as caught:
+                PACKAGE.launch(self.root / "package", self.config(app), {})
+            self.assertNotIn("SECRET_VALUE", str(caught.exception))
+            lock.assert_not_called()
+            spawn.assert_not_called()
 
     def test_launcher_preserves_production_flags_and_canonical_project_cwd(self):
         app = self.root / "canonical"
@@ -226,7 +246,7 @@ class ReleasePackageTests(unittest.TestCase):
              patch.object(PACKAGE.os, "close"), \
              patch.object(PACKAGE.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), \
              patch.object(PACKAGE.subprocess, "Popen", side_effect=RuntimeError("CAPTURE_NATIVE_COMMAND")) as spawn, \
-             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://localhost/disposable",
+             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/disposable",
                                     "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
             with self.assertRaisesRegex(RuntimeError, "CAPTURE_NATIVE_COMMAND"):
                 PACKAGE.launch(self.root / "package", config, {})
@@ -250,7 +270,7 @@ class ReleasePackageTests(unittest.TestCase):
                      patch.object(PACKAGE, "verify_installed_source"), \
                      patch.object(PACKAGE, "acquire_lock", side_effect=RuntimeError("UNEXPECTED_LOCK")) as lock, \
                      patch.object(PACKAGE.subprocess, "Popen") as spawn, \
-                     patch.dict(os.environ, {"JAC_DB_URL": "postgresql://localhost/disposable",
+                     patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/disposable",
                                             "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
                     with self.assertRaisesRegex(ValueError, "canonical project entry") as caught:
                         PACKAGE.launch(self.root / "package", self.config(app), {})
@@ -271,7 +291,7 @@ class ReleasePackageTests(unittest.TestCase):
              patch.object(PACKAGE, "state_inventory"), \
              patch.object(PACKAGE, "verify_installed_source"), \
              patch.object(PACKAGE, "acquire_lock", side_effect=RuntimeError("UNEXPECTED_LOCK_ATTEMPT")) as lock, \
-             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://localhost/disposable", "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
+             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/disposable", "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
             for index, supplied in enumerate((str(base / ".jac/data"), " " + str(base), str(base) + " ", "   ")):
                 with self.subTest(supplied_index=index):
                     os.environ["JAC_DATA_PATH"] = supplied
