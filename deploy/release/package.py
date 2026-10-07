@@ -21,6 +21,7 @@ import time
 import urllib.request
 from urllib.parse import urlsplit, unquote
 import posixpath
+import re
 
 PIN = "0.37.23"
 PRIVATE_NAMES = {"code.key", "jwt_secret", "onboarding.sqlite3", "photo-ownership.sqlite3"}
@@ -325,7 +326,11 @@ def validate_config(config):
         if not path.is_absolute():
             raise ValueError("Deployment paths must be absolute")
         reject_links(path)
-    if Path(config["native_signing_file"]) != entry.parent / ".jac/data/jwt_secret" or Path(config["photos_dir"]) != entry.parent / "assets/photos":
+    native_data = Path(config.get("native_data_dir", str(entry.parent / ".jac/data")))
+    if not native_data.is_absolute():
+        raise ValueError("Record the existing absolute native data directory")
+    reject_links(native_data)
+    if Path(config["native_signing_file"]) != native_data / "jwt_secret" or Path(config["photos_dir"]) != entry.parent / "assets/photos":
         raise ValueError("Native signing state and photos must retain their existing canonical paths")
     if config.get("topology") != "single-instance-serialized" or config.get("replicas") != 1:
         raise ValueError("Only the proposed exclusive single-instance serialized topology is supported")
@@ -602,6 +607,9 @@ def launch(package, config, evidence):
     environment.update(MLOCAL_ENV="production", MLOCAL_PUBLIC_INGRESS="restricted", MLOCAL_DEPLOYMENT_TOPOLOGY="single-instance-serialized",
                        MLOCAL_APP_REPLICAS="1", MLOCAL_DURABLE_ROOT=config["durable_root"], MLOCAL_ONBOARDING_DIR=config["onboarding_dir"],
                        MLOCAL_BACKEND_PORT=str(config["backend_port"]), PORT=str(config["gateway_port"]), MLOCAL_INGRESS_EVENT_LOG="stderr")
+    effective_data = Path(environment.get("JAC_DATA_PATH", str(app / ".jac/data")))
+    if not effective_data.is_absolute() or effective_data.resolve() / "jwt_secret" != Path(config["native_signing_file"]):
+        raise ValueError("JAC_DATA_PATH differs from the recorded original native signing state; preserve the existing path and key")
     # Node/gateway provenance and explicit trusted edge are host capabilities.
     if environment.get("MLOCAL_INGRESS") not in {"render", "funnel", "restricted-edge"}:
         raise ValueError("Select the verified restricted HTTPS edge; production direct ingress is prohibited")
@@ -612,10 +620,12 @@ def launch(package, config, evidence):
     try:
         require_free_ports(config)
         guard = subprocess.run([str(package / "runtime/jacpython"), "-c",
-                                "from services.production_guard import enforce_production_config; enforce_production_config()"],
+                                "import json,os; from pathlib import Path; from services.production_guard import validate_production_config; "
+                                "errors=validate_production_config(os.environ,Path.cwd()); print(json.dumps(errors)); raise SystemExit(78 if errors else 0)"],
                                cwd=app, env=environment, timeout=30, capture_output=True)
         if guard.returncode:
-            raise ValueError("Production configuration guard refused startup; inspect required setting names in the protected guard check")
+            names = sorted(set(re.findall(r"\b(?:MLOCAL_|JAC_)[A-Z_]+\b", guard.stdout.decode(errors="replace"))))
+            raise ValueError("Production configuration guard refused startup: " + (", ".join(names) or "required setting names unavailable; inspect protected guard check"))
         # Guard is also run by Jac onboarding import. Failure of either process
         # terminates both process groups; no restart while queue outcome is unknown.
         processes.append(subprocess.Popen([str(package / "runtime/jac"), "run", str(app / "main.jac"), "--no-dev", "--host", "127.0.0.1", "--port", str(config["backend_port"])], cwd=app, env=environment, start_new_session=True))

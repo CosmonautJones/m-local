@@ -178,6 +178,15 @@ class ReleasePackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "canonical"):
             PACKAGE.validate_config(config)
 
+    def test_recorded_existing_native_data_override_is_preserved(self):
+        config = self.config(self.root / "canonical")
+        config["native_data_dir"] = str(self.root / "state/existing-native")
+        config["native_signing_file"] = str(self.root / "state/existing-native/jwt_secret")
+        self.assertEqual(PACKAGE.validate_config(config), self.root / "canonical")
+        config["native_signing_file"] = str(self.root / "state/different-native/jwt_secret")
+        with self.assertRaisesRegex(ValueError, "existing canonical paths"):
+            PACKAGE.validate_config(config)
+
     def test_secret_values_never_in_inventory(self):
         config = self.config(self.root / "canonical")
         onboarding = Path(config["onboarding_dir"])
