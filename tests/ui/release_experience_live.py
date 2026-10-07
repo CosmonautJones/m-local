@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shutil
 import signal
@@ -22,6 +23,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -46,6 +48,11 @@ def port(number):
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", number))
     return number
+
+
+def scanner_chunk(url):
+    path = urlsplit(url).path
+    return path.startswith(("/assets/", "/static/assets/")) and bool(re.search(r"/assets/(?:assets/)?index-[A-Za-z0-9_-]+\.js$", path))
 
 
 def stop_private_postgres(workspace):
@@ -153,6 +160,8 @@ def main():
     phase = "install"
     completed = False
     redemption_transition_ms = None
+    student_scanner_requests = []
+    scanner_chunk_responses = []
     started = time.monotonic()
     try:
         run_logged("private fixture dependency install", [str(jac), "install", "--no-npm"], app, environment,
@@ -193,6 +202,7 @@ def main():
                 page.on("pageerror", lambda error: errors.append(str(error)))
                 page.on("console", lambda message: csp.append(message.text) if "Content Security Policy" in message.text else None)
                 page.on("request", lambda request: rpc_calls.append(request.url.rsplit("/", 1)[-1]) if "/function/" in request.url else None)
+                page.on("request", lambda request: student_scanner_requests.append(urlsplit(request.url).path) if scanner_chunk(request.url) else None)
                 def accessible(label):
                     page.add_script_tag(content=args.axe.read_text())
                     results = page.evaluate("async()=>await axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}})")
@@ -206,6 +216,7 @@ def main():
                 expect(page.get_by_text(sample["title"], exact=True)).to_be_visible()
                 accessible("guest-feed")
                 check(page.locator('[autocomplete="one-time-code"]').count() == 0, "guest browses native offers before signup")
+                check(not student_scanner_requests, "actual guest feed does not request the merchant scanner chunk")
                 page.get_by_text(sample["title"], exact=True).click()
                 expect(page.get_by_role("button", name="Sign in to claim", exact=True)).to_be_visible()
                 check("Sample deal for a local simulation" in page.inner_text("body"), "sample detail is honestly labeled")
@@ -250,13 +261,21 @@ def main():
                 check(detail["my_status"] == "claimed" and detail["my_terms"], "native claim keeps saved terms and opaque QR snapshot")
                 qr_path = workspace / "claim-qr.png"
                 page.locator('[data-testid="claim-qr"]').screenshot(path=str(qr_path))
+                check(not student_scanner_requests, "actual student QR display does not request the merchant scanner chunk")
                 merchant_context = browser.new_context(viewport={"width": 390, "height": 844}, reduced_motion="reduce")
                 merchant_page = merchant_context.new_page()
                 merchant_page.goto(origin)
                 merchant_page.evaluate("token => {localStorage.setItem('jac_token',token);localStorage.setItem('mlocal_audience','business');localStorage.removeItem('mlocal_public_offer_intent');}", merchant["token"])
                 merchant_page.reload()
+                merchant_page.on("response", lambda response: scanner_chunk_responses.append({"path": urlsplit(response.url).path,
+                    "status": response.status, "content_type": response.headers.get("content-type", "")}) if scanner_chunk(response.url) else None)
                 merchant_page.get_by_role("button", name="Scan QR", exact=True).click()
-                merchant_page.get_by_label("Choose a QR image", exact=True).set_input_files(str(qr_path))
+                image_input = merchant_page.get_by_label("Choose a QR image", exact=True)
+                expect(image_input).to_be_enabled()
+                expect(merchant_page.get_by_role("button", name="Start camera scan", exact=True)).to_be_visible()
+                check(scanner_chunk_responses and all(row["status"] == 200 and "javascript" in row["content_type"] for row in scanner_chunk_responses),
+                      "actual merchant scanner downloads its emitted JavaScript chunk successfully")
+                image_input.set_input_files(str(qr_path))
                 expect(merchant_page.get_by_role("button", name="Confirm redemption", exact=True)).to_be_visible()
                 check(student.call("get_offer", offer_id=sample["id"])["my_status"] == "claimed", "local QR image decoding previews native claim without redeeming")
                 redemption_started = time.monotonic()
@@ -362,6 +381,7 @@ def main():
         stop_private_postgres(workspace)
         receipt = {**binding, "status": "passed" if completed else "failed", "checks": checks, "passed": len(checks), "phase": phase,
                    "seconds": round(time.monotonic() - started, 2), "redemption_transition_ms": redemption_transition_ms,
+                   "student_scanner_requests": student_scanner_requests, "scanner_chunk_responses": scanner_chunk_responses,
                    "owned_processes_stopped": True,
                    "private_postgres_stopped": True}
         (args.evidence / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
