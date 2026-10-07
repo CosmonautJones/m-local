@@ -664,7 +664,10 @@ def launch(package, config, evidence):
                        MLOCAL_BACKEND_PORT=str(config["backend_port"]), PORT=str(config["gateway_port"]), MLOCAL_INGRESS_EVENT_LOG="stderr")
     # Official authcrypt.project_data_dir treats JAC_DATA_PATH as a base and
     # appends .jac/data. It is not the signing-directory setting itself.
-    native_base = Path(environment.get("JAC_DATA_PATH", "").strip() or str(app))
+    raw_native_base = environment.get("JAC_DATA_PATH", "")
+    if raw_native_base != raw_native_base.strip():
+        raise ReleaseError("JAC_DATA_PATH must retain its exact absolute base without leading or trailing whitespace")
+    native_base = Path(raw_native_base or str(app))
     if not native_base.is_absolute() or (native_base / ".jac/data/jwt_secret").resolve() != Path(config["native_signing_file"]):
         raise ReleaseError("JAC_DATA_PATH differs from the recorded original native signing state; preserve the existing path and key")
     # Node/gateway provenance and explicit trusted edge are host capabilities.

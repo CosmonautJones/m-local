@@ -220,10 +220,12 @@ class ReleasePackageTests(unittest.TestCase):
              patch.object(PACKAGE, "state_inventory"), \
              patch.object(PACKAGE, "verify_installed_source"), \
              patch.object(PACKAGE, "acquire_lock", side_effect=RuntimeError("UNEXPECTED_LOCK_ATTEMPT")) as lock, \
-             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://localhost/disposable", "JAC_DATA_PATH": str(base / ".jac/data"),
-                                    "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
-            with self.assertRaisesRegex(ValueError, "JAC_DATA_PATH differs"):
-                PACKAGE.launch(self.root / "package", config, {})
+             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://localhost/disposable", "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
+            for index, supplied in enumerate((str(base / ".jac/data"), " " + str(base), str(base) + " ", "   ")):
+                with self.subTest(supplied_index=index):
+                    os.environ["JAC_DATA_PATH"] = supplied
+                    with self.assertRaisesRegex(ValueError, "JAC_DATA_PATH"):
+                        PACKAGE.launch(self.root / "package", self.config(app) if not supplied.strip() else config, {})
             lock.assert_not_called()
 
     def test_secret_values_never_in_inventory(self):

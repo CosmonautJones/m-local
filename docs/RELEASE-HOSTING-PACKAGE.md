@@ -70,6 +70,8 @@ Official Jac appends `.jac/data` to it. Record the resulting existing directory
 `<JAC_DATA_PATH>/.jac/data` in optional `native_data_dir` and its existing
 `jwt_secret` in `native_signing_file`. Do not set `JAC_DATA_PATH` to that resulting
 signing directory: Jac would append `.jac/data` again.
+The launcher refuses a base with leading/trailing whitespace instead of
+validating a trimmed path while sending a different raw path to the runtime.
 Keep the same explicit environment setting. The launcher rejects a path mismatch;
 it never chooses a new signing store. Any `JAC_SERVE_AUTH_SECRET` or configured
 serve-auth secret must match the preserved original effective key, as verified
