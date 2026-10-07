@@ -30,9 +30,9 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/browser-bootstrap"
           "$RUNNER_TEMP/browser-bootstrap/bin/pip" install playwright==1.56.0
           "$RUNNER_TEMP/browser-bootstrap/bin/python" -m playwright install-deps chromium
-      - name: Verify diagnostic receipts exclude private browser and QR data
+      - name: Verify fixture isolation and diagnostic receipt privacy
         if: hashFiles('tests/ui/test_release_experience_diagnostics.py') != ''
-        run: bash scripts/python.sh -m unittest discover -s tests/ui -p test_release_experience_diagnostics.py -v
+        run: bash scripts/python.sh -m unittest discover -s tests/ui -p 'test_release_*.py' -v
       - name: Verify changed student flows through native HTTP and restricted ingress
         if: hashFiles('tests/ui/run-release-experience-live.sh') != ''
         run: bash tests/ui/run-release-experience-live.sh "$(git rev-parse HEAD)" "$RUNNER_TEMP/release-browser-evidence" 18920
