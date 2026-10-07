@@ -153,9 +153,12 @@ def main():
 
             run = secrets.token_hex(5)
             student_token = account('packstudent' + run, 'student', 'Disposable package student')
+            historical_token = account('packhistory' + run, 'student', 'Disposable historical student')
             merchant_token = account('packmerchant' + run + '@example.test', 'business', 'Disposable package merchant')
             student, merchant = Api(anonymous.origin, student_token), Api(anonymous.origin, merchant_token)
+            historical = Api(anonymous.origin, historical_token)
             student_actor, merchant_actor = student.call('current_session')['actor_id'], merchant.call('current_session')['actor_id']
+            historical_actor = historical.call('current_session')['actor_id']
             fields = dict(name='Disposable Package Cafe', cuisine='Cafe', description='Fictional package recovery fixture',
                 address='123 Fixture Street', website='', menu_text='', menu_url='', image_url='', confirmed=True)
             check(merchant.call('save_business_draft', **fields)['status'] == 'pending_review', 'package keeps manual business admission')
@@ -176,6 +179,9 @@ def main():
             check(offer.get('ok'), 'original approved merchant publishes one dedicated offer')
             claim = student.call('claim_offer', offer_id=offer['code'])
             check(claim.get('ok') and claim.get('qr_payload'), 'original student holds an authenticated claim snapshot')
+            historical_claim = historical.call('claim_offer', offer_id=offer['code'])
+            check(historical_claim.get('ok') and merchant.call('redeem_claim', qr_payload=historical_claim['qr_payload']).get('ok'),
+                'separate original student has a redeemed claim before backup')
             stop_process(dev)
             keys = {name: pkg.digest(path) for name, path in {'code': onboarding / 'code.key', 'jwt': app / '.jac/data/jwt_secret'}.items()}
             original_inventory = pkg.state_inventory(config)
@@ -201,7 +207,9 @@ def main():
             environment.update(MLOCAL_INGRESS='restricted-edge', MLOCAL_TRUSTED_HTTPS_EDGE='1')
             os.environ.update(environment)
 
-            def production(label):
+            def production(label, held=True, redeem_held=False):
+                nonlocal phase
+                phase = label + ' meaningful readiness'
                 proc = start([str(args.package / 'runtime/jacpython'), '-c',
                     'import runpy,sys;sys.argv.pop(0);runpy.run_path(sys.argv[0],run_name="__main__")',
                     str(app / 'deploy/release/package.py'), 'run',
@@ -211,9 +219,24 @@ def main():
                     label + ' preserves original student token and actor')
                 check(Api(api.origin, merchant_token).call('current_session')['actor_id'] == merchant_actor,
                     label + ' preserves original merchant token and actor')
+                merchant_api = Api(api.origin, merchant_token)
+                check(Api(api.origin, historical_token).call('current_session')['actor_id'] == historical_actor,
+                    label + ' preserves original redeemed-claim owner token and actor')
                 detail = Api(api.origin, student_token).call('get_offer', offer_id=offer['code'])
-                check(detail.get('my_qr_payload') == claim['qr_payload'] and detail.get('my_terms') == 'Original package terms',
-                    label + ' preserves original held QR and snapshot')
+                check(detail.get('my_claim_id') == claim['claim_id'] and detail.get('my_terms') == 'Original package terms'
+                    and detail.get('my_status') == ('claimed' if held else 'redeemed')
+                    and (not held or detail.get('my_qr_payload') == claim['qr_payload']),
+                    label + ' preserves original claim identity status and snapshot')
+                historical_detail = Api(api.origin, historical_token).call('get_offer', offer_id=offer['code'])
+                check(historical_detail.get('my_claim_id') == historical_claim['claim_id']
+                    and historical_detail.get('my_status') == 'redeemed' and historical_detail.get('my_terms') == 'Original package terms',
+                    label + ' preserves original redeemed claim identity and snapshot')
+                check(not merchant_api.call('redeem_claim', qr_payload=historical_claim['qr_payload']).get('ok'),
+                    label + ' refuses another redemption of original redeemed QR')
+                check(not Api(api.origin, historical_token).call('resolve_claim', qr_payload=claim['qr_payload']).get('ok'),
+                    label + ' keeps other student unable to inspect original QR')
+                check(any(row['id'] == offer['code'] for row in merchant_api.call('merchant_portal')['offers']),
+                    label + ' retains original merchant ownership of published offer')
                 with urllib.request.urlopen(api.origin + photo['url'], timeout=10) as response:
                     check(response.status == 200 and response.read().startswith(b'\xff\xd8'), label + ' serves the original owned JPEG')
                 with urllib.request.urlopen(api.origin + '/', timeout=10) as response:
@@ -225,6 +248,15 @@ def main():
                         check(error.code == 403, label + ' denies public native path ' + path)
                     else:
                         raise AssertionError('Public native route exposed')
+                if redeem_held:
+                    check(merchant_api.call('redeem_claim', qr_payload=claim['qr_payload']).get('ok')
+                        and not merchant_api.call('redeem_claim', qr_payload=claim['qr_payload']).get('ok'),
+                        label + ' redeems restored held QR exactly once')
+                    check(Api(api.origin, student_token).call('get_offer', offer_id=offer['code']).get('my_status') == 'redeemed',
+                        label + ' reports restored redemption to original student')
+                if not held:
+                    check(not merchant_api.call('redeem_claim', qr_payload=claim['qr_payload']).get('ok'),
+                        label + ' retains single-use refusal across subsequent restart')
                 stop_process(proc)
                 check(not process_group_alive(proc) and closed(backend_port) and closed(gateway_port),
                     label + ' TERM stops supervisor both children and both listeners')
@@ -245,7 +277,8 @@ def main():
             check(pkg.state_inventory(config) == original_inventory, 'logical restore retains all original private bytes and SQLite row counts')
             environment['JAC_DB_URL'] = connection_base + 'package_restored'
             os.environ.update(environment)
-            production('packaged-restored-startup')
+            production('packaged-restored-startup', redeem_held=True)
+            production('packaged-post-redemption-restart', held=False)
             check(all(pkg.digest(path) == keys[name] for name, path in {'code': onboarding / 'code.key', 'jwt': app / '.jac/data/jwt_secret'}.items()),
                 'restored startup never replaces original native and email signing keys')
         sink_closed = sink.closed
