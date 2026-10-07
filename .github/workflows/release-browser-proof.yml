@@ -1,0 +1,44 @@
+name: Release native browser proof
+
+on:
+  pull_request:
+    branches: [codex/release-readiness]
+  push:
+    branches: ['release/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install official pinned runtime
+        if: hashFiles('tests/ui/run-release-experience-live.sh') != ''
+        run: bash scripts/setup.sh
+      - name: Install browser system dependencies on the disposable runner
+        if: hashFiles('tests/ui/run-release-experience-live.sh') != ''
+        run: |
+          python3 -m venv "$RUNNER_TEMP/browser-bootstrap"
+          "$RUNNER_TEMP/browser-bootstrap/bin/pip" install playwright==1.56.0
+          "$RUNNER_TEMP/browser-bootstrap/bin/python" -m playwright install-deps chromium
+      - name: Verify changed student flows through native HTTP and restricted ingress
+        if: hashFiles('tests/ui/run-release-experience-live.sh') != ''
+        run: bash tests/ui/run-release-experience-live.sh "$(git rev-parse HEAD)" "$RUNNER_TEMP/release-browser-evidence" 18920
+      - uses: actions/upload-artifact@v4
+        if: always() && hashFiles('tests/ui/run-release-experience-live.sh') != ''
+        with:
+          name: native-browser-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/release-browser-evidence/receipt.json
+            ${{ runner.temp }}/release-browser-evidence/source-binding.json
+            ${{ runner.temp }}/release-browser-evidence/*-axe.json
+            ${{ runner.temp }}/release-browser-evidence/*.png
