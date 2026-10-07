@@ -13,7 +13,7 @@ The domain event schema is deliberately small:
 | `OPERATION_FAILED` | `email_request`, `claim`, `redeem` | The application returned `ok=False`, including a friendly HTTP-200 failure. |
 | `SMTP_DELIVERY_FAILED` | `email_delivery` | The local sender raised; the challenge remains unusable and the friendly failure is unchanged. |
 | `MAIL_QUOTA_NEAR` | `email_request` | Reserved attempts reach 80% of the existing hourly or daily limit. |
-| `MAIL_QUOTA_REACHED` | `email_request` | Existing hourly/daily quota blocks a new send. |
+| `MAIL_QUOTA_REACHED` | `email_request` | Reserved attempts exhaust an existing hourly/daily limit; the next send is refused. The last accepted reservation can emit this event. |
 
 Every event has only `kind=mlocal_domain_event`, numeric `time`, fixed
 `operation` and fixed `code`. Quota events add `hourly_attempts`, `hourly_limit`,
@@ -54,6 +54,8 @@ Verify locally with official pinned Jac 0.37.23:
 bash scripts/test.sh onboarding
 bash scripts/test.sh core
 bash scripts/check.sh
+source scripts/runtime.sh
+export JAC_BIN
 bash scripts/python.sh -c 'import runpy,sys; sys.path.insert(0,"tests/integration"); runpy.run_path("tests/integration/release_monitoring_http.py",run_name="__main__")' --receipt /absolute/fresh/monitoring.json
 ```
 
