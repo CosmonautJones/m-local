@@ -1,0 +1,19 @@
+.........E............
+======================================================================
+ERROR: test_invalid_typed_auth_configuration_fails_with_redacted_configuration_error (test_production_guard.GuardTests.test_invalid_typed_auth_configuration_fails_with_redacted_configuration_error)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/c/Users/Travesty/Desktop/JacHacks/m-local/.release/hardening/tests/onboarding/test_production_guard.py", line 225, in test_invalid_typed_auth_configuration_fails_with_redacted_configuration_error
+    enforce_production_config(self.good, self.root)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/Travesty/Desktop/JacHacks/m-local/.release/hardening/services/production_guard.py", line 222, in enforce_production_config
+    problems = validate_production_config(source, root)
+  File "/mnt/c/Users/Travesty/Desktop/JacHacks/m-local/.release/hardening/services/production_guard.py", line 173, in validate_production_config
+    configured_secret = (env.get('JAC_SERVE_AUTH_SECRET', '') or auth.get('secret', '')).strip()
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'int' object has no attribute 'strip'
+
+----------------------------------------------------------------------
+Ran 22 tests in 0.680s
+
+FAILED (errors=1)

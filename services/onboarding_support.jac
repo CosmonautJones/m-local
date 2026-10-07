@@ -27,6 +27,9 @@ def request_code(value: str, kind: str, name: str) -> dict[str, any] {
 def finish_account(proof: dict[str, any], users: any, state: any) -> dict[str, any] {
     email = proof["email"];
     existing = users.find_user_by_identity(email);
+    # Inbox proof never authorizes deletion, root replacement or identity relinking.
+    # Missing private onboarding may be a native/provisioned account or a failed
+    # restore. Only our matching interrupted-provisioning marker can recover here.
     user_id: any = None;
     if existing {
         root_id = str(existing.get("root_id", "")).replace("-", "");

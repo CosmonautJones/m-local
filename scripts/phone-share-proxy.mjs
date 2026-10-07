@@ -2,147 +2,317 @@
 // Never place the development relay or the raw Jac server behind a tunnel.
 import http from 'node:http';
 import {isIP} from 'node:net';
-import { pathToFileURL } from 'node:url';
+import {pathToFileURL} from 'node:url';
 import {createOnboardingLimit} from './onboarding-ingress.mjs';
+import {createSerializedIngress,IngressError} from './serialized-ingress.mjs';
 import {validateHomeFeed} from '../client/feed-validation.mjs';
 
-const functions = new Set(['list_offers', 'get_offer', 'claim_offer', 'merchant_portal',
-  'update_profile', 'save_offer', 'set_offer_status', 'resolve_claim', 'redeem_claim',
-  'cancel_claim', 'offer_defaults', 'current_session', 'request_email_code', 'verify_email_code',
-  'get_business_draft', 'import_business_website', 'upload_business_photo', 'import_business_photo', 'save_business_draft', 'get_business_profile',
-  'get_account_profile', 'save_account_profile', 'merchant_insights', 'local_activity', 'list_places', 'nearby_places',
-  'home_feed', 'taste_choices', 'save_taste', 'toggle_favorite', 'nearby_after']);
+const functions=new Set(['list_offers','get_offer','claim_offer','merchant_portal',
+  'update_profile','save_offer','set_offer_status','resolve_claim','redeem_claim',
+  'cancel_claim','offer_defaults','current_session','request_email_code','verify_email_code',
+  'get_business_draft','import_business_website','upload_business_photo','import_business_photo','save_business_draft','get_business_profile',
+  'get_account_profile','save_account_profile','merchant_insights','local_activity','list_places','nearby_places',
+  'home_feed','taste_choices','save_taste','toggle_favorite','nearby_after']);
 
-export function createShareProxy({ upstreamHost = 'localhost', upstreamPort = 8200,
-  trustCloudflare = true, trustFunnel = false, healthCheck = false } = {}) {
-  const limit=createOnboardingLimit();
-  return http.createServer((req, res) => {
-    const path = req.url.split('?')[0];
-    const read = ['GET', 'HEAD'].includes(req.method);
-    const allowed = read && (path === '/' || path === '/index.html' || path === '/favicon.ico' || path === '/static/client.js'
-      || /^\/assets\/[\w-]+\.(js|css|png|svg|ico|webp|woff2?)$/.test(path)
-      || /^\/static\/assets\/brand\/[\w-]+\.(png|ttf)$/.test(path)
-      || /^\/static\/photos\/[a-f0-9]{32}\.jpg$/.test(path))
-      || req.method === 'POST' && functions.has(path.replace(/^\/function\//, '')) && path.startsWith('/function/');
-    res.setHeader('x-content-type-options', 'nosniff');
-    res.setHeader('referrer-policy', 'no-referrer');
-    res.setHeader('permissions-policy', 'camera=(self), microphone=(), geolocation=()');
-    res.setHeader('cache-control', 'no-store');
-    if (healthCheck && read && path === '/healthz') {
-      let active;
-      let finished=false;
-      const finish = ready => {
-        if (finished || res.destroyed) return;
-        finished=true;
-        clearTimeout(deadline);
-        res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ ready }));
+// Jac's compiled HTML bootstraps an inline script; React Native Web uses inline
+// styles. Uploaded photos are local; website-picker previews may use HTTPS,
+// data images and blob previews. No external script or network RPC is required.
+const contentSecurityPolicy=["default-src 'self'","script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' data: https://fonts.gstatic.com","img-src 'self' data: blob: https:",
+  "connect-src 'self'","media-src 'self' blob:","object-src 'none'","base-uri 'none'",
+  "form-action 'self'","frame-ancestors 'none'"].join('; ');
+
+const failureCodes=new Set(['ROUTE_DENIED','BODY_TOO_LARGE','BODY_DEADLINE','ONBOARDING_RATE_LIMITED',
+  'QUEUE_FULL','QUEUE_DEADLINE','QUEUE_ABORTED','SERIALIZATION_CLOSED','UPSTREAM_DEADLINE',
+  'UPSTREAM_FAILURE','UPSTREAM_5XX','READINESS_FAILED','DELIVERY_LIMIT','DELIVERY_DEADLINE']);
+
+// A process-wide budget, rather than one large buffer per accepted socket.
+// HTTP completion must not depend on a browser continuing to read its socket.
+const maxResponseBytes=8*1024*1024,maxDeliveryBytes=16*1024*1024;
+const guestSession={authenticated:false,actor_id:'',role:'guest',restaurant_id:'',display_name:'',
+  is_demo:false,email_verified:false,business_account:false,catalog_activity:false};
+const guestMetadata=['_jac_type','_jac_id','_jac_archetype','_jac_type_id'];
+
+function validGuestSession(value) {
+  return value!==null&&typeof value==='object'&&!Array.isArray(value)&&
+    (Object.keys(value).length===Object.keys(guestSession).length||
+      (Object.keys(value).length===Object.keys(guestSession).length+guestMetadata.length&&
+        guestMetadata.every(name=>typeof value[name]==='string')))&&
+    Object.entries(guestSession).every(([name,expected])=>value[name]===expected);
+}
+
+function createObserver(eventSink) {
+  const failures=Object.fromEntries([...failureCodes].map(code=>[code,0]));
+  return {
+    fail(code,route,status) {
+      if(!failureCodes.has(code))return;
+      failures[code]=Math.min(Number.MAX_SAFE_INTEGER,failures[code]+1);
+      // Only allowlisted RPC names, readiness, and fixed categories can reach
+      // the sink. No query, body, identity, token, IP or raw exception is logged.
+      const event={kind:'mlocal_ingress_failure',code,route,status,time:new Date().toISOString()};
+      try {eventSink?.(Object.freeze(event));} catch { /* logging cannot crash ingress */ }
+    },
+    status:()=>({...failures}),
+  };
+}
+
+function routeLabel(path) {
+  if(path==='/healthz')return 'readiness';
+  if(path.startsWith('/function/')&&functions.has(path.slice(10)))return path.slice(10);
+  if(path==='/'||path==='/index.html'||path==='/favicon.ico'||path==='/static/client.js'||
+      path==='/static/assets/manifest.webmanifest'||/^\/static\/assets\/[\w-]+\.js$/.test(path)||path.startsWith('/assets/')||path.startsWith('/static/assets/brand/')||path.startsWith('/static/photos/'))return 'asset';
+  return 'blocked';
+}
+
+function responseHeaders(upstream={},secure=false) {
+  const headers={...upstream};
+  // Do not expose runtime versions, and do not accept weaker upstream policy.
+  for(const name of ['server','x-powered-by','strict-transport-security'])delete headers[name];
+  Object.assign(headers,{
+    'content-security-policy':contentSecurityPolicy,
+    'x-frame-options':'DENY','x-content-type-options':'nosniff',
+    'referrer-policy':'strict-origin-when-cross-origin',
+    'permissions-policy':'camera=(self), microphone=(), geolocation=()',
+    'cache-control':'no-store',
+  });
+  if(secure)headers['strict-transport-security']='max-age=31536000';
+  return headers;
+}
+
+export function createShareProxy({upstreamHost='localhost',upstreamPort=8200,
+  trustCloudflare=true,trustFunnel=false,healthCheck=false,
+  deploymentTopology=process.env.MLOCAL_DEPLOYMENT_TOPOLOGY||'',
+  secureProductionIngress=false,maxQueuedRequests=32,queueWaitMs=10000,maxConnections=96,
+  upstreamDeadlineMs,readinessDeadlineMs=5000,startupCatalogCheck=false,
+  eventSink=process.env.MLOCAL_INGRESS_EVENT_LOG==='stderr' ? event=>console.error(JSON.stringify(event)) : undefined,
+}={}) {
+  if(!['','single-instance-serialized'].includes(deploymentTopology))throw new Error('Invalid deployment topology.');
+  if(typeof secureProductionIngress!=='boolean')throw new Error('Invalid secure ingress policy.');
+  if(typeof startupCatalogCheck!=='boolean')throw new Error('Invalid startup catalog policy.');
+  if(!Number.isInteger(maxConnections)||maxConnections<1||maxConnections>256)throw new Error('Invalid ingress connection limit.');
+  if(upstreamDeadlineMs!==undefined&&(!Number.isInteger(upstreamDeadlineMs)||upstreamDeadlineMs<1||upstreamDeadlineMs>80000))throw new Error('Invalid upstream deadline.');
+  if(!Number.isInteger(readinessDeadlineMs)||readinessDeadlineMs<1||readinessDeadlineMs>5000)throw new Error('Invalid readiness deadline.');
+  const lane=deploymentTopology==='single-instance-serialized'?createSerializedIngress({maxQueuedRequests,queueWaitMs}):null;
+  if(startupCatalogCheck&&(!lane||!healthCheck))throw new Error('Startup catalog acceptance requires serialized readiness.');
+  const observer=createObserver(eventSink),limit=createOnboardingLimit();
+  let deliveryBytes=0,catalogState=startupCatalogCheck?'pending':'disabled';
+
+  function deliver(response,res,route,deadlineMs) {
+    if(res.destroyed){response.resume();return;}
+    let reserved=0,released=false,deliveryStopped=false;
+    const release=()=>{
+      if(released)return;
+      released=true;clearTimeout(deadline);
+      deliveryBytes-=reserved;reserved=0;
+    };
+    const stop=code=>{
+      if(deliveryStopped)return;
+      deliveryStopped=true;
+      observer.fail(code,route,502);
+      // Close only downstream delivery. Continue consuming the native response
+      // to establish completion; a delivery problem never clears its lane.
+      res.destroy();
+    };
+    const deadline=setTimeout(()=>stop('DELIVERY_DEADLINE'),deadlineMs);
+    res.once('finish',release);res.once('close',release);
+    res.writeHead(response.statusCode,responseHeaders(response.headers,secureProductionIngress));
+    response.on('data',chunk=>{
+      if(deliveryStopped||res.destroyed)return;
+      if(reserved+chunk.length>maxResponseBytes||deliveryBytes+chunk.length>maxDeliveryBytes) {
+        stop('DELIVERY_LIMIT');return;
+      }
+      reserved+=chunk.length;deliveryBytes+=chunk.length;
+      // Deliberately consume upstream even if write returns false. The shared
+      // byte budget bounds the outstanding output references until finish/close.
+      res.write(chunk);
+    });
+    response.on('end',()=>{if(!deliveryStopped&&!res.destroyed)res.end();});
+  }
+
+  function upstreamRequest(options,{body,onResponse,signal,deadlineMs}) {
+    return new Promise((resolve,reject)=>{
+      let settled=false,timer,response;
+      const finish=error=>{
+        if(settled)return;
+        settled=true;clearTimeout(timer);
+        signal?.removeEventListener('abort',abort);
+        error?reject(error):resolve();
       };
-      // Runtime readiness alone misses missing RPCs and an unavailable catalog.
-      // Use one deadline for both anonymous probes and expose no diagnostics.
-      const deadline=setTimeout(()=>{finish(false);active?.destroy();},5000);
-      res.on('close',()=>{clearTimeout(deadline);active?.destroy();});
-      const checkFeed=()=>{
-        if(finished)return;
-        if(!functions.has('home_feed')){finish(false);return;}
-        active=http.request({hostname:upstreamHost,port:upstreamPort,path:'/function/home_feed',method:'POST',
-          headers:{'content-type':'application/json','content-length':'2','accept-encoding':'identity'}},response=>{
-          if(response.statusCode!==200){response.resume();finish(false);return;}
-          let body='';
-          response.setEncoding('utf8');
-          response.on('data',chunk=>{
-            body+=chunk;
-            if(body.length>4*1024*1024){finish(false);response.destroy();}
-          });
-          response.on('error',()=>finish(false));
-          response.on('end',()=>{
-            try{
-              const reply=JSON.parse(body),feed=reply?.data?.result;
-              if(reply?.ok!==true){finish(false);return;}
-              validateHomeFeed(feed);
-              finish(true);
-            }catch{finish(false);}
-          });
-        });
-        active.on('error',()=>finish(false));
-        active.end('{}');
-      };
-      active = http.get({ hostname: upstreamHost, port: upstreamPort, path: '/ready' }, response => {
-        response.on('error',()=>finish(false));
-        response.on('end',()=>{if(response.statusCode===200)checkFeed();else finish(false);});
-        response.resume();
+      const request=http.request({hostname:upstreamHost,port:upstreamPort,...options},reply=>{
+        response=reply;
+        reply.on('error',finish);
+        reply.on('aborted',()=>finish(new IngressError('UPSTREAM_FAILURE')));
+        reply.on('end',()=>finish());
+        reply.on('close',()=>{if(!reply.complete)finish(new IngressError('UPSTREAM_FAILURE'));});
+        onResponse(reply);
       });
-      active.on('error', () => finish(false));
+      const abort=()=>{
+        request.destroy(new IngressError('UPSTREAM_DEADLINE'));
+        response?.destroy();
+      };
+      signal?.addEventListener('abort',abort,{once:true});
+      request.on('error',finish);
+      // Serialized deadlines belong to the lane and fail closed. Development
+      // keeps its bounded forwarding behavior without acquiring a global lane.
+      if(!lane)timer=setTimeout(abort,deadlineMs);
+      request.end(body);
+    });
+  }
+
+  function dispatch(task,{signal,deadlineMs}) {
+    if(lane)return lane.run(task,{signal,timeoutMs:deadlineMs});
+    if(signal?.aborted)return Promise.reject(new IngressError('QUEUE_ABORTED'));
+    return task(undefined);
+  }
+
+  async function jsonProbe(path,{signal,deadlineMs,maxBytes=64*1024}={}) {
+    const post=path.startsWith('/function/');
+    let body='',bytes=0,overflow=false,status,type;
+    await dispatch(active=>upstreamRequest({path,method:post?'POST':'GET',
+      headers:{'accept-encoding':'identity',...(post?{'content-type':'application/json','content-length':'2'}:{})}},
+      {body:post?'{}':undefined,signal:active,deadlineMs,onResponse:response=>{
+        status=response.statusCode;type=response.headers['content-type'];response.setEncoding('utf8');
+        response.on('data',chunk=>{
+          bytes+=Buffer.byteLength(chunk,'utf8');
+          if(bytes>maxBytes){overflow=true;body='';}
+          else if(!overflow)body+=chunk;
+        });
+      }}),{signal,deadlineMs});
+    // Even an oversized or invalid response drains completely before the lane
+    // can admit another operation. Never log response bodies or parser errors.
+    if(overflow||status!==200||typeof type!=='string'||!/^application\/json(?:;|$)/i.test(type))return null;
+    try{return JSON.parse(body);}catch{return null;}
+  }
+
+  const proxy=http.createServer((req,res)=>{
+    const path=req.url.split('?')[0],route=routeLabel(path);
+    const read=['GET','HEAD'].includes(req.method);
+    const allowed=read&&(path==='/'||path==='/index.html'||path==='/favicon.ico'||path==='/static/client.js'
+      ||/^\/assets\/[\w-]+\.(js|css|png|svg|ico|webp|woff2?)$/.test(path)
+      ||path==='/static/assets/manifest.webmanifest'
+      ||/^\/static\/assets\/[\w-]+\.js$/.test(path)
+      ||/^\/static\/assets\/brand\/[\w-]+\.(png|ttf|svg)$/.test(path)
+      ||/^\/static\/photos\/[a-f0-9]{32}\.jpg$/.test(path))
+      ||req.method==='POST'&&path.startsWith('/function/')&&functions.has(path.slice(10));
+    for(const [name,value] of Object.entries(responseHeaders({},secureProductionIngress)))res.setHeader(name,value);
+    const waiting=new AbortController();
+    res.on('close',()=>waiting.abort());
+    const fail=(code,status,message)=>{
+      observer.fail(code,route,status);
+      if(res.destroyed||res.writableEnded)return;
+      if(res.headersSent){res.destroy();return;}
+      res.writeHead(status,responseHeaders({'content-type':'text/plain',...(status===503?{'retry-after':'1'}:{})},secureProductionIngress));
+      res.end(message);
+    };
+
+    if(healthCheck&&read&&path==='/healthz') {
+      let finished=false;
+      const finish=ready=>{
+        if(finished)return;
+        finished=true;clearTimeout(deadline);waiting.abort();
+        if(!ready)observer.fail('READINESS_FAILED','readiness',503);
+        if(!res.destroyed){res.writeHead(ready?200:503,responseHeaders({'content-type':'application/json'},secureProductionIngress));res.end(JSON.stringify({ready}));}
+      };
+      // Expiry cancels queued probes. An active probe still drains through its
+      // full response; the lane's deadline latches closed if that never ends.
+      const deadline=setTimeout(()=>finish(false),readinessDeadlineMs);
+      res.on('close',()=>clearTimeout(deadline));
+      if(startupCatalogCheck&&catalogState!=='passed'){finish(false);return;}
+      (async()=>{
+        // Official Jac 0.37.23 registers this native route. A 200 app shell or
+        // incomplete/misconfigured response is not evidence of readiness.
+        const native=await jsonProbe('/healthz/ready',{signal:waiting.signal,deadlineMs:readinessDeadlineMs});
+        if(finished)return;
+        if(native?.ready!==true){finish(false);return;}
+        const reply=await jsonProbe('/function/current_session',{signal:waiting.signal,deadlineMs:readinessDeadlineMs});
+        if(finished)return;
+        finish(reply?.ok===true&&validGuestSession(reply?.data?.result));
+      })().catch(error=>{observer.fail(failureCodes.has(error.code)?error.code:'UPSTREAM_FAILURE','readiness',503);finish(false);});
       return;
     }
-    if (!allowed) { res.writeHead(403); res.end('This endpoint is not available.'); return; }
-    // The phone launcher uses a loopback cloudflared connection. Hosted callers
-    // must explicitly opt into an edge that overwrites CF-Connecting-IP (Render).
-    // A direct listener must not trust caller-supplied forwarding headers.
-    const cloudflareIp=req.headers['cf-connecting-ip'];
-    const funnelIp=req.headers['x-forwarded-for'];
+    if(!allowed){fail('ROUTE_DENIED',403,'This endpoint is not available.');return;}
+    if(startupCatalogCheck&&catalogState!=='passed'&&req.method==='POST'){
+      req.resume();fail('READINESS_FAILED',503,'M-Local is starting or unavailable.');return;
+    }
+    const cloudflareIp=req.headers['cf-connecting-ip'],funnelIp=req.headers['x-forwarded-for'];
     const loopback=['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
-    // Funnel's HTTP proxy replaces X-Forwarded-For. It does not sanitize CF IP.
-    // Trust one valid address only from the local daemon, never a forwarded list.
     const client=trustFunnel
-      ? (loopback&&typeof funnelIp==='string'&&isIP(funnelIp)?funnelIp:req.socket.remoteAddress)
-      : (trustCloudflare&&typeof cloudflareIp==='string'&&isIP(cloudflareIp)?cloudflareIp:req.socket.remoteAddress);
+      ?(loopback&&typeof funnelIp==='string'&&isIP(funnelIp)?funnelIp:req.socket.remoteAddress)
+      :(trustCloudflare&&typeof cloudflareIp==='string'&&isIP(cloudflareIp)?cloudflareIp:req.socket.remoteAddress);
     const retry=limit(client,path);
-    if(retry){res.writeHead(429,{'content-type':'application/json','retry-after':String(retry)});res.end(JSON.stringify({ok:false,error:{code:'RATE_LIMITED',message:'Too many sign-in attempts. Please wait before retrying.'}}));return;}
-    const forward = body => {
-    const upstream = http.request({ hostname: upstreamHost, port: upstreamPort,
-      path: req.url, method: req.method,
-      headers: { ...req.headers, host: `${upstreamHost}:${upstreamPort}` },
-    }, response => {
-      // Keep credentials and dynamic responses out of intermediary caches.
-      res.writeHead(response.statusCode, { ...response.headers, 'cache-control': 'no-store' });
-      response.pipe(res);
-    });
-    upstream.setTimeout(path==='/function/import_business_website'?75000:30000, () => upstream.destroy(new Error('timeout')));
-    upstream.on('error', () => {
-      if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain' });
-      res.end('M-Local is starting or unavailable. Ask the host to check the launcher, then reload.');
-    });
-    req.on('aborted', () => upstream.destroy());
-    res.on('close', () => { if (!res.writableEnded) upstream.destroy(); });
-    if(body)upstream.end(body);else req.pipe(upstream);
+    if(retry){
+      observer.fail('ONBOARDING_RATE_LIMITED',route,429);
+      res.writeHead(429,responseHeaders({'content-type':'application/json','retry-after':String(retry)},secureProductionIngress));
+      res.end(JSON.stringify({ok:false,error:{code:'RATE_LIMITED',message:'Too many sign-in attempts. Please wait before retrying.'}}));return;
+    }
+    const forward=body=>{
+      const headers={...req.headers,host:`${upstreamHost}:${upstreamPort}`};
+      // Bounded bodies are fully received before joining the queue; never relay
+      // a partial chunked mutation or an inconsistent incoming Content-Length.
+      delete headers['transfer-encoding'];
+      if(body)headers['content-length']=String(body.length);
+      else {delete headers['content-length'];req.resume();}
+      const deadlineMs=upstreamDeadlineMs??(path==='/function/import_business_website'?75000:30000);
+      dispatch(signal=>upstreamRequest({path:req.url,method:req.method,headers},
+        {body,signal,deadlineMs,onResponse:response=>{
+          if(response.statusCode>=500)observer.fail('UPSTREAM_5XX',route,response.statusCode);
+          deliver(response,res,route,deadlineMs);
+        }}),{signal:waiting.signal,deadlineMs}).catch(error=>{
+          const code=failureCodes.has(error.code)?error.code:'UPSTREAM_FAILURE';
+          const status=['QUEUE_FULL','QUEUE_DEADLINE','SERIALIZATION_CLOSED'].includes(code)?503:502;
+          fail(code,status,'M-Local is starting or unavailable. Ask the host to check the launcher, then reload.');
+        });
     };
     if(req.method!=='POST'){forward();return;}
-    // Resized photo payloads get a separate bound; profile forms stay at 64 KiB.
-    // Buffer bounded RPC bodies
-    // so a chunked oversized request cannot partly execute at the upstream.
     const maxBody=path==='/function/upload_business_photo'?1400000:64*1024;
-    let bytes=0, rejected=false;
+    let bytes=0,rejected=false;
     const chunks=[];
     const rejectBody=status=>{
-      clearTimeout(deadline);
-      rejected=true;chunks.length=0;
-      if(!res.headersSent){res.writeHead(status,{'content-type':'text/plain'});res.end(status===413?'Request is too large.':'Request took too long.');}
-      req.resume();
+      clearTimeout(deadline);rejected=true;chunks.length=0;
+      fail(status===413?'BODY_TOO_LARGE':'BODY_DEADLINE',status,status===413?'Request is too large.':'Request took too long.');req.resume();
     };
     const deadline=setTimeout(()=>rejectBody(408),15000);
     if(Number(req.headers['content-length'])>maxBody){rejectBody(413);return;}
     req.on('data',chunk=>{
       if(rejected)return;
       bytes+=chunk.length;
-      if(bytes>maxBody){rejected=true;chunks.length=0;rejectBody(413);return;}
+      if(bytes>maxBody){rejectBody(413);return;}
       chunks.push(chunk);
     });
-    req.on('end',()=>{
-      clearTimeout(deadline);
-      if(!rejected&&!res.writableEnded)forward(Buffer.concat(chunks));
-    });
+    req.on('end',()=>{clearTimeout(deadline);if(!rejected&&!res.writableEnded)forward(Buffer.concat(chunks));});
     req.on('aborted',()=>clearTimeout(deadline));
     req.on('error',()=>{clearTimeout(deadline);res.destroy();});
     res.on('close',()=>clearTimeout(deadline));
   });
+  if(startupCatalogCheck)proxy.once('listening',()=>{
+    (async()=>{
+      const native=await jsonProbe('/healthz/ready',{deadlineMs:readinessDeadlineMs});
+      if(native?.ready!==true)throw new Error('Startup metadata refused.');
+      const reply=await jsonProbe('/function/home_feed',{deadlineMs:upstreamDeadlineMs??30000,maxBytes:4*1024*1024});
+      if(reply?.ok!==true)throw new Error('Startup catalog refused.');
+      validateHomeFeed(reply?.data?.result);
+      if(lane.status().closed)throw new Error('Startup lane closed.');
+      catalogState='passed';
+    })().catch(()=>{catalogState='failed';observer.fail('READINESS_FAILED','readiness',503);});
+  });
+  proxy.ingressStatus=()=>({failures:observer.status(),serialization:lane?.status()??{enabled:false},
+    startupCatalog:catalogState,
+    delivery:{bytes:deliveryBytes,maxBytes:maxDeliveryBytes,maxResponseBytes}});
+  // Bound sockets and partially received requests as well as queued bodies.
+  proxy.maxConnections=maxConnections;
+  proxy.headersTimeout=10000;
+  proxy.requestTimeout=15000;
+  proxy.keepAliveTimeout=5000;
+  proxy.maxRequestsPerSocket=100;
+  proxy.on('close',()=>lane?.close());
+  return proxy;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const proxy = createShareProxy();
-  proxy.on('error', error => { console.error(error.message); process.exitCode = 1; });
-  proxy.listen(8280, '127.0.0.1', () => console.log('M-Local sharing gateway ready on 127.0.0.1:8280.'));
-  const stop = () => { proxy.closeAllConnections(); proxy.close(); };
-  process.on('SIGINT', stop);
-  process.on('SIGTERM', stop);
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
+  const proxy=createShareProxy();
+  proxy.on('error',()=>{console.error('M-Local sharing gateway could not start.');process.exitCode=1;});
+  proxy.listen(8280,'127.0.0.1',()=>console.log('M-Local sharing gateway ready on 127.0.0.1:8280.'));
+  const stop=()=>{proxy.closeAllConnections();proxy.close();};
+  process.on('SIGINT',stop);process.on('SIGTERM',stop);
 }
