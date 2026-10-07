@@ -355,6 +355,8 @@ def main():
                 (workspace / "qr-payload-proof.json").write_text(json.dumps({"payload_sha256": hashlib.sha256(detail["my_qr_payload"].encode()).hexdigest(), "size": 240, "margin": 4}))
                 layout = page.locator('[data-testid="claim-qr"]').evaluate("node => {const r=node.getBoundingClientRect();let blocked=0;for(const x of [.05,.5,.95])for(const y of [.05,.5,.95]){const top=document.elementFromPoint(r.x+r.width*x,r.y+r.height*y);if(!top||!node.contains(top))blocked++;}return {x:r.x,y:r.y,width:r.width,height:r.height,viewport_width:innerWidth,viewport_height:innerHeight,within_viewport:r.x>=0&&r.y>=0&&r.right<=innerWidth&&r.bottom<=innerHeight,occluded_sample_points:blocked};}")
                 (workspace / "qr-layout.json").write_text(json.dumps(layout))
+                check(layout["within_viewport"] and layout["occluded_sample_points"] == 0,
+                      "complete saved QR is visible without navigation covering any sampled point")
                 merchant_context = browser.new_context(viewport={"width": 390, "height": 844}, reduced_motion="reduce")
                 merchant_page = merchant_context.new_page()
                 merchant_page.on("pageerror", lambda error: merchant_diagnostic["errors"].append(str(error)))
