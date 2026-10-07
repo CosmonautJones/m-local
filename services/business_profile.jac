@@ -1,17 +1,15 @@
-"""Signed-in catalog readers see a business's public profile and published offers.
+"""Catalog readers see a business's public profile and published offers.
 
 This projection never returns merchant authority or any account's claim fields.
 Offer detail remains the existing caller-scoped get_offer endpoint.
 """
 
-import os;
 import time;
-import from services.models { Restaurant, Publishes }
+import from services.models { Restaurant, Publishes, samples_visible }
 import from services.promo { OfferView, _find_offer, _restaurant_of, _location_of, _view }
 import from services.qr_catalog { _ensure_seed }
 import from services.qr_auth { listing_visible }
 import from services.session { _actor_id, _merchant_for_actor }
-import from services.foryou { DEMO_MODE_ENV, demo_mode }
 
 obj BusinessProfileView {
     has ok: bool = False,
@@ -32,7 +30,7 @@ obj BusinessProfileView {
 
 def _public_business(slug: str, offer_id: str, now: float) -> BusinessProfileView {
     target = slug.strip();
-    show_samples = demo_mode(os.environ.get(DEMO_MODE_ENV, "")) or os.environ.get("MLOCAL_HOSTED_DATASET", "") == "1";
+    show_samples = samples_visible();
     r: Restaurant | None = None;
     if target {
         matches = [item for item in [root.shared -->[?:Restaurant]] if item.slug == target];
@@ -66,11 +64,8 @@ def _public_business(slug: str, offer_id: str, now: float) -> BusinessProfileVie
 }
 
 
-def:protect get_business_profile(slug: str = "", offer_id: str = "") -> BusinessProfileView {
+def:pub get_business_profile(slug: str = "", offer_id: str = "") -> BusinessProfileView {
     actor = _actor_id();
-    if not actor {
-        return BusinessProfileView(message="Sign in to view this business.");
-    }
     _ensure_seed();
     target = slug.strip();
     if not target and not offer_id.strip() {

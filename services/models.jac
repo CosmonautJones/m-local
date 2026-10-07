@@ -18,9 +18,10 @@ def public_name(name: str) -> str {
 }
 
 
-"""Test harness only. Production leaves MLOCAL_DEMO_MODE unset."""
+"""One server-side sample policy. An explicit switch overrides the demo/test
+fallback; selecting a hosted dataset never grants sample visibility."""
 def samples_visible() -> bool {
-    raw = os.environ.get("MLOCAL_DEMO_MODE", "");
+    raw = os.environ.get("MLOCAL_SHOW_SAMPLES", os.environ.get("MLOCAL_DEMO_MODE", ""));
     return raw.strip().lower() in ["1", "true", "yes", "on"];
 }
 

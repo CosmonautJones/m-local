@@ -5,7 +5,10 @@ to the internal helpers. Privacy between real accounts is checked over HTTP."""
 
 import from services.promo { _claim, _redeem, list_offers }
 import from services.session { _merchant_for_actor }
-import from unittest.mock { patch }
+import from services.models { samples_visible }
+import from services.hosted_dataset { ensure_hosted_dataset }
+import json;
+import from unittest.mock { patch, mock_open }
 import from jaclang.data.serializer { Serializer }
 
 def _reset -> TasteProfile {
@@ -18,6 +21,17 @@ def _reset -> TasteProfile {
     fresh = _profile(True);
     assert fresh is not None;
     return fresh as TasteProfile;
+}
+
+
+def _hosted_catalog_fixture -> any {
+    # Unit graphs provide a small catalog; keep the real hosted loader/importer
+    # active without depending on the large JSON excluded by code-only isolation.
+    records = [{"id": "osm:node:999876", "name": "Unit catalog cafe", "category": "cafe",
+        "source_type": "node", "source_id": "999876", "source_url": "https://www.openstreetmap.org/node/999876",
+        "lat": 42.28, "lon": -83.74, "coordinate_method": "osm_node",
+        "retrieved_at": "2026-09-27T00:00:00+00:00", "address": {}, "quality_flags": []}];
+    return patch.dict(ensure_hosted_dataset.__globals__, {"open": mock_open(read_data=json.dumps(records))});
 }
 
 
@@ -247,12 +261,108 @@ test "production home omits a demo offer the caller has claimed or redeemed" {
 test "hosted dataset replaces starter fixture discovery without deleting starter records" {
     _ensure_seed();
     original = [jid(r) for r in [root.shared -->[?:Restaurant]] if r.source == "demo-seed"];
-    with patch.dict(os.environ, {"MLOCAL_HOSTED_DATASET": "1"}) {
+    with _hosted_catalog_fixture(), patch.dict(os.environ, {"MLOCAL_HOSTED_DATASET": "1", "MLOCAL_DEMO_MODE": "1"}) {
         home = _home("", "", "any", "", time.time());
         assert home.show_samples;
         assert not [item for item in home.items if item.offer.restaurant.endswith(" (Demo)")];
     }
     assert [jid(r) for r in [root.shared -->[?:Restaurant]] if r.source == "demo-seed"] == original;
+}
+
+test "hosted dataset cannot override disabled sample discovery favorites or direct favorite writes" {
+    _ensure_seed();
+    p = _reset();
+    now = time.time();
+    demo = Restaurant(slug="hidden-sample-favorite", name="Hidden sample favorite", is_demo=True);
+    root.shared ++> demo;
+    real = Restaurant(slug="real-favorite-with-sample", name="Real favorite", is_demo=False);
+    root.shared ++> real;
+    sample = Offer(title="Hidden sample", price_cents=300, start_ts=now - 60, end_ts=now + 3600, quantity=3, is_demo=True);
+    demo +>:Publishes():+> sample;
+    demo +>:Publishes():+> Offer(title="Unmarked offer at sample parent", price_cents=300, start_ts=now - 60, end_ts=now + 3600, quantity=3, is_demo=False);
+    real +>:Publishes():+> Offer(title="Sample at real favorite", price_cents=200, start_ts=now - 60, end_ts=now + 3600, quantity=3, is_demo=True);
+    with patch.dict(os.environ, {"MLOCAL_DEMO_MODE": "1"}) {
+        assert _toggle_favorite(demo.slug, now).ok;
+        assert _toggle_favorite(real.slug, now).ok;
+    }
+    with _hosted_catalog_fixture(), patch.dict(os.environ, {"MLOCAL_DEMO_MODE": "0", "MLOCAL_HOSTED_DATASET": "1"}) {
+        quiet = _home("", "", "any", "", now);
+        assert not quiet.show_samples;
+        assert not [i for i in quiet.items if i.offer.is_demo];
+        assert not [i for i in quiet.items if i.offer.restaurant == demo.name];
+        favorites = _favorite_places(_favorite_slugs(p), now);
+        assert not [f for f in favorites if f.slug == demo.slug];
+        visible = [f for f in favorites if f.slug == real.slug];
+        assert len(visible) == 1 and visible[0].live_offers == 0 and visible[0].best_offer_id == "";
+        assert not _toggle_favorite(demo.slug, now).ok;
+        assert demo.slug in _favorite_slugs(p), "Visibility changes must preserve stored favorites";
+    }
+}
+
+test "explicit sample visibility overrides demo fallback and hosted fixtures" {
+    with _hosted_catalog_fixture(), patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "0", "MLOCAL_DEMO_MODE": "1", "MLOCAL_HOSTED_DATASET": "1"}) {
+        assert not samples_visible();
+        assert not _home("", "", "any", "", time.time()).show_samples;
+    }
+    with patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "1", "MLOCAL_DEMO_MODE": "0", "MLOCAL_HOSTED_DATASET": "0"}) {
+        assert samples_visible();
+    }
+}
+
+
+test "disabled sample taste responses preserve stored favorites and restore them when enabled" {
+    _ensure_seed();
+    p = _reset();
+    now = time.time();
+    demo = Restaurant(slug="taste-hidden-sample", name="Hidden taste sample", is_demo=True);
+    real = Restaurant(slug="taste-real-favorite", name="Real taste favorite", is_demo=False);
+    root.shared ++> demo;
+    root.shared ++> real;
+    with patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "1"}) {
+        assert toggle_favorite(slug=demo.slug).ok;
+        assert toggle_favorite(slug=real.slug).ok;
+    }
+    p +>:Keeps():+> Favorite(slug="preserved-unlisted-favorite", since_ts=now + 1);
+    original = _favorite_slugs(p);
+    with patch.dict(taste_choices.__globals__, {"_actor_id": lambda () -> str { return "taste-owner"; }}) {
+        with _hosted_catalog_fixture(), patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "0", "MLOCAL_DEMO_MODE": "1", "MLOCAL_HOSTED_DATASET": "1"}) {
+            choices = taste_choices();
+            saved = save_taste("pizza", "", "");
+            refused = toggle_favorite(slug=demo.slug);
+            for response in [choices, saved, refused] {
+                assert demo.slug not in response.favorites, "Disabled sample slugs must not leak through taste responses";
+                assert real.slug in response.favorites and "preserved-unlisted-favorite" in response.favorites;
+            }
+            assert not refused.ok;
+            assert _favorite_slugs(p) == original, "Visibility must not delete or alter saved favorite marks";
+        }
+        with patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "1", "MLOCAL_DEMO_MODE": "0"}) {
+            assert taste_choices().favorites == original, "Re-enabling samples must restore their stored favorites";
+        }
+    }
+}
+
+
+test "disabled sample offer lookup cannot toggle a real parent favorite" {
+    _ensure_seed();
+    p = _reset();
+    now = time.time();
+    real = Restaurant(slug="favorite-real-parent-sample-child", name="Real parent", is_demo=False);
+    demo = Restaurant(slug="favorite-sample-parent-unmarked-child", name="Sample parent", is_demo=True);
+    root.shared ++> real;
+    root.shared ++> demo;
+    sample = Offer(title="Hidden sample child", is_demo=True, start_ts=now - 60, end_ts=now + 3600, quantity=3);
+    unmarked = Offer(title="Unmarked child", is_demo=False, start_ts=now - 60, end_ts=now + 3600, quantity=3);
+    real +>:Publishes():+> sample;
+    demo +>:Publishes():+> unmarked;
+    with _hosted_catalog_fixture(), patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "0", "MLOCAL_DEMO_MODE": "1", "MLOCAL_HOSTED_DATASET": "1"}) {
+        assert not toggle_favorite(offer_id=jid(sample)).ok, "Hidden sample offers cannot create favorites through their real parent";
+        assert not toggle_favorite(offer_id=jid(unmarked)).ok, "A sample parent hides even an unmarked child";
+        assert _favorite_slugs(p) == [];
+        assert toggle_favorite(slug=real.slug).ok, "The legitimate real parent remains directly favoriteable";
+        assert not toggle_favorite(offer_id=jid(sample)).ok;
+        assert _favorite_slugs(p) == [real.slug], "Hidden offer requests must also preserve an existing real favorite";
+    }
 }
 
 
@@ -310,7 +420,9 @@ test "home retains a real saved QR after pause or shortened offer end until hold
 test "home retains only the owner's live claim across price diet and time filters" {
     _ensure_seed();
     _reset();
-    now = time.time();
+    # A real clock near midnight makes tomorrow's offer part of "today" after
+    # the hold deadline. Keep this filter fixture on one local calendar day.
+    now = datetime.fromtimestamp(time.time(), ZoneInfo("America/Detroit")).replace(hour=12, minute=0, second=0, microsecond=0).timestamp();
     o = _claim_fixture("filtered-claim-cafe", now);
     oid = jid(o);
     actor = "filtered-claim-student";
@@ -333,7 +445,7 @@ test "home retains only the owner's live claim across price diet and time filter
             assert not [i for i in _home(stranger, price, window, diets, now + 1).items if i.offer.id == oid];
             assert _listed_claim(stranger, oid, now + 1, budget, window, diets) == [];
         }
-        assert not [i for i in _home(actor, price, window, diets, expires).items if i.offer.id == oid];
+        assert not [i for i in _home(actor, price, window, diets, expires).items if i.offer.id == oid], "Expired hold visible for price=" + price + ", window=" + window + ", diets=" + diets + ", start=" + str(o.start_ts) + ", deadline=" + str(expires) + ", status=" + _view(o, expires, actor).my_status;
         assert _listed_claim(actor, oid, expires, budget, window, diets) == [];
     }
 }

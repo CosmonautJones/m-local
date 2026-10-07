@@ -1,0 +1,644 @@
+"""Disposable real-browser acceptance through the restricted serialized gateway.
+
+The fixture sends email only to an allowlisted local TLS SMTP sink, owns every
+store/process, and never contacts a hosted app. Screenshots exclude credentials.
+Run with the pinned jacpython wrapper; Playwright Chromium must be installed.
+"""
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timedelta
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tests/integration"))
+from recovery_http import Api, copy_application, input_manifest, private_dir, run_logged, scrub_environment, stable_json, stop_process
+from smtp_sink import SmtpSink
+
+GATEWAY_FILES = ("scripts/hosted-gateway.mjs", "scripts/phone-share-proxy.mjs",
+                 "scripts/onboarding-ingress.mjs", "scripts/serialized-ingress.mjs")
+
+
+def post(origin, path, body):
+    request = urllib.request.Request(origin + path, json.dumps(body).encode(),
+                                    {"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(request, timeout=30) as response:
+        result = json.load(response)
+    assert result.get("ok"), "fixture native provisioning failed"
+    return result["data"]
+
+
+def port(number):
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", number))
+    return number
+
+
+def scanner_chunk(url):
+    path = urlsplit(url).path
+    return path.startswith(("/assets/", "/static/assets/")) and bool(re.search(r"/assets/(?:assets/)?index-[A-Za-z0-9_-]+\.js$", path))
+
+
+def readiness_diagnostic_summary(workspace, attempts, post_failure):
+    """Export only fixed readiness categories; raw native/gateway logs stay private."""
+    labels = {"native-setup", "native", "gateway", "native-samples-disabled", "gateway-samples-disabled",
+              "native-samples-restored", "gateway-samples-restored"}
+    codes = {"QUEUE_FULL", "QUEUE_DEADLINE", "QUEUE_ABORTED", "SERIALIZATION_CLOSED", "UPSTREAM_DEADLINE",
+             "UPSTREAM_FAILURE", "UPSTREAM_5XX", "READINESS_FAILED", "DELIVERY_LIMIT", "DELIVERY_DEADLINE"}
+    categories = {"client_timeout", "transport_error", "invalid_json", "not_ready", "ready", "process_exit"}
+    summary = {"attempts": [], "gateway_events": {}, "post_failure": {}}
+    for row in attempts:
+        if row.get("label") not in labels:
+            continue
+        summary["attempts"].append({"label": row["label"], "seconds": float(row["seconds"]),
+            "attempts": int(row["attempts"]),
+            "statuses": {key: int(value) for key, value in row.get("statuses", {}).items()
+                         if key in {str(number) for number in range(100, 600)}},
+            "categories": {key: int(value) for key, value in row.get("categories", {}).items() if key in categories}})
+    for label in sorted(labels):
+        if not label.startswith("gateway"):
+            continue
+        path = workspace / (label + ".log")
+        if not path.is_file():
+            continue
+        counts = {}
+        for line in path.read_text(errors="replace").splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if (isinstance(event, dict) and event.get("kind") == "mlocal_ingress_failure"
+                    and event.get("route") == "readiness" and event.get("code") in codes):
+                code = event["code"]
+                counts[code] = counts.get(code, 0) + 1
+        summary["gateway_events"][label] = counts
+    if post_failure:
+        summary["post_failure"]["gateway_stopped_before_native_probe"] = post_failure.get("gateway_stopped_before_native_probe") is True
+        for label in ("native_health", "native_feed"):
+            row = post_failure.get(label, {})
+            exported = {}
+            for name in ("status", "seconds"):
+                if isinstance(row.get(name), (int, float)) and not isinstance(row[name], bool):
+                    exported[name] = row[name]
+            for name in ("ready", "ok", "shape_valid", "client_timeout", "transport_error", "invalid_json"):
+                if isinstance(row.get(name), bool):
+                    exported[name] = row[name]
+            summary["post_failure"][label] = exported
+    return summary
+
+
+def capture_qr_controls(browser, app, workspace, payload, actual_svg):
+    """Private controls use the same payload, size and library as the product."""
+    renderer = "const fs=require('node:fs'),{createRequire}=require('node:module');const pkg=createRequire(process.argv[1]+'/.jac/client/configs/package.json');const React=pkg('react'),{renderToStaticMarkup}=pkg('react-dom/server'),{QRCodeSVG}=pkg('qrcode.react');process.stdout.write(renderToStaticMarkup(React.createElement(QRCodeSVG,{value:fs.readFileSync(0,'utf8'),size:240,level:'M',marginSize:4,bgColor:'#FFFFFF',fgColor:'#000000'})));"
+    with (workspace / "qr-control-node.log").open("ab") as log:
+        independent_svg = subprocess.check_output(["node", "-e", renderer, str(app)], input=payload.encode(), stderr=log, timeout=10).decode()
+    (workspace / "independent-qr.svg").write_text(independent_svg)
+    control = browser.new_context(viewport={"width": 390, "height": 844})
+    try:
+        page = control.new_page()
+        for name, svg in (("actual-svg-isolated.png", actual_svg), ("independent-qr-240.png", independent_svg)):
+            page.set_content(svg)
+            page.locator("svg").screenshot(path=str(workspace / name))
+    finally:
+        control.close()
+
+
+def qr_diagnostic_summary(workspace, merchant):
+    """Export fixed categories and measurements; raw frames/logs stay private."""
+    messages = {
+        "No readable claim QR was found": "image_decode_failed",
+        "This is not an M-Local claim QR": "wrong_payload_shape",
+        "Could not check the claim": "native_resolution_transport_failed",
+        "The QR scanner could not load": "module_load_failed",
+        "Reading the QR image": "image_decode_pending",
+        "Checking the claim": "native_resolution_pending",
+    }
+    state = merchant.get("state_text", "")
+    summary = {"state_category": next((category for text, category in messages.items() if text in state), "unclassified"),
+        "page_error_count": len(merchant["errors"]), "csp_error_count": len(merchant["csp"]),
+        "assets": [{"path": row["path"], "status": row["status"], "javascript": "javascript" in row["content_type"]}
+                   for row in merchant["assets"] if re.fullmatch(r"/(?:static/(?:assets/)?|assets/)[A-Za-z0-9_.-]+\.js", row["path"])],
+        "resolve": [{"status": row["status"], "ok": row.get("ok") if isinstance(row.get("ok"), bool) else None} for row in merchant["resolve"]],
+        "merchant_visibility": merchant.get("merchant_visibility") if merchant.get("merchant_visibility") in {"visible", "hidden"} else None,
+        "student_visibility": merchant.get("student_visibility") if merchant.get("student_visibility") in {"visible", "hidden"} else None}
+    if summary["state_category"] == "unclassified" and any(row.get("ok") is False for row in merchant["resolve"]):
+        summary["state_category"] = "native_resolution_refused"
+    if (workspace / "qr-layout.json").exists():
+        summary["layout"] = json.loads((workspace / "qr-layout.json").read_text())
+    images = {}
+    from PIL import Image
+    for name in ("claim-qr.png", "actual-svg-isolated.png", "independent-qr-240.png"):
+        path = workspace / name
+        if not path.exists():
+            continue
+        image = Image.open(path).convert("RGB")
+        gray = image.convert("L")
+        (workspace / (name + ".gray")).write_bytes(gray.tobytes())
+        colors = image.getcolors(image.width * image.height)
+        regions = {"top": (0, 0, image.width, 20), "bottom": (0, image.height - 20, image.width, image.height),
+                   "left": (0, 0, 20, image.height), "right": (image.width - 20, 0, image.width, image.height)}
+        edges = {}
+        for edge, box in regions.items():
+            strip = gray.crop(box)
+            edges[edge] = round(sum(value > 245 for value in strip.tobytes()) / (strip.width * strip.height), 4)
+        images[name] = {"width": image.width, "height": image.height,
+                       "non_gray_pixels": sum(count for count, rgb in colors if max(rgb) - min(rgb) > 8),
+                       "quiet_edge_white_fractions": edges}
+    summary["images"] = images
+    if images:
+        (workspace / "qr-image-metadata-all.json").write_text(json.dumps(images))
+        reader = r"""
+const fs=require('node:fs'),{createRequire}=require('node:module'),{createHash}=require('node:crypto');
+const root=process.argv[1],pkg=createRequire(root+'/app/.jac/client/configs/package.json');
+const {RGBLuminanceSource,BinaryBitmap,HybridBinarizer,QRCodeReader}=pkg('@zxing/library');
+const images=JSON.parse(fs.readFileSync(root+'/qr-image-metadata-all.json','utf8'));
+const expected=JSON.parse(fs.readFileSync(root+'/qr-payload-proof.json','utf8')).payload_sha256,results={};
+for(const [name,meta] of Object.entries(images)){
+ const pixels=new Uint8ClampedArray(fs.readFileSync(root+'/'+name+'.gray'));
+ try{const value=new QRCodeReader().decode(new BinaryBitmap(new HybridBinarizer(new RGBLuminanceSource(pixels,meta.width,meta.height)))).getText();
+ results[name]={decoded:true,is_native_claim_payload:/^mlocal:v1:[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(value),matches_expected_payload:createHash('sha256').update(value).digest('hex')===expected};}
+ catch{results[name]={decoded:false};}
+}
+process.stdout.write(JSON.stringify(results));
+"""
+        with (workspace / "qr-readability-node.log").open("ab") as log:
+            summary["readability"] = json.loads(subprocess.check_output(["node", "-e", reader, str(workspace)], stderr=log, timeout=10))
+    if (workspace / "actual-qr.svg").exists() and (workspace / "independent-qr.svg").exists():
+        from xml.etree import ElementTree
+        actual = ElementTree.fromstring((workspace / "actual-qr.svg").read_text())
+        control = ElementTree.fromstring((workspace / "independent-qr.svg").read_text())
+        def matrix(svg):
+            return [element.get("d") for element in svg.iter() if element.tag.rsplit("}", 1)[-1] == "path" and element.get("fill") == "#000000"]
+        summary["matrix_equal"] = bool(matrix(actual)) and matrix(actual) == matrix(control)
+        summary["viewbox_equal"] = actual.get("viewBox") == control.get("viewBox")
+    return summary
+
+
+def stop_private_postgres(workspace):
+    """Stop the embedded daemon only after all owned API writers are stopped."""
+    workspace = workspace.resolve()
+    if workspace.parent != Path("/var/tmp") or not workspace.name.startswith("m-local-release-browser."):
+        raise RuntimeError("PostgreSQL cleanup refuses an unrelated workspace")
+    data = workspace / "cache/pg/main"
+    pid_file = data / "postmaster.pid"
+    if not pid_file.exists():
+        return
+    if data.is_symlink() or not data.resolve().is_relative_to(workspace):
+        raise RuntimeError("PostgreSQL cleanup refuses an unrelated data directory")
+    pid = int(pid_file.read_text().splitlines()[0])
+    process = Path("/proc") / str(pid)
+    arguments = (process / "cmdline").read_bytes().split(b"\0")
+    location = arguments.index(b"-D") + 1
+    if Path(os.fsdecode(arguments[location])).resolve() != data.resolve():
+        raise RuntimeError("PostgreSQL cleanup refuses a mismatched process")
+    executable = (process / "exe").resolve()
+    if executable.name != "postgres":
+        raise RuntimeError("PostgreSQL cleanup refuses a different executable")
+    controller = executable.with_name("pg_ctl")
+    subprocess.run([str(controller), "-D", str(data), "-m", "fast", "-w", "-t", "15", "stop"],
+                   check=True, timeout=20, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if pid_file.exists():
+        raise RuntimeError("Owned PostgreSQL process remained after cleanup")
+
+
+def main():
+    from playwright.sync_api import sync_playwright, expect
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source", type=Path, default=ROOT)
+    parser.add_argument("--source-ref", default="", help="Informational candidate commit; source bytes are independently hashed")
+    parser.add_argument("--gateway-repo", type=Path, required=True)
+    parser.add_argument("--gateway-ref", required=True)
+    parser.add_argument("--evidence", type=Path, required=True)
+    parser.add_argument("--base-port", type=int, default=18900)
+    parser.add_argument("--axe", type=Path, default=Path("/var/tmp/m-local-experience-ui/node_modules/axe-core/axe.min.js"))
+    args = parser.parse_args()
+    if (sys.platform != "linux" or os.geteuid() == 0
+            or any(os.environ.get(name) for name in ("JAC_DB_URL", "JAC_DATA_PATH", "JAC_DEV_SOURCE", "JACPATH"))):
+        raise RuntimeError("Use an unprivileged Linux fixture without inherited live database/source overrides")
+    source = args.source.resolve()
+    if not source.is_dir() or not (source / "main.jac").is_file():
+        raise RuntimeError("Fixture source must be an application source directory")
+    jac = Path(os.environ["JAC_BIN"]).resolve()
+    assert subprocess.check_output([str(jac), "--version"], text=True, timeout=30).split()[:2] == ["jac", "0.37.23"]
+    os.umask(0o077)
+    workspace = Path(tempfile.mkdtemp(prefix="m-local-release-browser.", dir="/var/tmp"))
+    workspace.chmod(0o700)
+    app, cache = workspace / "app", workspace / "cache"
+    private_dir(app); private_dir(cache); private_dir(cache / "tmp")
+    copy_application(source, app)
+    shutil.copy2(Path(__file__), app / "tests/ui/release_experience_live.py")
+    shutil.copy2(Path(__file__).with_name("release_sample_fixture.py"), app / "tests/ui/release_sample_fixture.py")
+    shutil.copy2(source / "assets/manifest.webmanifest", app / "assets/manifest.webmanifest")
+    for relative in GATEWAY_FILES:
+        data = subprocess.check_output(["git", "show", args.gateway_ref + ":" + relative], cwd=args.gateway_repo)
+        (app / relative).write_bytes(data)
+    args.evidence.mkdir(parents=True, exist_ok=True)
+    manifest = input_manifest(app)
+    manifest["assets/manifest.webmanifest"] = hashlib.sha256((app / "assets/manifest.webmanifest").read_bytes()).hexdigest()
+    binding = {"source_sha256": hashlib.sha256(stable_json(manifest)).hexdigest(), "files": manifest,
+               "source_ref": args.source_ref, "gateway_ref": args.gateway_ref, "workspace": str(workspace), "jac": "0.37.23"}
+    binding["axe_sha256"] = hashlib.sha256(args.axe.read_bytes()).hexdigest()
+    binding["browser_helper_sha256"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    binding["mixed_sample_helper_sha256"] = hashlib.sha256(Path(__file__).with_name("release_sample_fixture.py").read_bytes()).hexdigest()
+    (args.evidence / "source-binding.json").write_text(json.dumps(binding, indent=2) + "\n")
+    environment = scrub_environment(jac, cache, app / ".jac/onboarding")
+    # The browser runner imports Playwright from another private venv. Native
+    # installation must resolve every dependency into this app's own venv.
+    environment.pop("PYTHONPATH", None)
+    environment.pop("JAC_DATA_PATH", None)
+    environment.pop("JACPATH", None)
+    environment.update(MLOCAL_ENV="development", MLOCAL_DEMO_MODE="1", MLOCAL_SHOW_SAMPLES="1",
+                       MLOCAL_HOSTED_DATASET="0", MLOCAL_DEPLOYMENT_TOPOLOGY="single-instance-serialized",
+                       MLOCAL_APP_REPLICAS="1", MLOCAL_BACKEND_PORT=str(port(args.base_port)),
+                       PORT=str(port(args.base_port + 1)), MLOCAL_INGRESS="restricted-edge",
+                       MLOCAL_INGRESS_EVENT_LOG="stderr")
+    native = "http://127.0.0.1:" + str(args.base_port)
+    origin = "http://127.0.0.1:" + str(args.base_port + 1)
+    processes, checks, process_labels, readiness_attempts, readiness_post_failure = [], [], {}, [], {}
+    def interrupted(signum, _frame):
+        raise SystemExit(128 + signum)
+    for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(signum, interrupted)
+    def check(value, label):
+        assert value, label
+        checks.append(label)
+        print("PASS " + label, flush=True)
+    def launch(command, label):
+        with (workspace / (label + ".log")).open("wb") as log:
+            process = subprocess.Popen(command, cwd=app, env=environment, stdin=subprocess.DEVNULL,
+                                       stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        processes.append(process)
+        process_labels[process] = label
+        return process
+    def native_failure_probe():
+        # Called only after stopping every owned gateway process. The private
+        # native store has one exclusive writer, with no public-lane bypass.
+        readiness_post_failure["gateway_stopped_before_native_probe"] = True
+        for label, path, body in (("native_health", "/healthz/ready", None), ("native_feed", "/function/home_feed", b"{}")):
+            row, began = {}, time.monotonic()
+            request = urllib.request.Request(native + path, body,
+                {"Content-Type": "application/json"} if body is not None else {}, method="POST" if body is not None else "GET")
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    row["status"] = response.status
+                    raw = response.read(4 * 1024 * 1024 + 1)
+                    reply = json.loads(raw) if len(raw) <= 4 * 1024 * 1024 else None
+                    if label == "native_health":
+                        row["ready"] = isinstance(reply, dict) and reply.get("ready") is True
+                    else:
+                        row["ok"] = isinstance(reply, dict) and reply.get("ok") is True
+                        result = reply.get("data", {}).get("result") if row["ok"] else None
+                        row["shape_valid"] = isinstance(result, dict) and isinstance(result.get("items"), list) and isinstance(result.get("favorites"), list)
+            except urllib.error.HTTPError as error:
+                row["status"] = error.code
+            except (TimeoutError, socket.timeout):
+                row["client_timeout"] = True
+            except ValueError:
+                row["invalid_json"] = True
+            except (OSError, urllib.error.URLError):
+                row["transport_error"] = True
+            row["seconds"] = round(time.monotonic() - began, 3)
+            readiness_post_failure[label] = row
+    def ready(process, url, predicate):
+        began = time.monotonic()
+        row = {"label": process_labels[process], "attempts": 0, "statuses": {}, "categories": {}, "seconds": 0}
+        readiness_attempts.append(row)
+        def category(name):
+            row["categories"][name] = row["categories"].get(name, 0) + 1
+            row["seconds"] = round(time.monotonic() - began, 3)
+        deadline = time.monotonic() + 300
+        while time.monotonic() < deadline:
+            row["attempts"] += 1
+            if process.poll() is not None:
+                category("process_exit")
+                raise RuntimeError("Owned fixture process exited: " + url)
+            try:
+                with urllib.request.urlopen(url, timeout=3) as response:
+                    status = str(response.status)
+                    row["statuses"][status] = row["statuses"].get(status, 0) + 1
+                    if predicate(json.load(response)):
+                        category("ready")
+                        return
+                    category("not_ready")
+            except urllib.error.HTTPError as error:
+                status = str(error.code)
+                row["statuses"][status] = row["statuses"].get(status, 0) + 1
+                category("not_ready")
+            except (TimeoutError, socket.timeout):
+                category("client_timeout")
+            except ValueError:
+                category("invalid_json")
+            except (OSError, urllib.error.URLError):
+                category("transport_error")
+            time.sleep(.25)
+        row["seconds"] = round(time.monotonic() - began, 3)
+        if url == origin + "/healthz":
+            for owned in processes:
+                if process_labels[owned].startswith("gateway"):
+                    stop_process(owned)
+            native_failure_probe()
+        raise TimeoutError("Owned fixture readiness deadline")
+    phase = "install"
+    completed = False
+    redemption_transition_ms = None
+    merchant_diagnostic = {"assets": [], "resolve": [], "errors": [], "csp": []}
+    student_scanner_requests = []
+    scanner_chunk_responses = []
+    started = time.monotonic()
+    try:
+        run_logged("private fixture dependency install", [str(jac), "install", "--no-npm"], app, environment,
+                   workspace / "install.log", 180)
+        with SmtpSink(workspace / "smtp") as sink:
+            environment.update(MLOCAL_SMTP_HOST="127.0.0.1", MLOCAL_SMTP_PORT=str(sink.port),
+                MLOCAL_SMTP_FROM=sink.sender, MLOCAL_SMTP_USERNAME=sink.username,
+                MLOCAL_SMTP_PASSWORD=sink.password, SSL_CERT_FILE=str(sink.ca_file))
+            phase = "native disposable merchant provisioning"
+            backend = launch([str(jac), "run", "--no-dev", "--host", "127.0.0.1", "--port", str(args.base_port)], "native-setup")
+            ready(backend, native + "/healthz/ready", lambda row: row.get("ready") is True)
+            merchant_email = "browser-merchant-" + secrets.token_hex(4) + "@example.test"
+            merchant_password = secrets.token_urlsafe(24)
+            post(native, "/user/register", {"identities": [{"type": "email", "value": merchant_email}],
+                                           "credential": {"type": "password", "password": merchant_password}})
+            merchant = post(native, "/user/login", {"identity": {"type": "email", "value": merchant_email},
+                                                     "credential": {"type": "password", "password": merchant_password}})
+            # Native bootstrap must precede extra fixture restaurants: a nonempty
+            # shared catalog deliberately prevents automatic demo initialization.
+            initial_feed = Api(native).call("home_feed")
+            check(any(row["place"] == "arbor-leaf-kitchen" and row["offer"]["state"] == "active"
+                      for row in initial_feed["items"]),
+                  "native initial catalog contains the active sample before mixed fixture setup")
+            stop_process(backend)
+            environment["MLOCAL_RELEASE_BROWSER_FIXTURE"] = "1"
+            run_logged("private mixed sample graph fixture", ["bash", "scripts/python.sh", "-c",
+                "import runpy;runpy.run_path('tests/ui/release_sample_fixture.py',run_name='__main__')"],
+                app, environment, workspace / "sample-fixture.log", 180)
+            environment.pop("MLOCAL_RELEASE_BROWSER_FIXTURE")
+            check(all(hashlib.sha256((app / name).read_bytes()).hexdigest() == value for name, value in manifest.items()),
+                  "offline sample fixture preserves every bound candidate source file")
+            mixed_samples = json.loads((app / ".jac/release-sample-fixture.json").read_text())
+            environment["MLOCAL_MERCHANT_OWNERS"] = json.dumps({"arbor-leaf-kitchen": merchant["root_id"]})
+            phase = "native app and restricted gateway readiness"
+            backend = launch([str(jac), "run", "--no-dev", "--host", "127.0.0.1", "--port", str(args.base_port)], "native")
+            ready(backend, native + "/healthz/ready", lambda row: row.get("ready") is True)
+            gateway = launch(["node", "scripts/hosted-gateway.mjs"], "gateway")
+            ready(gateway, origin + "/healthz", lambda row: row.get("ready") is True)
+            public, owner = Api(origin), Api(origin, merchant["token"])
+            for key in ("sample_parent", "real_parent"):
+                check(public.call("get_business_profile", slug=mixed_samples[key]).get("ok"),
+                      "native sample fixture " + key + " is visible while samples are enabled")
+            for key in ("unmarked_offer", "marked_offer"):
+                check((public.call("get_offer", offer_id=mixed_samples[key]) or {}).get("id") == mixed_samples[key],
+                      "native sample fixture " + key + " is visible while samples are enabled")
+            feed = public.call("home_feed")
+            sample = next(row["offer"] for row in feed["items"] if row["place"] == "arbor-leaf-kitchen" and row["offer"]["state"] == "active")
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(headless=True)
+                context = browser.new_context(viewport={"width": 390, "height": 844}, reduced_motion="reduce")
+                page = context.new_page()
+                errors, csp, rpc_calls = [], [], []
+                page.on("pageerror", lambda error: errors.append(str(error)))
+                page.on("console", lambda message: csp.append(message.text) if "Content Security Policy" in message.text else None)
+                page.on("request", lambda request: rpc_calls.append(request.url.rsplit("/", 1)[-1]) if "/function/" in request.url else None)
+                page.on("request", lambda request: student_scanner_requests.append(urlsplit(request.url).path) if scanner_chunk(request.url) else None)
+                def accessible(label):
+                    page.add_script_tag(content=args.axe.read_text())
+                    results = page.evaluate("async()=>await axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}})")
+                    (args.evidence / (label + "-axe.json")).write_text(json.dumps(results, indent=2) + "\n")
+                    check(not results["violations"], label + " has no axe WCAG A/AA violations")
+                phase = "anonymous actual browser"
+                page.goto(origin)
+                accessible("welcome")
+                page.get_by_role("button", name="Find local deals", exact=False).click()
+                expect(page.get_by_role("button", name="Sign in", exact=True)).to_be_visible()
+                expect(page.get_by_text(sample["title"], exact=True)).to_be_visible()
+                accessible("guest-feed")
+                check(page.locator('[autocomplete="one-time-code"]').count() == 0, "guest browses native offers before signup")
+                check(not student_scanner_requests, "actual guest feed does not request the merchant scanner chunk")
+                page.get_by_text(sample["title"], exact=True).click()
+                expect(page.get_by_role("button", name="Sign in to claim", exact=True)).to_be_visible()
+                check("Sample deal for a local simulation" in page.inner_text("body"), "sample detail is honestly labeled")
+                page.get_by_role("button", name="View business profile", exact=True).click()
+                expect(page.get_by_text("Sample business", exact=True)).to_be_visible()
+                check(page.get_by_text("Sign in to view this business.", exact=True).count() == 0, "anonymous public business profile has a usable sanitized projection")
+                page.get_by_role("button", name="Back to offer", exact=True).click()
+                for width in (320, 390):
+                    page.set_viewport_size({"width": width, "height": 844})
+                    check(page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), str(width) + "px detail has no horizontal overflow")
+                    page.keyboard.press("Tab")
+                    check(page.evaluate("document.activeElement !== document.body"), str(width) + "px keyboard reaches a control")
+                page.screenshot(path=str(args.evidence / "guest-detail-390.png"))
+                accessible("guest-detail")
+                phase = "real local TLS email verification"
+                page.get_by_role("button", name="Sign in to claim", exact=True).click()
+                accessible("claim-sign-in")
+                short_controls = page.locator('button,[role="button"]').evaluate_all("nodes=>nodes.filter(n=>n.getBoundingClientRect().width>0&&n.getBoundingClientRect().height>0&&!n.disabled).map(n=>({text:n.textContent.trim(),height:n.getBoundingClientRect().height})).filter(n=>n.height<44)")
+                check(not short_controls, "changed sign-in controls provide44px minimum targets")
+                page.get_by_role("button", name="Create an account", exact=True).click()
+                page.get_by_label("Your name", exact=True).fill("Disposable browser student")
+                uniqname = "browser" + secrets.token_hex(4)
+                sink.allow(uniqname + "@umich.edu")
+                page.get_by_label("U-M uniqname", exact=True).fill(uniqname)
+                page.get_by_role("button", name="Send verification code", exact=True).click()
+                expect(page.get_by_label("Verification code", exact=True)).to_be_visible()
+                code = sink.take_code(uniqname + "@umich.edu", timeout=10)
+                page.get_by_label("Verification code", exact=True).fill(code)
+                page.get_by_role("button", name="Verify and continue", exact=True).click()
+                expect(page.get_by_role("button", name="Claim this sample", exact=True)).to_be_visible()
+                check("claim_offer" not in rpc_calls, "native verification returns to selected offer without automatic claim")
+                check(page.evaluate("localStorage.getItem('mlocal_public_offer_intent')") == sample["id"], "only selected public offer ID survives verification")
+                page.reload()
+                expect(page.get_by_role("button", name="Claim this sample", exact=True)).to_be_visible()
+                check("claim_offer" not in rpc_calls, "authenticated real browser reload re-fetches selected offer without automatic claim")
+                token = page.evaluate("localStorage.getItem('jac_token')")
+                student = Api(origin, token)
+                phase = "actual saved claim, QR image preview and confirmation"
+                page.get_by_role("button", name="Claim this sample", exact=True).click()
+                expect(page.locator('[data-testid="claim-qr"]')).to_be_visible()
+                detail = student.call("get_offer", offer_id=sample["id"])
+                check(detail["my_status"] == "claimed" and detail["my_terms"], "native claim keeps saved terms and opaque QR snapshot")
+                qr_path = workspace / "claim-qr.png"
+                page.locator('[data-testid="claim-qr"]').screenshot(path=str(qr_path))
+                check(not student_scanner_requests, "actual student QR display does not request the merchant scanner chunk")
+                actual_svg = page.locator('[data-testid="claim-qr"]').evaluate("node => node.outerHTML")
+                (workspace / "actual-qr.svg").write_text(actual_svg)
+                (workspace / "qr-payload-proof.json").write_text(json.dumps({"payload_sha256": hashlib.sha256(detail["my_qr_payload"].encode()).hexdigest(), "size": 240, "margin": 4}))
+                layout = page.locator('[data-testid="claim-qr"]').evaluate("node => {const r=node.getBoundingClientRect();let blocked=0;for(const x of [.05,.5,.95])for(const y of [.05,.5,.95]){const top=document.elementFromPoint(r.x+r.width*x,r.y+r.height*y);if(!top||!node.contains(top))blocked++;}return {x:r.x,y:r.y,width:r.width,height:r.height,viewport_width:innerWidth,viewport_height:innerHeight,within_viewport:r.x>=0&&r.y>=0&&r.right<=innerWidth&&r.bottom<=innerHeight,occluded_sample_points:blocked};}")
+                (workspace / "qr-layout.json").write_text(json.dumps(layout))
+                check(layout["within_viewport"] and layout["occluded_sample_points"] == 0,
+                      "complete saved QR is visible without navigation covering any sampled point")
+                merchant_context = browser.new_context(viewport={"width": 390, "height": 844}, reduced_motion="reduce")
+                merchant_page = merchant_context.new_page()
+                merchant_page.on("pageerror", lambda error: merchant_diagnostic["errors"].append(str(error)))
+                merchant_page.on("console", lambda message: merchant_diagnostic["csp"].append(message.text) if "Content Security Policy" in message.text else None)
+                def merchant_response(response):
+                    path = urlsplit(response.url).path
+                    if path.endswith(".js"):
+                        merchant_diagnostic["assets"].append({"path": path, "status": response.status, "content_type": response.headers.get("content-type", "")})
+                    if path == "/function/resolve_claim":
+                        try:
+                            envelope = response.json()
+                            body = envelope.get("data", {}).get("result", {}) if envelope.get("ok") else {"ok": False}
+                            merchant_diagnostic["resolve"].append({"status": response.status, "ok": body.get("ok"), "message": body.get("message", "")})
+                        except Exception as error:
+                            merchant_diagnostic["resolve"].append({"status": response.status, "error_type": type(error).__name__})
+                merchant_page.on("response", merchant_response)
+                merchant_page.goto(origin)
+                merchant_page.evaluate("token => {localStorage.setItem('jac_token',token);localStorage.setItem('mlocal_audience','business');localStorage.removeItem('mlocal_public_offer_intent');}", merchant["token"])
+                merchant_page.reload()
+                merchant_page.on("response", lambda response: scanner_chunk_responses.append({"path": urlsplit(response.url).path,
+                    "status": response.status, "content_type": response.headers.get("content-type", "")}) if scanner_chunk(response.url) else None)
+                merchant_page.get_by_role("button", name="Scan QR", exact=True).click()
+                image_input = merchant_page.get_by_label("Choose a QR image", exact=True)
+                expect(image_input).to_be_enabled()
+                expect(merchant_page.get_by_role("button", name="Start camera scan", exact=True)).to_be_visible()
+                check(scanner_chunk_responses and all(row["status"] == 200 and "javascript" in row["content_type"] for row in scanner_chunk_responses),
+                      "actual merchant scanner downloads its emitted JavaScript chunk successfully")
+                image_input.set_input_files(str(qr_path))
+                try:
+                    expect(merchant_page.get_by_role("button", name="Confirm redemption", exact=True)).to_be_visible()
+                except AssertionError:
+                    merchant_diagnostic["state_text"] = merchant_page.locator('section[aria-label="Scan a student claim"]').inner_text()
+                    merchant_diagnostic["merchant_visibility"] = merchant_page.evaluate("document.visibilityState")
+                    merchant_diagnostic["student_visibility"] = page.evaluate("document.visibilityState")
+                    (workspace / "scanner-diagnostic.json").write_text(json.dumps(merchant_diagnostic, indent=2) + "\n")
+                    try:
+                        capture_qr_controls(browser, app, workspace, detail["my_qr_payload"], actual_svg)
+                    except Exception as diagnostic_error:
+                        (workspace / "control-generation-error.txt").write_text(type(diagnostic_error).__name__)
+                    raise
+                check(student.call("get_offer", offer_id=sample["id"])["my_status"] == "claimed", "local QR image decoding previews native claim without redeeming")
+                redemption_started = time.monotonic()
+                merchant_page.get_by_role("button", name="Confirm redemption", exact=True).click()
+                expect(merchant_page.get_by_text("Redeemed", exact=False).first).to_be_visible()
+                expect(page.get_by_text("Your saved claim was redeemed.", exact=True)).to_be_visible(timeout=5000)
+                redemption_transition_ms = round((time.monotonic() - redemption_started) * 1000, 2)
+                check(redemption_transition_ms <= 5000, "actual merchant redemption reaches the visible student claim within five seconds")
+                check(page.locator('[data-testid="claim-qr"]').count() == 0, "visible held-claim polling observes actual redemption and removes QR")
+                phase = "availability changes during native inbox verification"
+                for mode in ("sold out", "expired"):
+                    now = datetime.now(ZoneInfo("America/Detroit"))
+                    ending = now.replace(second=0, microsecond=0) + timedelta(minutes=1 if mode == "expired" else 60)
+                    created = owner.call("save_offer", offer_id="", create_key=secrets.token_hex(16), title="Browser " + mode,
+                        description="Disposable availability recovery fixture", price="4", regular_price="6",
+                        start_local=(now - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M"),
+                        end_local=ending.strftime("%Y-%m-%d %H:%M"), quantity="1", eligibility="Student ID",
+                        terms="Disposable local fixture", dietary="", menu_item="")
+                    check(created.get("ok"), "native merchant creates " + mode + " availability fixture")
+                    visitor_context = browser.new_context(viewport={"width": 320, "height": 844}, reduced_motion="reduce")
+                    visitor = visitor_context.new_page()
+                    visitor.goto(origin)
+                    visitor.evaluate("id=>localStorage.setItem('mlocal_public_offer_intent',id)", created["code"])
+                    visitor.reload()
+                    visitor.get_by_role("button", name="Sign in to claim", exact=True).click()
+                    visitor.get_by_role("button", name="Create an account", exact=True).click()
+                    visitor.get_by_label("Your name", exact=True).fill("Disposable availability student")
+                    uniqname = "browser" + secrets.token_hex(4)
+                    sink.allow(uniqname + "@umich.edu")
+                    visitor.get_by_label("U-M uniqname", exact=True).fill(uniqname)
+                    visitor.get_by_role("button", name="Send verification code", exact=True).click()
+                    expect(visitor.get_by_label("Verification code", exact=True)).to_be_visible()
+                    code = sink.take_code(uniqname + "@umich.edu", timeout=10)
+                    if mode == "sold out":
+                        check(student.call("claim_offer", offer_id=created["code"]).get("ok"), "another native actor consumes the last unit during verification")
+                    else:
+                        while time.time() <= ending.timestamp():
+                            time.sleep(.25)
+                    visitor.get_by_label("Verification code", exact=True).fill(code)
+                    visitor.get_by_role("button", name="Verify and continue", exact=True).click()
+                    recovery = "This offer is sold out right now." if mode == "sold out" else "This offer is no longer available."
+                    expect(visitor.get_by_text(recovery, exact=True)).to_be_visible()
+                    check(visitor.get_by_role("button", name="Claim this sample", exact=True).count() == 0,
+                          "real " + mode + " verification rechecks server availability with recoverable result")
+                    visitor_context.close()
+                phase = "headers, metadata and gateway admission"
+                with urllib.request.urlopen(origin) as response:
+                    check("default-src 'self'" in response.headers.get("Content-Security-Policy", ""), "actual gateway serves restrictive CSP")
+                for relative in ("/static/assets/manifest.webmanifest", "/static/assets/brand/app-icon.svg", "/static/assets/brand/app-icon-192.png", "/static/assets/brand/app-icon-512.png"):
+                    with urllib.request.urlopen(origin + relative) as response:
+                        check(response.status == 200, "actual gateway serves " + relative)
+                check(page.title() == "M-Local", "actual document title identifies M-Local")
+                check(not errors and not csp, "changed actual browser journeys have no page or CSP errors")
+                browser.close()
+            phase = "server-authoritative sample switch over actual HTTP"
+            check(student.call("toggle_favorite", slug=mixed_samples["sample_parent"]).get("ok"), "native actor saves a sample favorite while enabled")
+            check(student.call("toggle_favorite", slug=mixed_samples["real_parent"]).get("ok"), "native actor saves a legitimate real favorite")
+            stop_process(gateway)
+            stop_process(backend)
+            environment.update(MLOCAL_SHOW_SAMPLES="0", MLOCAL_DEMO_MODE="1", MLOCAL_HOSTED_DATASET="1")
+            backend = launch([str(jac), "run", "--no-dev", "--host", "127.0.0.1", "--port", str(args.base_port)], "native-samples-disabled")
+            ready(backend, native + "/healthz/ready", lambda row: row.get("ready") is True)
+            gateway = launch(["node", "scripts/hosted-gateway.mjs"], "gateway-samples-disabled")
+            ready(gateway, origin + "/healthz", lambda row: row.get("ready") is True)
+            for endpoint in ("home_feed", "list_offers"):
+                result = public.call(endpoint)
+                offers = [row["offer"] for row in result["items"]] if endpoint == "home_feed" else result
+                check(not any(row["id"] in (sample["id"], mixed_samples["unmarked_offer"], mixed_samples["marked_offer"]) for row in offers),
+                      "SHOW0 overrides demo and hosted dataset on native " + endpoint)
+            for offer_id in (sample["id"], mixed_samples["unmarked_offer"], mixed_samples["marked_offer"]):
+                check(public.call("get_offer", offer_id=offer_id) is None, "native direct sample detail is hidden")
+                check(not student.call("claim_offer", offer_id=offer_id).get("ok"), "native direct hidden sample claim is refused")
+            check(not public.call("get_business_profile", slug=mixed_samples["sample_parent"]).get("ok"), "native sample business profile is hidden")
+            real_profile = public.call("get_business_profile", slug=mixed_samples["real_parent"])
+            check(real_profile.get("ok") and not real_profile["offers"], "native real business profile hides its sample child")
+            hidden_home = student.call("home_feed")
+            check(not any(place["slug"] == mixed_samples["sample_parent"] for place in hidden_home["favorites"]), "native stored sample favorites cannot leak when disabled")
+            favorite_responses = [
+                student.call("taste_choices"),
+                student.call("save_taste", categories="pizza", diets="", price_range=""),
+                student.call("toggle_favorite", slug=mixed_samples["sample_parent"]),
+            ]
+            check(not favorite_responses[-1].get("ok"), "native direct favorite writes cannot bypass disabled samples")
+            for endpoint, result in zip(("taste_choices", "save_taste", "toggle_favorite"), favorite_responses):
+                check(mixed_samples["sample_parent"] not in result["favorites"] and mixed_samples["real_parent"] in result["favorites"],
+                      "native " + endpoint + " hides sample favorites while preserving legitimate favorites")
+            for offer_id in (mixed_samples["unmarked_offer"], mixed_samples["marked_offer"]):
+                check(not student.call("toggle_favorite", offer_id=offer_id).get("ok"), "native hidden offer lookup cannot mutate favorites")
+            check(mixed_samples["real_parent"] in student.call("taste_choices")["favorites"], "native rejected sample lookup preserves the legitimate real favorite")
+            stop_process(gateway)
+            stop_process(backend)
+            environment.update(MLOCAL_SHOW_SAMPLES="1", MLOCAL_DEMO_MODE="0")
+            backend = launch([str(jac), "run", "--no-dev", "--host", "127.0.0.1", "--port", str(args.base_port)], "native-samples-restored")
+            ready(backend, native + "/healthz/ready", lambda row: row.get("ready") is True)
+            gateway = launch(["node", "scripts/hosted-gateway.mjs"], "gateway-samples-restored")
+            ready(gateway, origin + "/healthz", lambda row: row.get("ready") is True)
+            check(mixed_samples["sample_parent"] in student.call("taste_choices")["favorites"], "native re-enabled samples restore saved sample favorite marks")
+            phase = "complete"
+            completed = True
+    finally:
+        for process in reversed(processes):
+            stop_process(process)
+        stop_private_postgres(workspace)
+        try:
+            qr_diagnostics = qr_diagnostic_summary(workspace, merchant_diagnostic)
+        except Exception as diagnostic_error:
+            (workspace / "diagnostic-summary-error.txt").write_text(type(diagnostic_error).__name__)
+            qr_diagnostics = {"status": "diagnostic_summary_unavailable"}
+        receipt = {**binding, "status": "passed" if completed else "failed", "checks": checks, "passed": len(checks), "phase": phase,
+                   "seconds": round(time.monotonic() - started, 2), "redemption_transition_ms": redemption_transition_ms,
+                   "student_scanner_requests": student_scanner_requests, "scanner_chunk_responses": scanner_chunk_responses,
+                   "qr_diagnostics": qr_diagnostics,
+                   "readiness_diagnostics": readiness_diagnostic_summary(workspace, readiness_attempts, readiness_post_failure),
+                   "owned_processes_stopped": True,
+                   "private_postgres_stopped": True}
+        (args.evidence / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+        print("Retained private fixture: " + str(workspace), flush=True)
+
+
+if __name__ == "__main__":
+    main()

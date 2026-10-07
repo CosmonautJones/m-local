@@ -2,21 +2,25 @@ name: checks
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, codex/release-readiness]
   push:
-    branches: [main]
+    branches: [main, 'release/**']
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  jac:
+  source-share:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Report tracked source-byte composition
         run: python3 scripts/check-jac-share.py
+  jac:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -32,6 +36,8 @@ jobs:
         run: ./scripts/check.sh
       - name: Run core tests
         run: ./scripts/test.sh core
+      - name: Verify named core test inventory
+        run: python3 scripts/test-inventory.py --core-log .jac/release-core-outcomes.log --binding .jac/release-core-binding.json --output .jac/release-test-inventory.json
       - name: Run access context tests
         run: ./scripts/test.sh context
       - name: Run business insights tests
@@ -61,3 +67,12 @@ jobs:
         run: npm install --prefix .jac/ui-test-runtime --no-save --package-lock=false jsdom@26.1.0
       - name: Check compiled onboarding and phone flows
         run: node --test tests/ui/browser/*.test.mjs
+      - name: Preserve exact-source test inventory and compiled artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-check-evidence-${{ github.sha }}
+          path: |
+            .jac/release-core-binding.json
+            .jac/release-test-inventory.json
+            dist/*.jab

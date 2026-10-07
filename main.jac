@@ -63,6 +63,7 @@ import from "./client/insights-support.mjs" { normalizeInsights }
 import from "./client/scan-controller.mjs" { isClaimPayload }
 import from "./client/feed-support.jsx" { useFeedRefresh }
 import from "./client/feed-validation.mjs" { validateHomeFeed }
+import from "./client/public-offer-intent.mjs" { readPublicOfferIntent, rememberPublicOfferIntent, clearPublicOfferIntent }
 import from .client.offer_filters { OfferFilters }
 import from .client.ui { BrandLogo, UiFoundation, ThemeControl, NavIcon, StockBar }
 import from "./client/theme.mjs" { createThemeStore }
@@ -93,7 +94,7 @@ def Message(text: str, good: bool) -> JsxElement {
     if not text {
         return <View style={styles.hidden} />;
     }
-    return <View style={styles.msgGood if good else styles.msgBad}>
+    return <View accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.msgGood if good else styles.msgBad}>
         <Text style={styles.msgGoodText if good else styles.msgBadText}>{text}</Text>
     </View>;
 }
@@ -155,6 +156,7 @@ def DealCard(item: FeedItem, onOpen: any, onBusiness: any, onHeart: any, canHear
         else o.time_label if o.state == "scheduled" else o.state.capitalize()
     );
     return <View style={[styles.card, {} if live or hasSavedClaim else styles.cardMuted]}>
+        {(<Text style={[styles.small, {"fontWeight": "800", "color": C["warn"]}]}>Sample</Text>) if o.is_demo else <View style={styles.hidden} />}
         {(<Pressable accessibilityRole="button" accessibilityLabel={"View " + o.title} onPress={onOpen}><OfferImage url={o.offer_image_url} width={"100%"} height={184} alt={o.title} /></Pressable>) if o.offer_image_url else <View style={styles.hidden} />}
         <View style={styles.rowBetween}>
             <Pressable accessibilityRole="button" accessibilityLabel={"View " + o.restaurant + " business profile"} style={styles.flex1} onPress={onBusiness}>
@@ -333,10 +335,23 @@ def:pub app -> JsxElement {
 
     viewport = useWindowDimensions();
     useFeedRefresh({
-        "enabled": sessionReady and session is not None and session.authenticated and session.role == "student" and audience != "" and tab == "discover" and selected == "" and not tastesOpen and not profileOpen,
+        "enabled": sessionReady and audience == "student" and not authOpen and tab == "discover" and selected == "" and not tastesOpen and not profileOpen,
         "onRefresh": lambda { return refresh(); },
         "busy": loading
     });
+    useFeedRefresh({
+        "enabled": sessionReady and session is not None and session.authenticated and session.role == "student" and selected != "" and detail is not None and detail.my_status == "claimed" and not authOpen and not profileOpen and tab == "discover",
+        "onRefresh": lambda { return refreshHeldClaim(); },
+        "busy": busy or detailLoading,
+        "interval": 3000
+    });
+
+    def publicOffer(o: OfferView) -> OfferView {
+        o.my_claim_id = ""; o.my_status = ""; o.my_qr_payload = "";
+        o.my_title = ""; o.my_price_cents = 0; o.my_terms = ""; o.my_eligibility = "";
+        o.my_expires = ""; o.my_expires_ts = 0.0;
+        return o;
+    }
 
     async def openTastes() {
         found: TasteView | None = None;
@@ -407,6 +422,9 @@ def:pub app -> JsxElement {
                     found.items = [item for item in found.items if not item.offer.is_demo];
                     found.favorites = [place for place in found.favorites if not place.is_demo];
                 }
+                if not session or not session.authenticated {
+                    for item in found.items { item.offer = publicOffer(item.offer); }
+                }
                 home = found;
                 offers = [i.offer for i in found.items];
                 if found.signed_in and not found.completed and not tastePrompted and session and session.role == "student" {
@@ -423,6 +441,8 @@ def:pub app -> JsxElement {
 
     async can with entry {
         epoch = sessionEpoch.current;
+        selectionRevision = detailRequest.current;
+        pending = readPublicOfferIntent();
         restored: SessionView | None = None;
         try {
             restored = await loadSession();
@@ -437,6 +457,11 @@ def:pub app -> JsxElement {
         if epoch == sessionEpoch.current {
             sessionReady = True;
             if restored is not None and restored.authenticated and restored.role == "student" { await loadOffers("", "any", []); }
+            if epoch == sessionEpoch.current and pending and (restored is None or not restored.authenticated or restored.role == "student") {
+                audience = "student";
+                if restored is None or not restored.authenticated { await loadOffers("", "any", []); }
+                if epoch == sessionEpoch.current and selectionRevision == detailRequest.current { await openOffer(pending); }
+            }
         }
         if epoch == sessionEpoch.current and restored is not None and restored.authenticated and restored.role == "merchant" {
             tab = "merchant"; await openMerchant();
@@ -449,7 +474,8 @@ def:pub app -> JsxElement {
     async def refresh() { await loadOffers(maxPrice, timeWin, diets); }
 
     def chooseAudience(kind: str) {
-        audience = kind; authOpen = True; authMode = "signup"; authMsg = "";
+        audience = kind; authOpen = kind == "business"; authMode = "signup"; authMsg = "";
+        if kind == "student" { loadOffers(maxPrice, timeWin, diets); }
     }
 
     def switchAudience(kind: str) {
@@ -494,11 +520,16 @@ def:pub app -> JsxElement {
     }
 
     async def finishSignIn(fresh: SessionView) {
+        pending = readPublicOfferIntent();
         clearPrivate(); session = fresh; authOpen = False;
+        epoch = sessionEpoch.current; selectionRevision = detailRequest.current;
         freshAudience = audienceForSession(fresh);
         if freshAudience { audience = freshAudience; }
         businessOpen = fresh.role == "business";
-        if fresh.role == "student" { tab = "discover"; await refresh(); }
+        if fresh.role == "student" {
+            tab = "discover"; await refresh();
+            if pending and epoch == sessionEpoch.current and selectionRevision == detailRequest.current { await openOffer(pending); }
+        } else { clearPublicOfferIntent(); }
         if fresh.role == "merchant" { tab = "merchant"; await openMerchant(); }
     }
 
@@ -512,7 +543,7 @@ def:pub app -> JsxElement {
         if session and session.actor_id {
             try { localStorage.removeItem("mlocal_offer_draft_" + session.actor_id); } except Exception {}
         }
-        signOut(); clearPrivate(); session = None; audience = "";
+        signOut(); clearPrivate(); clearPublicOfferIntent(); session = None; audience = "";
         tab = "discover"; authOpen = False; businessOpen = False; authMsg = ""; home = None;
     }
 
@@ -522,13 +553,17 @@ def:pub app -> JsxElement {
     }
 
     async def openOffer(oid: str) {
+        rememberPublicOfferIntent(oid);
         detailRequest.current = (detailRequest.current or 0) + 1;
         requestId = detailRequest.current; epoch = sessionEpoch.current;
         found: OfferView | None = None;
         selected = oid; claimMsg = ""; detailError = ""; detail = None; detailLoading = True;
         try {
             found = await get_offer(oid, maxPrice.split("-")[-1] if maxPrice else "", timeWin, ",".join(diets));
-            if requestId == detailRequest.current and epoch == sessionEpoch.current { detail = found; }
+            if requestId == detailRequest.current and epoch == sessionEpoch.current {
+                detail = publicOffer(found) if found is not None and (not session or not session.authenticated) else found;
+                if found is None { detailError = "This offer is no longer available."; clearPublicOfferIntent(); }
+            }
         } except Exception {
             if requestId == detailRequest.current and epoch == sessionEpoch.current { detailError = "Could not load this offer. Check your connection and try again."; }
         } finally {
@@ -542,7 +577,11 @@ def:pub app -> JsxElement {
     }
 
     async def changeClaim(cancel: bool) {
-        if not session or session.role != "student" { openSignIn(); return; }
+        if not session or not session.authenticated or session.role != "student" {
+            if selected { rememberPublicOfferIntent(selected); }
+            openSignIn(); authMsg = "Sign in with your U-M email to claim this deal.";
+            return;
+        }
         if busyRef.current or not selected { return; }
         busyRef.current = True; busy = True;
         epoch = sessionEpoch.current; requestId = detailRequest.current; oid = selected;
@@ -562,6 +601,29 @@ def:pub app -> JsxElement {
             }
         } finally {
             if epoch == sessionEpoch.current { busy = False; busyRef.current = False; }
+        }
+    }
+
+    async def refreshHeldClaim() {
+        if busyRef.current or not selected or not detail or detail.my_status != "claimed" { return; }
+        epoch = sessionEpoch.current; oid = selected;
+        detailRequest.current = (detailRequest.current or 0) + 1;
+        requestId = detailRequest.current;
+        found: OfferView | None = None;
+        try {
+            found = await get_offer(oid, maxPrice.split("-")[-1] if maxPrice else "", timeWin, ",".join(diets));
+            if epoch != sessionEpoch.current or requestId != detailRequest.current or selected != oid { return; }
+            if found is None {
+                detail = None; detailError = "This offer is no longer available.";
+            } else {
+                detail = found;
+                if found.my_status == "redeemed" { claimOk = True; claimMsg = "Your saved claim was redeemed."; }
+                elif found.my_status == "expired" { claimOk = False; claimMsg = "Your hold has expired. Check current availability before claiming again."; }
+            }
+        } except Exception {
+            if epoch == sessionEpoch.current and requestId == detailRequest.current {
+                claimOk = False; claimMsg = "Could not refresh your claim. The saved terms are kept; check your connection and tap Refresh offer and claim.";
+            }
         }
     }
 
@@ -698,7 +760,7 @@ def:pub app -> JsxElement {
 
     def closeDetail() {
         detailRequest.current = (detailRequest.current or 0) + 1;
-        selected = ""; detail = None; detailLoading = False;
+        selected = ""; detail = None; detailLoading = False; clearPublicOfferIntent();
     }
 
     async def dropFavorite(slug: str) {
@@ -711,7 +773,7 @@ def:pub app -> JsxElement {
     }
 
     def openBusiness(slug: str, offerId: str = "") {
-        if busyRef.current or not session or not session.authenticated { return; }
+        if busyRef.current { return; }
         profileSlug = slug; profileOfferId = offerId; profileOpen = True;
     }
 
@@ -724,10 +786,16 @@ def:pub app -> JsxElement {
 
     def closeAuth() {
         authOpen = False; authMsg = "";
-        if not (session and session.authenticated) { audience = ""; }
+        if not (session and session.authenticated) and audience != "student" { audience = ""; }
     }
 
     def LogoutLink() -> JsxElement {
+        if not session or not session.authenticated {
+            return <View style={styles.row}><ThemeControl />
+                <Pressable accessibilityRole="button" style={styles.btnGhost} onPress={lambda { openSignIn(); }}><Text style={styles.btnGhostText}>Sign in</Text></Pressable>
+                <Pressable accessibilityRole="button" style={styles.btnGhost} onPress={lambda { closeDetail(); audience = ""; }}><Text style={styles.btnGhostText}>Choose account type</Text></Pressable>
+            </View>;
+        }
         return <View style={styles.row}><ThemeControl /><Pressable accessibilityRole="button" accessibilityLabel="Log out" style={styles.btnGhost} disabled={authBusy} onPress={lambda { logout(); }}><Text style={styles.btnGhostText}>Log out</Text></Pressable></View>;
     }
 
@@ -900,6 +968,7 @@ def:pub app -> JsxElement {
                 <Pressable accessibilityRole="button" style={[styles.btnGhost, {"alignSelf": "flex-start"}]} onPress={lambda { openBusiness("", o.id); }}><Text style={styles.btnGhostText}>View business profile</Text></Pressable>
                 {(<OfferImage url={o.offer_image_url} width={"100%"} height={220} alt={o.title} />) if o.offer_image_url else <View style={styles.hidden} />}
                 <Text style={styles.title}>{o.my_title if hasSavedClaim else o.title}</Text>
+                {(<View style={styles.note}><Text style={[styles.noteText, {"fontWeight": "800"}]}>Sample</Text><Text style={styles.noteText}>Sample deal for a local simulation. Confirm real offers directly with the business.</Text></View>) if o.is_demo else <View style={styles.hidden} />}
                 {(<Text style={styles.subtitle}>{o.description}</Text>) if not hasSavedClaim else <View style={styles.hidden} />}
             </View>
             <View style={styles.row}>
@@ -927,6 +996,7 @@ def:pub app -> JsxElement {
             ) if o.reasons and not hasSavedClaim else <View style={styles.hidden} />}
             {(
                 <View style={styles.claimPass}>
+                    {(<Text style={styles.claimBody}>Sample claim for a local simulation.</Text>) if o.is_demo else <View style={styles.hidden} />}
                     <Text style={styles.claimHeading}>{"Your saved claim" if o.my_status == "claimed" else "Saved claim · " + o.my_status}</Text>
                     <Text style={styles.claimHeading}>{o.my_title}</Text>
                     {(<View style={{"gap": 12}}>
@@ -941,6 +1011,7 @@ def:pub app -> JsxElement {
                 </View>
             ) if o.my_claim_id else <View style={styles.hidden} />}
             <Message text={claimMsg} good={claimOk} />
+            {(<Message text={"This offer is " + o.state + " right now."} good={False} />) if o.state != "active" and not hasSavedClaim else <View style={styles.hidden} />}
             <Pressable accessibilityRole="button" style={styles.btnGhost} disabled={busy} onPress={lambda { openOffer(o.id); }}><Text style={styles.btnGhostText}>Refresh offer and claim</Text></Pressable>
             <Pressable accessibilityRole="button"
                 style={[styles.btn, {} if claimable and audience == "student" else styles.btnDisabled]}
@@ -948,7 +1019,7 @@ def:pub app -> JsxElement {
                 onPress={lambda { changeClaim(False); }}
             >
                 <Text style={styles.btnText}>
-                    {"For U-M customers" if audience == "business" else "Updating..." if busy else "Sign in to claim" if not studentSession and claimable else "Claim this offer" if claimable else "Already claimed" if o.my_status else "Not claimable right now"}
+                    {"For U-M customers" if audience == "business" else "Updating..." if busy else "Sign in to claim" if not studentSession and claimable else "Claim this sample" if claimable and o.is_demo else "Claim this offer" if claimable else "Already claimed" if o.my_status else "Not claimable right now"}
                 </Text>
             </Pressable>
             <Text style={styles.small}>Prices exclude tax unless the saved terms say otherwise. The restaurant checks the stated ID requirement.</Text>
@@ -1125,7 +1196,7 @@ def:pub app -> JsxElement {
     role: str = session.role if session is not None and session.authenticated else "guest";
     company: bool = role in ["business", "merchant"];
 
-    if not signedIn {
+    if not signedIn and (audience != "student" or authOpen) {
         return <View style={[styles.screen, {"height": viewport.height}]}>
             <UiFoundation />
             <View style={styles.frame}>
@@ -1151,12 +1222,12 @@ def:pub app -> JsxElement {
     return <View style={[styles.screen, {"height": viewport.height}]}>
         <UiFoundation />
         <View style={[styles.frame, {"maxWidth": 1040} if shown == "insights" else {}]}>
-            <ScrollView style={[styles.scroll, {"height": viewport.height}]}>
+            <ScrollView style={[styles.scroll, {"minHeight": 0}]}>
                 <View testID="app-masthead" style={styles.masthead}><BrandLogo />{LogoutLink()}</View>
                 {body}
             </ScrollView>
             {(
-                <View testID="app-tabbar" style={styles.tabbar}>
+                <View testID="app-tabbar" style={[styles.tabbar, {"position": "relative", "flexShrink": 0}]}>
                     {TabButton("discover", "Offers") if not company else <View style={styles.hidden} />}
                     {TabButton("merchant", "Offers") if role == "merchant" else <View style={styles.hidden} />}
                     {TabButton("redeem", "Scan QR") if role == "merchant" else <View style={styles.hidden} />}
