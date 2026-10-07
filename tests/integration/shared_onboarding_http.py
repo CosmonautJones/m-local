@@ -145,7 +145,21 @@ def main():
             environment.update(MLOCAL_SMTP_HOST='127.0.0.1', MLOCAL_SMTP_PORT=str(sink.port),
                 MLOCAL_SMTP_FROM=sink.sender, MLOCAL_SMTP_USERNAME=sink.username,
                 MLOCAL_SMTP_PASSWORD=sink.password, SSL_CERT_FILE=str(sink.ca_file))
-            PHASE = 'concurrent native cold starts'
+            # Official 0.37.23 races CREATE TABLE for native identity schemas
+            # on an empty PostgreSQL database (SQLSTATE 23505). The supported
+            # rollout always initializes that database with one exclusive
+            # server. Keep onboarding itself cold for the simultaneous OTP/key
+            # tests below; never substitute serial requests for those races.
+            PHASE = 'exclusive native identity schema initialization'
+            start(0)
+            ready(0)
+            check(not (onboarding / 'code.key').exists() and not (onboarding / 'onboarding.sqlite3').exists(),
+                  'exclusive native schema initialization leaves onboarding keys and accounts cold')
+            bootstrap = active.pop(0)
+            stop_process(bootstrap)
+            processes.remove(bootstrap)
+            check(True, 'exclusive schema bootstrap API stops before the concurrent onboarding APIs')
+            PHASE = 'concurrent native starts with initialized identity schema and cold onboarding'
             start(0)
             start(1)
             apis = [ready(0), ready(1)]
@@ -290,6 +304,9 @@ def main():
         runtime_version=version, runtime_bin_sha256=digest(jac), github_sha=os.environ.get('GITHUB_SHA', ''),
         shared_local_directory=True, concurrent_api_instances=2, sink_deliveries=deliveries,
         local_tls_smtp=True, external_email_delivery=False, idle_peer_crash_only=True,
+        fixture_script_sha256=digest(Path(__file__)),
+        native_identity_schema_initialized_exclusively=True, onboarding_cold_before_parallel_apis=True,
+        simultaneous_native_schema_creation_supported=False,
         public_ingress=False, independent_host_replication=False, release_acceptance=False), sort_keys=True), flush=True)
 
 
