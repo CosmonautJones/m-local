@@ -28,7 +28,10 @@ non-Boolean outcomes and invalid quota counts are silent. Logging exceptions
 are swallowed so a broken sink cannot change authorization, quota admission,
 challenge cleanup, claim/redemption behavior or the original friendly result.
 Protected claim/redemption result hooks run after the existing mutation unlock;
-they do not alter the transaction/finalization path.
+they run before the runtime's final response/transaction finalization and do not
+alter that path. These are failed application-result events, not durable-COMMIT
+receipts. Runtime replay may repeat an attempted-operation event; use separate
+gateway/fault/independent database readback evidence to establish durable state.
 
 Use a private, bounded host log collector and test redaction before rollout.
 Raw native/SMTP/database diagnostics remain private; collect only these fixed
