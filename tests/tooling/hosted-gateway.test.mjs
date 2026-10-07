@@ -6,6 +6,8 @@ import test from 'node:test';
 import { createShareProxy } from '../../scripts/phone-share-proxy.mjs';
 
 const emptyFeed={items:[],favorites:[],note:'',price_range:'',total_deals:0,signed_in:false,personalized:false,completed:false};
+const guest={authenticated:false,actor_id:'',role:'guest',restaurant_id:'',display_name:'',is_demo:false,
+  email_verified:false,business_account:false,catalog_activity:false};
 
 async function serve(t, handler, options = {}) {
   const upstream = http.createServer(handler).listen(0, '127.0.0.1');
@@ -32,11 +34,11 @@ test('public ingress refuses password sign-in and still forwards email verificat
 test('host readiness reflects the backend and does not expose its diagnostics', async t => {
   let ready = false;
   const origin = await serve(t, (req, res) => {
-    if(req.url === '/function/home_feed') {
+    if(req.url === '/function/current_session') {
       assert.equal(req.method, 'POST');
       assert.equal(req.headers.authorization, undefined);
       res.writeHead(200, {'content-type':'application/json'});
-      res.end(JSON.stringify({ok:true,data:{result:emptyFeed}}));
+      res.end(JSON.stringify({ok:true,data:{result:guest}}));
       return;
     }
     assert.equal(req.url, '/healthz/ready');
@@ -54,29 +56,30 @@ test('host readiness reflects the backend and does not expose its diagnostics', 
   assert.equal((await fetch(origin + '/healthz/ready')).status, 403);
 });
 
-test('readiness requires a working feed RPC, and accepts a genuinely empty catalog', async t => {
+test('periodic readiness requires a canonical guest application RPC and redacts failures', async t => {
   let status=404, body={detail:'private missing endpoint diagnostics'};
   const origin=await serve(t,(req,res)=>{
     if(req.url==='/healthz/ready'){res.writeHead(200,{'content-type':'application/json'});res.end('{"ready":true}');return;}
-    assert.equal(req.url,'/function/home_feed');
+    assert.equal(req.url,'/function/current_session');
     res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(body));
   },{healthCheck:true});
   for(const failure of [
     [404,{detail:'private missing endpoint diagnostics'}],
     [500,{ok:false,error:'private backend diagnostics'}],
-    [200,{ok:false,data:{result:{items:[],favorites:[]}}}],
+    [200,{ok:false,data:{result:guest}}],
     [200,{ok:true,data:{result:null}}],
-    [200,{ok:true,data:{result:{items:{},favorites:[]}}}],
-    [200,{ok:true,data:{result:{items:[],favorites:[]}}}],
-    [200,{ok:true,data:{result:{...emptyFeed,items:[null]}}}],
-    [200,{ok:true,data:{result:{...emptyFeed,favorites:[null]}}}]
+    [200,{ok:true,data:{result:{}}}],
+    [200,{ok:true,data:{result:{...guest,authenticated:'false'}}}],
+    [200,{ok:true,data:{result:{...guest,actor_id:'private actor'}}}],
+    [200,{ok:true,data:{result:{...guest,role:'merchant'}}}],
+    [200,{ok:true,data:{result:{...guest,extra:'private diagnostic'}}}]
   ]) {
     [status,body]=failure;
     const response=await fetch(origin+'/healthz');
-    assert.equal(response.status,503,`unusable feed must be unhealthy: ${JSON.stringify(failure)}`);
+    assert.equal(response.status,503,`unusable application response must be unhealthy: ${JSON.stringify(failure)}`);
     assert.deepEqual(await response.json(),{ready:false});
   }
-  status=200;body={ok:true,data:{result:emptyFeed}};
+  status=200;body={ok:true,data:{result:guest}};
   const response=await fetch(origin+'/healthz');
   assert.equal(response.status,200);
   assert.deepEqual(await response.json(),{ready:true});
@@ -93,7 +96,7 @@ test('compressed API responses retain their encoding and parse correctly on a ph
   assert.deepEqual(await response.json(), { ok: true, data: [{ title: 'Lunch special' }] });
 });
 
-test('readiness fails within its deadline when the feed response never completes', {timeout:10000}, async t => {
+test('readiness fails within its deadline when the application response never completes', {timeout:10000}, async t => {
   const origin=await serve(t,(req,res)=>{
     if(req.url==='/healthz/ready'){res.writeHead(200,{'content-type':'application/json'});res.end('{"ready":true}');return;}
     res.writeHead(200,{'content-type':'application/json'});
@@ -104,13 +107,13 @@ test('readiness fails within its deadline when the feed response never completes
   assert.deepEqual(await response.json(),{ready:false});
 });
 
-test('native readiness must be canonical JSON ready true before any catalog probe',async t=>{
+test('native readiness must be canonical JSON ready true before any application probe',async t=>{
   let nativeStatus=200,nativeBody='{}',nativeType='application/json',seen=[];
   const origin=await serve(t,(req,res)=>{
     seen.push(req.url);
-    if(req.url==='/function/home_feed') {
+    if(req.url==='/function/current_session') {
       res.writeHead(200,{'content-type':'application/json'});
-      res.end(JSON.stringify({ok:true,data:{result:emptyFeed}}));return;
+      res.end(JSON.stringify({ok:true,data:{result:guest}}));return;
     }
     res.writeHead(nativeStatus,{'content-type':nativeType});res.end(nativeBody);
   },{healthCheck:true});
@@ -130,12 +133,12 @@ test('native readiness must be canonical JSON ready true before any catalog prob
     const response=await fetch(origin+'/healthz');
     assert.equal(response.status,503);
     assert.deepEqual(await response.json(),{ready:false});
-    assert.deepEqual(seen,['/healthz/ready'],'unready native process must not reach the feed probe');
+    assert.deepEqual(seen,['/healthz/ready'],'unready native process must not reach the application probe');
   }
   nativeStatus=200;nativeBody='{"status":"ready","ready":true}';nativeType='application/json; charset=utf-8';seen=[];
   const response=await fetch(origin+'/healthz');
   assert.equal(response.status,200);assert.deepEqual(await response.json(),{ready:true});
-  assert.deepEqual(seen,['/healthz/ready','/function/home_feed']);
+  assert.deepEqual(seen,['/healthz/ready','/function/current_session']);
 });
 
 test('direct hosting cannot bypass signup limits by spoofing edge headers', async t => {

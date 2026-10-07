@@ -10,10 +10,27 @@ must bind to loopback and must never receive public traffic directly.
 
 `MLOCAL_DEPLOYMENT_TOPOLOGY=single-instance-serialized` opts into one upstream
 HTTP request at a time in one gateway process. That includes assets, authenticated
-RPCs, internal `/healthz/ready` and the anonymous `home_feed` readiness probe. The lane is retained
+RPCs, internal `/healthz/ready`, the startup `home_feed` check and periodic guest
+`current_session` readiness. The lane is retained
 until the entire upstream response has ended; receiving headers is insufficient.
 A downstream client disconnect removes waiting work, but an active upstream
 request is drained through completion before another request starts.
+
+The actual hosted entry always enables catalog admission. On listening, it
+checks native metadata and runs exactly one anonymous `home_feed` through this
+lane with the existing ordinary 30-second request deadline and full feed DTO
+validation. Public RPCs and readiness return 503 until that completes. A failed
+catalog check never retries or opens admission; restart requires the coordinated
+operator procedure. Assets can be served through the same lane while starting.
+Periodic health then checks native metadata plus the exact nine-field guest
+`current_session` response under the original overall five-second limit, without
+repeating catalog traversal or forwarding a caller's credentials.
+
+A disposable warm database outage on official Jac 0.37.23 showed native metadata
+still returned ready while both session and catalog RPCs returned HTTP 500.
+The session check detects that tested storage outage. It does not certify graph
+schema completeness, every cached/runtime fault, transaction durability, provider
+storage or hosted recovery; those separate acceptance gates remain mandatory.
 
 The lane is process-local. Run exactly one gateway and one backend instance,
 with no autoscaling, overlapping rolling replacement, direct backend ingress or
