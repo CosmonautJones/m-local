@@ -63,7 +63,10 @@ def main():
                         help='Require the integrated two-active-hold-per-student policy')
     parser.add_argument('--skip-faults', action='store_true',
                         help='Run only normal correctness races; cannot close the topology fault gate')
+    parser.add_argument('--receipt', type=Path, help='New receipt path; existing receipts are never overwritten')
     args = parser.parse_args()
+    if args.receipt and args.receipt.exists():
+        raise RuntimeError('Requested receipt already exists; preserve it and choose a new path')
     if sys.platform != 'linux' or os.geteuid() == 0:
         raise RuntimeError('Run as an unprivileged WSL/Linux user')
     if os.environ.get('JAC_DB_URL') or os.environ.get('JAC_DEV_SOURCE'):
@@ -84,6 +87,11 @@ def main():
     private_dir(cache / 'tmp')
     copy_application(ROOT, app)
     inputs = input_manifest(app)
+    source_sha = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip()
+    source_digest = hashlib.sha256(stable_json(inputs)).hexdigest()
+    evidence = args.receipt or ROOT / 'docs/review/stock-topology' / ('serialized-app-' + source_sha[:12] + '-' + source_digest[:12] + '.json')
+    if not args.receipt and evidence.exists():
+        evidence = evidence.with_name(evidence.stem + '-' + secrets.token_hex(4) + '.json')
     environment = scrub_environment(jac, cache, app / '.jac/onboarding')
     environment['MLOCAL_DEMO_MODE'] = '1'
     instrumentation = {}
@@ -105,8 +113,10 @@ def main():
                         tcp=True, port=pg_port)
     processes, checks = [], []
     receipt = dict(schema=1, verdict='INCOMPLETE', checks=checks, workspace=str(workspace),
-        candidate_sha=subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip(),
-        source_manifest_sha256=hashlib.sha256(stable_json(inputs)).hexdigest(),
+        candidate_sha=source_sha,
+        source_manifest_sha256=source_digest,
+        manifest_scope='unmodified candidate copy before test-only instrumentation',
+        receipt_path=str(evidence),
         source_manifest=inputs, version=version, jac_sha256=digest(jac),
         jacpython_sha256=digest(Path(str(jac) + 'python')), source_override=False,
         topology='one exclusive native backend, one single-instance-serialized gateway; no operator writes',
@@ -316,6 +326,15 @@ def main():
               'publication key retains original offer after restart')
         with urllib.request.urlopen(gateway + '/healthz', timeout=30) as health:
             check(json.load(health).get('ready') is True, 'serialized readiness remains meaningful after restart')
+        expected_inputs = dict(inputs)
+        if instrumentation:
+            expected_inputs['main.jac'] = instrumentation['instrumented_entry_sha256']
+        after_inputs = input_manifest(app)
+        receipt['source_copy_unchanged'] = after_inputs == expected_inputs
+        receipt['repository_head_after'] = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip()
+        receipt['source_repository_unchanged'] = receipt['repository_head_after'] == source_sha
+        check(receipt['source_copy_unchanged'], 'tested source copy is unchanged after declared test-only instrumentation')
+        check(receipt['source_repository_unchanged'], 'tested repository SHA remains unchanged throughout proof')
         receipt['verdict'] = 'BOUNDED_SERIALIZED_APP_RACES_PASS_NOT_HOSTING_CERTIFIED'
     except BaseException as error:
         receipt['failure_type'], receipt['failure'] = type(error).__name__, str(error)
@@ -327,9 +346,10 @@ def main():
         runtime.stop()
         receipt['cleanup'] = dict(owned_api_gateway_groups_stopped=True, private_postgres_stopped=True)
         (workspace / 'result.json').write_text(json.dumps(receipt, indent=2) + '\n')
-        evidence = ROOT / 'docs/review/stock-topology/serialized-app.json'
         evidence.parent.mkdir(parents=True, exist_ok=True)
-        evidence.write_text(json.dumps(receipt, indent=2) + '\n')
+        fd = os.open(evidence, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w') as stream:
+            stream.write(json.dumps(receipt, indent=2) + '\n')
         print('Retained private full-app fixture:', workspace, flush=True)
 
 

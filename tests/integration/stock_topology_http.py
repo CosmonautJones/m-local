@@ -65,6 +65,8 @@ def main():
     parser.add_argument('--port', type=int, default=18880)
     parser.add_argument('--evidence', type=Path)
     args = parser.parse_args()
+    if args.evidence and args.evidence.exists():
+        raise RuntimeError('Evidence receipt exists; preserve it and choose a new path')
     if sys.platform != 'linux' or os.geteuid() == 0:
         raise RuntimeError('Use an unprivileged WSL/Linux user')
     if os.environ.get('JAC_DB_URL') or os.environ.get('JAC_DEV_SOURCE'):
@@ -221,7 +223,9 @@ graph_enabled = false
         (workspace / 'result.json').write_text(json.dumps(receipt, indent=2) + '\n')
         if args.evidence:
             args.evidence.parent.mkdir(parents=True, exist_ok=True)
-            args.evidence.write_text(json.dumps(receipt, indent=2) + '\n')
+            fd = os.open(args.evidence, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, 'w') as stream:
+                stream.write(json.dumps(receipt, indent=2) + '\n')
         print('Retained private diagnostic:', workspace, flush=True)
     if receipt['verdict'] == 'BLOCKED':
         raise SystemExit('BLOCKED: stock native HTTP response/cache violated durable-state invariant')

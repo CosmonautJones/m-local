@@ -55,16 +55,20 @@ were written.
 bash scripts/test-runtime-transaction.sh
 
 # Minimal native transaction/acknowledgement/process-death proof.
-bash scripts/test-stock-topology.sh --evidence docs/review/stock-topology/native-fault.json
+bash scripts/test-stock-topology.sh --evidence .jac/release-native/stock-fault-new.json
 
 # Actual app/gateway simultaneous correctness and actual mutation faults.
 bash scripts/test-stock-topology-app.sh
 
 # Final integration proof also exercises the two-active-hold policy.
-bash scripts/test-stock-topology-app.sh --require-hold-cap
+bash scripts/test-stock-topology-app.sh --require-hold-cap --receipt .jac/release-native/stock-app.json
 ```
 
-Preserve existing receipts before rerunning. These scripts refuse inherited
+Receipt paths are created exclusively; existing receipts are never overwritten.
+The default full-app receipt name includes source SHA and manifest digest and adds
+a unique suffix if needed. The source manifest is captured before instrumentation,
+then checked afterward with only the declared disposable entry allowed to differ.
+The repository SHA must also stay unchanged throughout the proof. These scripts refuse inherited
 `JAC_DB_URL`/`JAC_DEV_SOURCE`, create private databases under `/var/tmp`, scrub mail
 credentials, and stop only their owned processes. Ports 18880/18881 must be free;
 never kill an unrelated listener to make them available.
