@@ -375,6 +375,7 @@ def main():
                 reject_start({**production, 'JAC_SERVE_AUTH_SECRET': '   '},
                              'environment signing fallback mismatch', ('JAC_SERVE_AUTH_SECRET',))
                 configuration.write_bytes(original_configuration + b'\n[serve.auth]\nsecret = " ' + original_signing_bytes.strip() + b' "\n')
+                PHASE = 'supported preflight native production readiness'
                 start({**production, 'JAC_SERVE_AUTH_SECRET': '   ', 'JAC_SERVE_AUTH_ALGORITHM': '   '}, guarded=True)
                 ready()
                 with urllib.request.urlopen(origin + '/healthz/ready', timeout=5) as response:
