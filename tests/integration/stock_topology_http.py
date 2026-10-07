@@ -99,6 +99,9 @@ docs_enabled = false
 graph_enabled = false
 ''')
     environment = scrub_environment(jac, cache, app / '.jac/onboarding')
+    for name in ('JAC_DATA_PATH', 'JAC_SERVE_AUTH_SECRET', 'JAC_SERVE_AUTH_ALGORITHM'):
+        environment.pop(name, None)
+    environment['MLOCAL_ENV'] = 'development'
     # Disable only the supported read-only optimization so each cold mutation
     # exercises the same full transaction. This does not disable stock retries.
     environment.update(STOCK_PROOF_EVENTS=str(workspace / 'events.json'), JAC_DB_RO_UNITS='0')

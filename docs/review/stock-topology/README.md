@@ -70,7 +70,10 @@ a unique suffix if needed. The source manifest is captured before instrumentatio
 then checked afterward with only the declared disposable entry allowed to differ.
 The repository SHA must also stay unchanged throughout the proof. These scripts refuse inherited
 `JAC_DB_URL`/`JAC_DEV_SOURCE`, create private databases under `/var/tmp`, scrub mail
-credentials, and stop only their owned processes. Ports 18880/18881 must be free;
+credentials and inherited native signing-state overrides, and stop only their
+owned processes. The full-app diagnostic explicitly enables fictional samples
+in development and disables extra demo companies and the hosted dataset; it
+does not inherit an operator's production or catalog settings. Ports 18880/18881 must be free;
 never kill an unrelated listener to make them available.
 
 ## Remaining topology gate

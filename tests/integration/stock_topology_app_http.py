@@ -93,7 +93,13 @@ def main():
     if not args.receipt and evidence.exists():
         evidence = evidence.with_name(evidence.stem + '-' + secrets.token_hex(4) + '.json')
     environment = scrub_environment(jac, cache, app / '.jac/onboarding')
-    environment['MLOCAL_DEMO_MODE'] = '1'
+    # A developer/operator may have exported an existing native signing-state
+    # path or key. Never share that state with the disposable native process.
+    for name in ('JAC_DATA_PATH', 'JAC_SERVE_AUTH_SECRET', 'JAC_SERVE_AUTH_ALGORITHM'):
+        environment.pop(name, None)
+    environment.update(MLOCAL_ENV='development', MLOCAL_DEMO_MODE='1',
+                       MLOCAL_SHOW_SAMPLES='1', MLOCAL_DEMO_COMPANIES='0',
+                       MLOCAL_HOSTED_DATASET='0')
     instrumentation = {}
     if not args.skip_faults:
         entry = app / 'main.jac'
@@ -121,7 +127,9 @@ def main():
         jacpython_sha256=digest(Path(str(jac) + 'python')), source_override=False,
         topology='one exclusive native backend, one single-instance-serialized gateway; no operator writes',
         configuration=dict(native_port=NATIVE_PORT, gateway_port=GATEWAY_PORT,
-            max_queued_requests=64, queue_wait_ms=10000, backend_workers='stock default'),
+            max_queued_requests=64, queue_wait_ms=10000, backend_workers='stock default',
+            isolated_native_signing_state=True, development_fixture=True,
+            fictional_samples_enabled=True),
         limitations=['local correctness under bounded50-client bursts, not capacity certification',
             'no SMTP/physical-device/hosted or multi-host proof',
             'existing stock competing-writer retry defect remains; exclusive topology is mandatory',
