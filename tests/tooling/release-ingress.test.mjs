@@ -66,7 +66,7 @@ test('readiness ready and anonymous feed probes use the same serialized gate',as
   const {origin}=await serve(t,(req,res)=>{
     seen.push(req.url);
     if(req.url==='/function/claim_offer'){res.writeHead(200);res.write('{}');finishFirst=()=>res.end();}
-    else if(req.url==='/ready')res.end('{}');
+    else if(req.url==='/healthz/ready'){res.writeHead(200,{'content-type':'application/json'});res.end('{"ready":true}');}
     else res.end(JSON.stringify({ok:true,data:{result:emptyFeed}}));
   },{deploymentTopology:'single-instance-serialized',healthCheck:true});
   const first=await fetch(origin+'/function/claim_offer',{method:'POST',body:'{}'});
@@ -77,7 +77,7 @@ test('readiness ready and anonymous feed probes use the same serialized gate',as
   const response=await ready;
   assert.equal(response.status,200);
   assert.deepEqual(await response.json(),{ready:true});
-  assert.deepEqual(seen,['/function/claim_offer','/ready','/function/home_feed']);
+  assert.deepEqual(seen,['/function/claim_offer','/healthz/ready','/function/home_feed']);
 });
 
 test('queue saturation and waiting deadline never forward rejected work',async t=>{

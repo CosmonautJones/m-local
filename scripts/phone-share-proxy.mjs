@@ -185,11 +185,27 @@ export function createShareProxy({upstreamHost='localhost',upstreamPort=8200,
       const deadline=setTimeout(()=>finish(false),readinessDeadlineMs);
       res.on('close',()=>clearTimeout(deadline));
       (async()=>{
-        let runtimeReady=false;
-        await dispatch(signal=>upstreamRequest({path:'/ready',method:'GET',headers:{'accept-encoding':'identity'}},
-          {signal,deadlineMs:readinessDeadlineMs,onResponse:response=>{runtimeReady=response.statusCode===200;response.resume();}}),
+        let nativeBody='',nativeBytes=0,nativeStatus,nativeType;
+        // Official Jac 0.37.23 registers this native route. A 200 app shell or
+        // incomplete/misconfigured response is not evidence of readiness.
+        await dispatch(signal=>upstreamRequest({path:'/healthz/ready',method:'GET',headers:{'accept-encoding':'identity'}},
+          {signal,deadlineMs:readinessDeadlineMs,onResponse:response=>{
+            nativeStatus=response.statusCode;nativeType=response.headers['content-type'];
+            response.setEncoding('utf8');
+            response.on('data',chunk=>{
+              nativeBytes+=Buffer.byteLength(chunk,'utf8');
+              if(nativeBytes>64*1024){finish(false);nativeBody='';}
+              else if(!finished)nativeBody+=chunk;
+            });
+          }}),
           {signal:waiting.signal,deadlineMs:readinessDeadlineMs});
-        if(!runtimeReady||finished){finish(false);return;}
+        if(finished)return;
+        let runtimeReady=false;
+        try {
+          runtimeReady=nativeStatus===200&&typeof nativeType==='string'&&
+            /^application\/json(?:;|$)/i.test(nativeType)&&JSON.parse(nativeBody)?.ready===true;
+        }catch{ /* invalid native readiness is unready */ }
+        if(!runtimeReady){finish(false);return;}
         let body='',status;
         await dispatch(signal=>upstreamRequest({path:'/function/home_feed',method:'POST',
           headers:{'content-type':'application/json','content-length':'2','accept-encoding':'identity'}},

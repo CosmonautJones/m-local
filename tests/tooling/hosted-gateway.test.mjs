@@ -39,9 +39,9 @@ test('host readiness reflects the backend and does not expose its diagnostics', 
       res.end(JSON.stringify({ok:true,data:{result:emptyFeed}}));
       return;
     }
-    assert.equal(req.url, '/ready');
+    assert.equal(req.url, '/healthz/ready');
     res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' });
-    res.end('{"private":"backend diagnostics"}');
+    res.end(JSON.stringify({ready,status:ready?'ready':'not_ready',private:'backend diagnostics'}));
   }, { healthCheck: true });
   let response = await fetch(origin + '/healthz');
   assert.equal(response.status, 503);
@@ -51,12 +51,13 @@ test('host readiness reflects the backend and does not expose its diagnostics', 
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { ready: true });
   assert.equal((await fetch(origin + '/ready')).status, 403);
+  assert.equal((await fetch(origin + '/healthz/ready')).status, 403);
 });
 
 test('readiness requires a working feed RPC, and accepts a genuinely empty catalog', async t => {
   let status=404, body={detail:'private missing endpoint diagnostics'};
   const origin=await serve(t,(req,res)=>{
-    if(req.url==='/ready'){res.writeHead(200);res.end('{}');return;}
+    if(req.url==='/healthz/ready'){res.writeHead(200,{'content-type':'application/json'});res.end('{"ready":true}');return;}
     assert.equal(req.url,'/function/home_feed');
     res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(body));
   },{healthCheck:true});
@@ -94,13 +95,47 @@ test('compressed API responses retain their encoding and parse correctly on a ph
 
 test('readiness fails within its deadline when the feed response never completes', {timeout:10000}, async t => {
   const origin=await serve(t,(req,res)=>{
-    if(req.url==='/ready'){res.end('{}');return;}
+    if(req.url==='/healthz/ready'){res.writeHead(200,{'content-type':'application/json'});res.end('{"ready":true}');return;}
     res.writeHead(200,{'content-type':'application/json'});
     res.write('{"ok":');
   },{healthCheck:true});
   const response=await fetch(origin+'/healthz');
   assert.equal(response.status,503);
   assert.deepEqual(await response.json(),{ready:false});
+});
+
+test('native readiness must be canonical JSON ready true before any catalog probe',async t=>{
+  let nativeStatus=200,nativeBody='{}',nativeType='application/json',seen=[];
+  const origin=await serve(t,(req,res)=>{
+    seen.push(req.url);
+    if(req.url==='/function/home_feed') {
+      res.writeHead(200,{'content-type':'application/json'});
+      res.end(JSON.stringify({ok:true,data:{result:emptyFeed}}));return;
+    }
+    res.writeHead(nativeStatus,{'content-type':nativeType});res.end(nativeBody);
+  },{healthCheck:true});
+  for(const invalid of [
+    [200,'{}','application/json'],
+    [200,'{"ready":false}','application/json'],
+    [200,'{"ready":"true"}','application/json'],
+    [200,'{"ready":1}','application/json'],
+    [200,'{"status":"ready"}','application/json'],
+    [200,'{"ready":','application/json'],
+    [200,'<html>App shell</html>','text/html'],
+    [200,'{"ready":true}','text/html'],
+    [503,'{"ready":true}','application/json'],
+    [200,'x'.repeat(65537),'application/json'],
+  ]) {
+    [nativeStatus,nativeBody,nativeType]=invalid;seen=[];
+    const response=await fetch(origin+'/healthz');
+    assert.equal(response.status,503);
+    assert.deepEqual(await response.json(),{ready:false});
+    assert.deepEqual(seen,['/healthz/ready'],'unready native process must not reach the feed probe');
+  }
+  nativeStatus=200;nativeBody='{"status":"ready","ready":true}';nativeType='application/json; charset=utf-8';seen=[];
+  const response=await fetch(origin+'/healthz');
+  assert.equal(response.status,200);assert.deepEqual(await response.json(),{ready:true});
+  assert.deepEqual(seen,['/healthz/ready','/function/home_feed']);
 });
 
 test('direct hosting cannot bypass signup limits by spoofing edge headers', async t => {
