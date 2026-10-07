@@ -11,8 +11,11 @@ test('signed-out visits ignore an old path and keep both account choices availab
    assert.equal(ui.text().includes('New here or coming back?'),false);
    assert.equal(ui.text().includes('remember it on this browser'),false);
    assert.equal(ui.calls.some(c=>c.name==='home_feed'),false);
-   ui.click('Find local deals');await until(()=>ui.document.querySelector('[placeholder="uniqname"]'));
-   ui.click('Back');await until(()=>ui.find('List my business'));
+   ui.click('Find local deals');await until(()=>ui.find('Current bowl'));
+   assert.equal(ui.document.querySelector('[placeholder="uniqname"]'),null);
+   ui.click('Sign in');await until(()=>ui.document.querySelector('[placeholder="uniqname"]'));
+   ui.click('Back');await until(()=>ui.find('Current bowl'));
+   ui.click('Choose account type');await until(()=>ui.find('List my business'));
    ui.click('List my business');await until(()=>ui.document.querySelector('[type="email"]'));
    assert.equal(ui.document.querySelector('[placeholder="uniqname"]'),null);
    assert.equal(ui.window.localStorage.getItem('jac_token'),null);

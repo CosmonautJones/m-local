@@ -109,7 +109,7 @@ def:pub BusinessProfile(
             <header className="ml-business-hero">
                 {if profile.image_url and not imageFailed { <img className="ml-business-photo" decoding="async" src={profile.image_url} alt={profile.name + " business photo"} referrerPolicy="no-referrer" onError={lambda { imageFailed = True; }} /> }
                 else { <div className="ml-business-monogram" aria-hidden="true">{initials}</div> }}
-                <div style={{"display": "flex", "flexDirection": "column", "gap": 10}}><p className="ml-business-kicker">Local business</p><h1 tabIndex={-1} ref={heading}>{profile.name}</h1></div>
+                <div style={{"display": "flex", "flexDirection": "column", "gap": 10}}><p className="ml-business-kicker">{"Sample business" if profile.is_demo else "Local business"}</p><h1 tabIndex={-1} ref={heading}>{profile.name}</h1></div>
                 {if profile.cuisine or profile.neighborhood { <p style={{"fontSize": 15, "lineHeight": 1.5}}>{" · ".join([label for label in [profile.cuisine, profile.neighborhood] if label])}</p> }}
             </header>
             if profile.blurb { <p className="ml-business-description">{profile.blurb}</p> }

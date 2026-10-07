@@ -34,17 +34,22 @@ export function ClaimScanner({resolveClaim, redeemClaim, onRedeemed}) {
       secure: window.isSecureContext,
       requestStream: navigator.mediaDevices?.getUserMedia ? () => navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'}}}) : null,
       decode: (stream,element,callback) => reader.decodeFromStream(stream,element,callback),
+      decodeImage: async file => {
+        const url=URL.createObjectURL(file);
+        try{return await reader.decodeFromImageUrl(url);}
+        finally{URL.revokeObjectURL(url);}
+      },
       resolveClaim: value => callbacks.current.resolveClaim(value),
       redeemClaim: value => callbacks.current.redeemClaim(value),
       onRedeemed: () => callbacks.current.onRedeemed?.()
     },setState);
     controller.current=instance;
-    const hide = () => {if (document.hidden && ['requesting','scanning','resolving'].includes(instance.state.phase)) instance.cancel();};
+    const hide = () => {if (document.hidden && ['requesting','scanning','decoding','resolving'].includes(instance.state.phase)) instance.cancel();};
     const leave = () => instance.cancel();
     document.addEventListener('visibilitychange',hide); window.addEventListener('pagehide',leave);
     return () => {document.removeEventListener('visibilitychange',hide);window.removeEventListener('pagehide',leave);instance.dispose();controller.current=null;};
   },[]);
-  const active=['requesting','scanning','resolving'].includes(state.phase), confirming=state.phase==='redeeming';
+  const active=['requesting','scanning','decoding','resolving'].includes(state.phase), confirming=state.phase==='redeeming';
   return <section aria-label="Scan a student claim" style={box}>
     <p style={{margin:0,lineHeight:1.5}}>Scan the student’s QR, review the saved offer, then confirm redemption.</p>
     <div className="ml-scan-window">
@@ -64,7 +69,11 @@ export function ClaimScanner({resolveClaim, redeemClaim, onRedeemed}) {
       <button style={button} type="button" disabled={confirming} onClick={()=>controller.current?.confirm()}>{confirming?'Confirming…':'Confirm redemption'}</button>
     </div>}
     {!active && !state.preview && <button style={button} type="button" onClick={()=>controller.current?.start(video.current)}>{state.phase==='success'?'Scan next claim':state.phase==='error'?'Retry camera scan':'Start camera scan'}</button>}
+    {!active&&!state.preview&&<label style={{...secondary,display:'flex',flexDirection:'column',gap:10,boxSizing:'border-box'}}>
+      <span>Choose a QR image</span>
+      <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" aria-label="Choose a QR image" onChange={event=>{const file=event.target.files?.[0];event.target.value='';if(file)controller.current?.startImage(file);}} style={{maxWidth:'100%',font:'inherit',minHeight:44}}/>
+    </label>}
     {(active || state.preview) && <button style={secondary} type="button" disabled={confirming} onClick={()=>controller.current?.cancel()}>Cancel scan</button>}
-    <small style={{lineHeight:1.5,color:'var(--ml-muted)'}}>Allow camera access when prompted. Scanning an offer does not redeem it until you confirm.</small>
+    <small style={{lineHeight:1.5,color:'var(--ml-muted)'}}>Allow camera access or choose a QR screenshot. Images are decoded on this device and are never uploaded; only the opaque claim credential is checked with the server. Redemption still needs your confirmation.</small>
   </section>;
 }

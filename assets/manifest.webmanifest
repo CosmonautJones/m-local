@@ -1,0 +1,15 @@
+{
+  "id": "/",
+  "name": "M-Local",
+  "short_name": "M-Local",
+  "description": "Local restaurant offers for the U-M community in Ann Arbor.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F9F6F0",
+  "theme_color": "#02305C",
+  "icons": [
+    {"src": "/static/assets/brand/app-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "/static/assets/brand/app-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}

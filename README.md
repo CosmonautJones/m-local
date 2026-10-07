@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://m-local-main-prjc0b.jachammer.app/"><strong>Open M-Local</strong></a> ·
+  <a href="https://mlocal.jachammer.app/"><strong>Open M-Local</strong></a> ·
   <a href="docs/START-HERE.md">Team start here</a> ·
   <a href="docs/HOSTING.md">Hosting</a> ·
   <a href="docs/RUNTIME.md">Runtime</a>
@@ -24,7 +24,7 @@ Android packaging has not been verified.
 
 | For students | For businesses |
 |---|---|
-| Sign in with a U-M email and a 6-digit code. No university password is needed. | Sign up with a business email, import details from the business website, review them, then post offers. |
+| Browse offers before signup. Sign in with a U-M email and a 6-digit code to claim. No university password is needed. | Sign up with a business email, import details from the business website, review them, then post offers. |
 | Pick tastes once. The **For you** feed puts matching deals first and still shows everything else. | **Manage** offers: publish now or schedule a start time, edit, pause and resume. |
 | Filter by maximum price, time and diet from one dropdown. | **Redeem** by scanning the student's claim QR, reviewing the saved terms, then confirming. |
 | Claim an offer to get a QR pass that holds one unit for 20 minutes. | **Insights** shows claims, redemptions, returning accounts and redeemed value over 7, 30 or 90 days or a year, with a day-by-day replay and a downloadable recap. |
@@ -79,10 +79,10 @@ Captured on 2026-09-27 from the current build with fictional test data
 
 ## Live app
 
-**[JacHammer app](https://m-local-main-prjc0b.jachammer.app/): public startup verified September 29, 2026.**
+**[JacHammer app](https://mlocal.jachammer.app/): canonical HTTPS page returned 200 on October 7, 2026.**
 Everyone connects to one hosted backend and shared PostgreSQL database. Offers
 are shared; accounts and claim credentials are intended to remain private.
-The welcome page, backend and database are online, but this is **not ready for
+The public page is reachable; the deployed revision and current storage are unverified. This is **not ready for
 real account onboarding yet**: email/account ownership storage still needs to
 survive redeployments, and registration access needs the protections used by
 the laptop gateway. Full hosted sign-in, redemption and restart checks remain
@@ -91,7 +91,7 @@ open. See [what works and what remains](docs/HOSTING.md#shared-hosting-status).
 **Portfolio reviewers:** start with the [project brief](docs/PORTFOLIO.md) for
 the team attribution, architecture, demo walkthrough and current hosting limits.
 
-**[Laptop fallback](https://mlocal.tail0d5ef8.ts.net/)**, hosted on Travis's laptop.
+**[Historical laptop fallback](https://mlocal.tail0d5ef8.ts.net/)**, hosted on Travis's laptop. Its hostname did not resolve in the October 7 read-only check; confirm availability with the operator before a demo.
 
 This is a shared prototype, not an always-on production service. Availability
 depends on the laptop. See the dated [release checkpoint](docs/PORTFOLIO.md#release-checkpoint)
