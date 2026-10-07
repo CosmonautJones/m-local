@@ -8,6 +8,7 @@ import from uuid { UUID }
 import from services.email_codes { delivery_ready, send_code, store }
 import from services.photo_reference { image_reference }
 import from services.website_import { clean_url }
+import from services.qr_auth { configured_owners }
 
 
 def request_code(value: str, kind: str, name: str) -> dict[str, any] {
@@ -24,9 +25,46 @@ def request_code(value: str, kind: str, name: str) -> dict[str, any] {
 }
 
 
+"""An identity that merely claims this inbox's address without ever owning it.
+
+Jac's native /user/register accepts an unverified email (or a username spelled
+like one) from anyone. Such a record has no onboarding account and no verified
+email identity, so it is never a legitimate sign-in method for the inbox owner.
+Server-provisioned merchants, demo students, SSO links and non-user roles are
+never treated as squatters.
+"""
+def _is_squatter(existing: dict[str, any], email: str, state: any) -> bool {
+    root_id = str(existing.get("root_id", "")).replace("-", "");
+    if state.account(root_id) or existing.get("role") != "user" or existing.get("status") != "active" {
+        return False;
+    }
+    identities = existing.get("identities", []);
+    if not identities or `any([i.get("type") not in ["email", "username"] for i in identities]) {
+        return False;
+    }
+    if `any([i.get("type") == "email" and i.get("value_normalized") == email and i.get("verified") is True for i in identities]) {
+        return False;
+    }
+    profile = existing.get("profile") or {};
+    if profile.get("sso") or profile.get("mlocal_provision") {
+        return False;
+    }
+    protected = set(configured_owners(os.environ.get("MLOCAL_MERCHANT_OWNERS", "{}")).values());
+    return root_id not in protected and not demo_student(root_id);
+}
+
+
 def finish_account(proof: dict[str, any], users: any, state: any) -> dict[str, any] {
     email = proof["email"];
     existing = users.find_user_by_identity(email);
+    if existing and _is_squatter(existing, email, state) {
+        # The verified inbox owner wins over an unverified native registration.
+        removed = users.delete_user(existing["user_id"]);
+        if removed.get("error") {
+            raise ValueError("This account uses another sign-in method. Use its original sign-in or contact the host.");
+        }
+        existing = users.find_user_by_identity(email);
+    }
     user_id: any = None;
     if existing {
         root_id = str(existing.get("root_id", "")).replace("-", "");
