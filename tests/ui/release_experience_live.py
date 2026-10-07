@@ -48,6 +48,33 @@ def port(number):
     return number
 
 
+def stop_private_postgres(workspace):
+    """Stop the embedded daemon only after all owned API writers are stopped."""
+    workspace = workspace.resolve()
+    if workspace.parent != Path("/var/tmp") or not workspace.name.startswith("m-local-release-browser."):
+        raise RuntimeError("PostgreSQL cleanup refuses an unrelated workspace")
+    data = workspace / "cache/pg/main"
+    pid_file = data / "postmaster.pid"
+    if not pid_file.exists():
+        return
+    if data.is_symlink() or not data.resolve().is_relative_to(workspace):
+        raise RuntimeError("PostgreSQL cleanup refuses an unrelated data directory")
+    pid = int(pid_file.read_text().splitlines()[0])
+    process = Path("/proc") / str(pid)
+    arguments = (process / "cmdline").read_bytes().split(b"\0")
+    location = arguments.index(b"-D") + 1
+    if Path(os.fsdecode(arguments[location])).resolve() != data.resolve():
+        raise RuntimeError("PostgreSQL cleanup refuses a mismatched process")
+    executable = (process / "exe").resolve()
+    if executable.name != "postgres":
+        raise RuntimeError("PostgreSQL cleanup refuses a different executable")
+    controller = executable.with_name("pg_ctl")
+    subprocess.run([str(controller), "-D", str(data), "-m", "fast", "-w", "-t", "15", "stop"],
+                   check=True, timeout=20, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if pid_file.exists():
+        raise RuntimeError("Owned PostgreSQL process remained after cleanup")
+
+
 def main():
     from playwright.sync_api import sync_playwright, expect
     parser = argparse.ArgumentParser(description=__doc__)
@@ -124,6 +151,7 @@ def main():
             time.sleep(.25)
         raise TimeoutError("Owned fixture readiness deadline")
     phase = "install"
+    completed = False
     started = time.monotonic()
     try:
         run_logged("private fixture dependency install", [str(jac), "install", "--no-npm"], app, environment,
@@ -277,6 +305,7 @@ def main():
                 browser.close()
             phase = "server-authoritative sample switch over actual HTTP"
             check(student.call("toggle_favorite", slug=mixed_samples["sample_parent"]).get("ok"), "native actor saves a sample favorite while enabled")
+            check(student.call("toggle_favorite", slug=mixed_samples["real_parent"]).get("ok"), "native actor saves a legitimate real favorite")
             stop_process(gateway)
             stop_process(backend)
             environment.update(MLOCAL_SHOW_SAMPLES="0", MLOCAL_DEMO_MODE="1", MLOCAL_HOSTED_DATASET="1")
@@ -297,12 +326,35 @@ def main():
             check(real_profile.get("ok") and not real_profile["offers"], "native real business profile hides its sample child")
             hidden_home = student.call("home_feed")
             check(not any(place["slug"] == mixed_samples["sample_parent"] for place in hidden_home["favorites"]), "native stored sample favorites cannot leak when disabled")
-            check(not student.call("toggle_favorite", slug=mixed_samples["sample_parent"]).get("ok"), "native direct favorite writes cannot bypass disabled samples")
+            favorite_responses = [
+                student.call("taste_choices"),
+                student.call("save_taste", categories="pizza", diets="", price_range=""),
+                student.call("toggle_favorite", slug=mixed_samples["sample_parent"]),
+            ]
+            check(not favorite_responses[-1].get("ok"), "native direct favorite writes cannot bypass disabled samples")
+            for endpoint, result in zip(("taste_choices", "save_taste", "toggle_favorite"), favorite_responses):
+                check(mixed_samples["sample_parent"] not in result["favorites"] and mixed_samples["real_parent"] in result["favorites"],
+                      "native " + endpoint + " hides sample favorites while preserving legitimate favorites")
+            for offer_id in (mixed_samples["unmarked_offer"], mixed_samples["marked_offer"]):
+                check(not student.call("toggle_favorite", offer_id=offer_id).get("ok"), "native hidden offer lookup cannot mutate favorites")
+            check(mixed_samples["real_parent"] in student.call("taste_choices")["favorites"], "native rejected sample lookup preserves the legitimate real favorite")
+            stop_process(gateway)
+            stop_process(backend)
+            environment.update(MLOCAL_SHOW_SAMPLES="1", MLOCAL_DEMO_MODE="0")
+            backend = launch([str(jac), "run", "--no-dev", "--host", "127.0.0.1", "--port", str(args.base_port)], "native-samples-restored")
+            ready(backend, native + "/healthz/ready", lambda row: row.get("ready") is True)
+            gateway = launch(["node", "scripts/hosted-gateway.mjs"], "gateway-samples-restored")
+            ready(gateway, origin + "/healthz", lambda row: row.get("ready") is True)
+            check(mixed_samples["sample_parent"] in student.call("taste_choices")["favorites"], "native re-enabled samples restore saved sample favorite marks")
+            phase = "complete"
+            completed = True
     finally:
         for process in reversed(processes):
             stop_process(process)
-        receipt = {**binding, "checks": checks, "passed": len(checks), "phase": phase,
-                   "seconds": round(time.monotonic() - started, 2), "owned_processes_stopped": True}
+        stop_private_postgres(workspace)
+        receipt = {**binding, "status": "passed" if completed else "failed", "checks": checks, "passed": len(checks), "phase": phase,
+                   "seconds": round(time.monotonic() - started, 2), "owned_processes_stopped": True,
+                   "private_postgres_stopped": True}
         (args.evidence / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
         print("Retained private fixture: " + str(workspace), flush=True)
 

@@ -153,6 +153,11 @@ def _choices() -> list[list[Choice]] {
 
 def _taste_view(p: TasteProfile | None, signed_in: bool, message: str = "", ok: bool = True) -> TasteView {
     lists = _choices();
+    favorites = _favorite_slugs(p);
+    if not samples_visible() {
+        hidden = [r.slug for r in [root.shared -->[?:Restaurant]] if r.is_demo];
+        favorites = [slug for slug in favorites if slug not in hidden];
+    }
     return TasteView(
         ok=ok,
         message=message,
@@ -161,7 +166,7 @@ def _taste_view(p: TasteProfile | None, signed_in: bool, message: str = "", ok: 
         categories=p.categories if p is not None else [],
         diets=p.diets if p is not None else [],
         price_range=p.price_range if p is not None else "",
-        favorites=_favorite_slugs(p),
+        favorites=favorites,
         all_categories=lists[0],
         all_diets=lists[1],
         all_price_ranges=lists[2]
@@ -559,6 +564,9 @@ def:protect toggle_favorite(slug: str = "", offer_id: str = "") -> TasteView {
     if not target and offer_id {
         o = _find_offer(offer_id);
         r = _restaurant_of(o) if o is not None else None;
+        if not samples_visible() and ((o is not None and o.is_demo) or (r is not None and r.is_demo)) {
+            return _taste_view(_profile(), True, "That place is no longer listed.", False);
+        }
         target = r.slug if r is not None else "";
     }
     return _toggle_favorite(target, time.time());
