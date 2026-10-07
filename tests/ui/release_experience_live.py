@@ -194,7 +194,7 @@ def main():
     private_dir(app); private_dir(cache); private_dir(cache / "tmp")
     copy_application(source, app)
     shutil.copy2(Path(__file__), app / "tests/ui/release_experience_live.py")
-    shutil.copy2(Path(__file__).with_name("release_sample_fixture.jac"), app / "tests/ui/release_sample_fixture.jac")
+    shutil.copy2(Path(__file__).with_name("release_sample_fixture.py"), app / "tests/ui/release_sample_fixture.py")
     shutil.copy2(source / "assets/manifest.webmanifest", app / "assets/manifest.webmanifest")
     for relative in GATEWAY_FILES:
         data = subprocess.check_output(["git", "show", args.gateway_ref + ":" + relative], cwd=args.gateway_repo)
@@ -269,9 +269,12 @@ def main():
                                                      "credential": {"type": "password", "password": merchant_password}})
             stop_process(backend)
             environment["MLOCAL_RELEASE_BROWSER_FIXTURE"] = "1"
-            run_logged("private mixed sample graph fixture", [str(jac), "run", "--backend", "python", "--no-serve",
-                "tests/ui/release_sample_fixture.jac"], app, environment, workspace / "sample-fixture.log", 180)
+            run_logged("private mixed sample graph fixture", ["bash", "scripts/python.sh", "-c",
+                "import runpy;runpy.run_path('tests/ui/release_sample_fixture.py',run_name='__main__')"],
+                app, environment, workspace / "sample-fixture.log", 180)
             environment.pop("MLOCAL_RELEASE_BROWSER_FIXTURE")
+            check(all(hashlib.sha256((app / name).read_bytes()).hexdigest() == value for name, value in manifest.items()),
+                  "offline sample fixture preserves every bound candidate source file")
             mixed_samples = json.loads((app / ".jac/release-sample-fixture.json").read_text())
             environment["MLOCAL_MERCHANT_OWNERS"] = json.dumps({"arbor-leaf-kitchen": merchant["root_id"]})
             phase = "native app and restricted gateway readiness"
@@ -280,6 +283,12 @@ def main():
             gateway = launch(["node", "scripts/hosted-gateway.mjs"], "gateway")
             ready(gateway, origin + "/healthz", lambda row: row.get("ready") is True)
             public, owner = Api(origin), Api(origin, merchant["token"])
+            for key in ("sample_parent", "real_parent"):
+                check(public.call("get_business_profile", slug=mixed_samples[key]).get("ok"),
+                      "native sample fixture " + key + " is visible while samples are enabled")
+            for key in ("unmarked_offer", "marked_offer"):
+                check((public.call("get_offer", offer_id=mixed_samples[key]) or {}).get("id") == mixed_samples[key],
+                      "native sample fixture " + key + " is visible while samples are enabled")
             feed = public.call("home_feed")
             sample = next(row["offer"] for row in feed["items"] if row["place"] == "arbor-leaf-kitchen" and row["offer"]["state"] == "active")
             with sync_playwright() as playwright:
