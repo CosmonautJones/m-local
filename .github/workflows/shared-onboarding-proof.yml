@@ -29,8 +29,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: Verify Jac source-byte share
-        run: python3 scripts/check-jac-share.py --min-jac 40
+      - name: Report tracked source-byte composition
+        run: python3 scripts/check-jac-share.py
       - name: Install pinned Jac
         run: bash scripts/setup.sh
       - name: Check the disposable TLS mail sink

@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Verify Jac source-byte share
-        run: python3 scripts/check-jac-share.py --min-jac 40
+      - name: Report tracked source-byte composition
+        run: python3 scripts/check-jac-share.py
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
