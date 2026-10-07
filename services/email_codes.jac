@@ -20,6 +20,7 @@ import ssl;
 import tempfile;
 import time;
 import from uuid { UUID }
+import from services.release_events { record_mail_failure, record_mail_quota }
 
 def mutation_lock_path() -> str {
     directory = Path(os.environ.get("MLOCAL_ONBOARDING_DIR", ".jac/onboarding")).resolve();
@@ -180,15 +181,18 @@ obj CodeStore {
             hourly = db.execute("SELECT COUNT(*) FROM sends WHERE at>?", (now - 3600,)).fetchone()[0];
             daily = db.execute("SELECT COUNT(*) FROM sends").fetchone()[0];
             if hourly >= 60 or daily >= 300 {
+                record_mail_quota(hourly, daily);
                 raise ValueError("Email sign-in is busy. Please try again later.");
             }
             db.execute("INSERT INTO sends VALUES (?,?)", (email, now));
             db.execute("DELETE FROM codes WHERE email=?", (email,));
             db.execute("INSERT INTO codes VALUES (?,?,?,?,?,?,0,0)", (challenge, email, kind, name, self.digest(challenge, code), now + 600));
         }
+        record_mail_quota(hourly + 1, daily + 1);
         try {
             send(email, code);
         } except Exception {
+            record_mail_failure();
             with self.transaction() as db {
                 db.execute("DELETE FROM codes WHERE challenge=?", (challenge,));
             }

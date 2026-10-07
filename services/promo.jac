@@ -46,6 +46,7 @@ import from services.money { money_to_cents }
 import from services.session { _actor_id, _merchant_for_actor }
 import from services.onboarding { student_can_claim }
 import from services.email_codes { store, mutation_lock_path }
+import from services.release_events { record_outcome }
 import from services.context_models { AccessContextView }
 import from services.context { get_access_context }
 
@@ -884,6 +885,7 @@ def:protect claim_offer(offer_id: str) -> ActionResult {
     } finally {
         _unlock(fd);
     }
+    record_outcome("claim", result.ok);
     return result;
 }
 
@@ -1071,6 +1073,7 @@ def:protect redeem_claim(qr_payload: str) -> ActionResult {
     } finally {
         _unlock(fd);
     }
+    record_outcome("redeem", result.ok);
     return result;
 }
 

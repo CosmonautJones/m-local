@@ -1,6 +1,7 @@
 """Passwordless onboarding; verified inbox ownership, never enrollment or merchant authority."""
 import from services.onboarding_support { request_code, verify_code, account_details, may_claim, demo_student }
 import from services.production_guard { exit_unless_production_ready }
+import from services.release_events { record_outcome }
 
 # Opt-in (MLOCAL_ENV=production): exit before serving with unsafe private-state config.
 glob _production_config_checked: bool = exit_unless_production_ready();
@@ -18,7 +19,9 @@ def _code_result(raw: dict[str, any]) -> EmailCodeResult {
 }
 
 def:pub request_email_code(value: str, kind: str, name: str) -> EmailCodeResult {
-    return _code_result(request_code(value, kind, name));
+    result = _code_result(request_code(value, kind, name));
+    record_outcome("email_request", result.ok);
+    return result;
 }
 
 def:pub verify_email_code(challenge: str, code: str) -> EmailCodeResult {
