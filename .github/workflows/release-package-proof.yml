@@ -1,0 +1,58 @@
+name: Offline release package and authenticated recovery proof
+
+on:
+  push:
+    branches: [release/combined-candidate]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-package-proof-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install official pinned runtime
+        run: bash scripts/setup.sh
+      - name: Build and verify the exact-source offline package
+        run: bash scripts/build-release-package.sh "$RUNNER_TEMP/release-package"
+      - name: Prepare only the owned disposable state mount
+        run: |
+          test -x /usr/lib/postgresql/16/bin/initdb
+          test -x /usr/lib/postgresql/16/bin/pg_dump
+          mkdir -m 700 "$RUNNER_TEMP/package-backing" "$RUNNER_TEMP/package-mount"
+          sudo mount --bind "$RUNNER_TEMP/package-backing" "$RUNNER_TEMP/package-mount"
+      - name: Prove packaged startup and authenticated logical recovery
+        run: |
+          source scripts/runtime.sh
+          export JAC_BIN
+          timeout --signal=TERM --kill-after=30s 1200s bash scripts/python.sh tests/integration/release_package_http.py \
+            --package "$RUNNER_TEMP/release-package/release" --tools / \
+            --durable-base "$RUNNER_TEMP/package-mount" --receipt "$RUNNER_TEMP/release-package/live-proof.json"
+      - name: Unmount only the owned disposable state mount
+        if: always()
+        run: |
+          if mountpoint -q "$RUNNER_TEMP/package-mount"; then sudo umount "$RUNNER_TEMP/package-mount"; fi
+      - name: Retain lightweight source-bound receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-package-receipts-${{ github.sha }}
+          retention-days: 1
+          path: |
+            ${{ runner.temp }}/release-package/package-manifest.json
+            ${{ runner.temp }}/release-package/build-receipt.json
+            ${{ runner.temp }}/release-package/official-checksums.json
+            ${{ runner.temp }}/release-package/archive-sha256.txt
+            ${{ runner.temp }}/release-package/live-proof.json
+      # The large archive is generated and verified, but new storage spending
+      # has not been approved. Do not add an archive upload without that gate.
