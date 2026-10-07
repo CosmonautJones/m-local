@@ -230,6 +230,36 @@ class GuardTests(unittest.TestCase):
                 self.assertNotIn(str(self.root), str(caught.exception))
                 self.assertNotIn('42', str(caught.exception))
 
+    def test_path_overrides_cannot_validate_a_trimmed_store_and_select_another_store(self):
+        native_base = self.data / 'native base with spaces'
+        signing = native_base / '.jac/data'
+        signing.mkdir(parents=True)
+        original = (self.data / 'native/jwt_secret').read_bytes()
+        (signing / 'jwt_secret').write_bytes(original)
+        self.assertEqual(self.problems(JAC_DATA_PATH=str(native_base)), [])
+        paths = {name: self.good[name] for name in ('MLOCAL_DURABLE_ROOT', 'MLOCAL_ONBOARDING_DIR')}
+        paths['JAC_DATA_PATH'] = str(native_base)
+        for name, path in paths.items():
+            for raw in (' ' + path, path + ' ', '\t' + path, '   '):
+                with self.subTest(setting=name, whitespace=repr(raw[:1])):
+                    with self.assertRaises(ProductionConfigError) as caught:
+                        enforce_production_config({**self.good, name: raw}, self.root)
+                    self.assertIn(name, str(caught.exception))
+                    self.assertNotIn(path, str(caught.exception))
+        self.assertEqual((signing / 'jwt_secret').read_bytes(), original)
+        self.assertEqual((Path(self.good['MLOCAL_ONBOARDING_DIR']) / 'code.key').read_bytes(), b'x' * 32)
+
+    def test_signing_configuration_matches_official_environment_fallback_and_raw_toml_algorithm(self):
+        original = (self.data / 'native/jwt_secret').read_text()
+        (self.root / 'jac.toml').write_text('[serve.auth]\nalgorithm = " HS256 "\n')
+        self.assertTrue(any('ALGORITHM' in p for p in self.problems()))
+        self.assertEqual(self.problems(JAC_SERVE_AUTH_ALGORITHM=' HS256 '), [])
+        self.assertTrue(any('ALGORITHM' in p for p in self.problems(JAC_SERVE_AUTH_ALGORITHM='   ')))
+        (self.root / 'jac.toml').write_text('[serve.auth]\nsecret = "another-private-key"\n')
+        self.assertTrue(any('SECRET' in p for p in self.problems(JAC_SERVE_AUTH_SECRET='   ')))
+        (self.root / 'jac.toml').write_text('[serve.auth]\nsecret = " ' + original + ' "\n')
+        self.assertEqual(self.problems(JAC_SERVE_AUTH_SECRET='   ', JAC_SERVE_AUTH_ALGORITHM='   '), [])
+
 
 if __name__ == '__main__':
     unittest.main()
