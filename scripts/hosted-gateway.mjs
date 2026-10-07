@@ -21,7 +21,8 @@ const loopback = ingress === 'funnel' || ingress === 'restricted-edge';
 const proxy = createShareProxy({
   upstreamHost: '127.0.0.1', upstreamPort,
   trustCloudflare: ingress === 'render', trustFunnel: ingress === 'funnel', healthCheck: true,
-  deploymentTopology: process.env.MLOCAL_DEPLOYMENT_TOPOLOGY || '',
+  deploymentTopology: process.env.MLOCAL_DEPLOYMENT_TOPOLOGY || 'single-instance-serialized',
+  startupCatalogCheck: true,
   secureProductionIngress: production,
 });
 proxy.on('error', error => { console.error(error.message); process.exitCode = 1; });
