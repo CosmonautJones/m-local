@@ -1,0 +1,66 @@
+name: Release native preservation and topology proof
+
+on:
+  pull_request:
+    branches: [codex/release-readiness]
+  push:
+    branches: ['release/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-hardening:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 32
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install official pinned runtime
+        if: hashFiles('scripts/test-native-hardening.sh') != ''
+        run: bash scripts/setup.sh
+      - name: Prepare disposable mounted volume
+        if: hashFiles('scripts/test-native-hardening.sh') != ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/hardening-backing" "$RUNNER_TEMP/hardening-mount"
+          chmod 700 "$RUNNER_TEMP/hardening-backing" "$RUNNER_TEMP/hardening-mount"
+          sudo mount --bind "$RUNNER_TEMP/hardening-backing" "$RUNNER_TEMP/hardening-mount"
+      - name: Prove startup and account preservation over native and ingress HTTP
+        if: hashFiles('scripts/test-native-hardening.sh') != ''
+        env:
+          MLOCAL_HARDENING_DURABLE_BASE: ${{ runner.temp }}/hardening-mount
+        run: bash scripts/test-native-hardening.sh --receipt .jac/release-native/hardening.json
+      - name: Unmount owned disposable volume
+        if: always() && hashFiles('scripts/test-native-hardening.sh') != ''
+        run: sudo umount "$RUNNER_TEMP/hardening-mount"
+      - uses: actions/upload-artifact@v4
+        if: always() && hashFiles('.jac/release-native/hardening.json') != ''
+        with:
+          name: native-hardening-${{ github.sha }}
+          path: .jac/release-native/hardening.json
+
+  serialized-stock-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install official pinned runtime
+        if: hashFiles('scripts/test-stock-topology-app.sh') != ''
+        run: bash scripts/setup.sh
+      - name: Prove official runtime native faults
+        if: hashFiles('scripts/test-stock-topology.sh') != ''
+        run: bash scripts/test-stock-topology.sh
+      - name: Prove integrated application races and commit faults
+        if: hashFiles('scripts/test-stock-topology-app.sh') != ''
+        run: bash scripts/test-stock-topology-app.sh --require-hold-cap --receipt .jac/release-native/stock-app.json
+      - uses: actions/upload-artifact@v4
+        if: always() && hashFiles('.jac/release-native/stock-app.json') != ''
+        with:
+          name: serialized-stock-runtime-${{ github.sha }}
+          path: .jac/release-native/stock-app.json
