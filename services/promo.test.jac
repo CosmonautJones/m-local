@@ -763,6 +763,13 @@ test "hold limit rollout preserves every pre-existing claim above the cap" {
         claim = _find_claim(restaurant, retry.qr_payload) as Redemption;
         assert claim.status == "claimed" and claim.terms_snapshot == "Original promise";
     }
+    restaurant = _restaurant_of(offers[0]) as Restaurant;
+    additional = Offer(title="New admission after rollout", start_ts=now - 60,
+        end_ts=now + 3600, quantity=5, qr_ready=True);
+    restaurant +>:Publishes():+> additional;
+    rejected = _claim(jid(additional), "hold-limit-existing-student", now);
+    assert not rejected.ok and "limit is 2 active holds" in rejected.message;
+    assert _remaining(additional, now) == 5;
 }
 
 

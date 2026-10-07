@@ -558,7 +558,7 @@ def _claim(offer_id: str, actor_id: str, now: float) -> ActionResult {
     # Existing live claims returned above remain idempotent, including accounts
     # that already held more than the new limit before rollout.
     if _active_hold_count(actor_id, now) >= MAX_ACTIVE_HOLDS {
-        return ActionResult(message=f"You have {MAX_ACTIVE_HOLDS} active holds. Cancel one or wait for it to expire before claiming another offer.");
+        return ActionResult(message=f"The limit is {MAX_ACTIVE_HOLDS} active holds. Cancel one or wait for it to expire before claiming another offer.");
     }
     o.qr_ready = True;
     expires = min(now + CLAIM_HOLD_MINUTES * 60, o.end_ts);
