@@ -22,8 +22,11 @@ receipt even when a narrower component proof remains useful.
 Verification requires actual CI on every final pushed component and combined
 SHA, complete applicable checks, source binding, real native HTTP and browser
 proofs, and terminal results. A skipped or absent required check is not success.
-A red source-share job keeps the unchanged release criterion open even when
-functional jobs pass. Keep unfinished work draft and link failures as well as
+Source composition is informational under Travis's current release policy;
+genuine inventory/Git errors still fail the reporting job. Preserve historical
+threshold failures and require new exact-head CI after the policy change.
+Correctness, security, runtime and recovery requirements remain unchanged.
+Keep unfinished work draft and link failures as well as
 passing receipts. Live inbox, host, device, recovery and pilot gates stay open
 until their own acceptance is recorded.
 

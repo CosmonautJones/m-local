@@ -36,9 +36,11 @@ authority. Keep unfinished PRs draft and bind each receipt to its tested source.
 - Run the complete current workflows and focused native/browser regressions on
   the combined candidate, with official Jac 0.37.23 and isolated stores. No check
   run is not a passing check. Keep failures and original receipts.
-- Source composition remains governed by `check-jac-share.py --min-jac 40`.
-  Added safety tooling must pass this unchanged gate or remain an explicit
-  engineering blocker; do not pad Jac or hide operational/test sources.
+- Source composition is informational under Travis's current release policy.
+  `check-jac-share.py` reports tracked Git blob bytes, including tests and
+  operational tooling. Inventory/Git errors still fail the reporting check.
+  No padding, exclusions or conversion target replaces correctness, security,
+  official-runtime pinning or the required acceptance gates.
 - Reconcile test definitions and named outcomes rather than targeting duplicate
   execution counts. The historical 410-to-380 reduction retained every baseline
   name: 32 fewer import-induced repeats plus two executions of one new test.
