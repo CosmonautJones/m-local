@@ -10,6 +10,20 @@ const guest={authenticated:false,actor_id:'',role:'guest',restaurant_id:'',displ
 const reply=(res,value,status=200)=>{res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(value));};
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
+test('official hydrated guest metadata is accepted but unknown or malformed extras remain unhealthy',async t=>{
+  const metadata={_jac_type:'official fixture',_jac_id:'fixture id',_jac_archetype:'fixture archetype',_jac_type_id:'fixture type'};
+  let result={...guest,...metadata};
+  const {origin}=await serve(t,(req,res)=>reply(res,req.url==='/healthz/ready'?{ready:true}:
+    {ok:true,data:{result:req.url==='/function/home_feed'?feed:result}}));
+  await pause(30);
+  assert.equal((await fetch(origin+'/healthz')).status,200);
+  for(const invalid of [{...result,unknown:'private value'},{...guest,_jac_type:'partial metadata'},
+    {...result,_jac_id:7},{...result,authenticated:true},{...result,actor_id:'another actor'}]) {
+    result=invalid;const response=await fetch(origin+'/healthz');assert.equal(response.status,503);
+    assert.deepEqual(await response.json(),{ready:false});
+  }
+});
+
 async function serve(t,handler,options={}) {
   const upstream=http.createServer(handler).listen(0,'127.0.0.1');await once(upstream,'listening');
   const proxy=createShareProxy({upstreamHost:'127.0.0.1',upstreamPort:upstream.address().port,
