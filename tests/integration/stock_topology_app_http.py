@@ -241,6 +241,18 @@ def main():
         finally:
             observer.close()
 
+    def seal_source():
+        expected_inputs = dict(inputs)
+        if instrumentation:
+            expected_inputs['main.jac'] = instrumentation['instrumented_entry_sha256']
+        after_inputs = input_manifest(app)
+        receipt['source_copy_after_sha256'] = hashlib.sha256(stable_json(after_inputs)).hexdigest()
+        receipt['source_copy_unchanged'] = after_inputs == expected_inputs
+        receipt['repository_head_after'] = subprocess.check_output(
+            ['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True, timeout=30).strip()
+        receipt['source_repository_unchanged'] = receipt['repository_head_after'] == source_sha
+        return receipt['source_copy_unchanged'] and receipt['source_repository_unchanged']
+
     def interrupted(signum, _frame):
         raise SystemExit(128 + signum)
     for signum in (signal.SIGINT, signal.SIGTERM):
@@ -356,13 +368,7 @@ def main():
               'publication key retains original offer after restart')
         with urllib.request.urlopen(gateway + '/healthz', timeout=30) as health:
             check(json.load(health).get('ready') is True, 'serialized readiness remains meaningful after restart')
-        expected_inputs = dict(inputs)
-        if instrumentation:
-            expected_inputs['main.jac'] = instrumentation['instrumented_entry_sha256']
-        after_inputs = input_manifest(app)
-        receipt['source_copy_unchanged'] = after_inputs == expected_inputs
-        receipt['repository_head_after'] = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip()
-        receipt['source_repository_unchanged'] = receipt['repository_head_after'] == source_sha
+        seal_source()
         check(receipt['source_copy_unchanged'], 'tested source copy is unchanged after declared test-only instrumentation')
         check(receipt['source_repository_unchanged'], 'tested repository SHA remains unchanged throughout proof')
         receipt['verdict'] = 'BOUNDED_SERIALIZED_APP_RACES_PASS_NOT_HOSTING_CERTIFIED'
@@ -374,6 +380,10 @@ def main():
         for process in processes:
             stop_process(process)
         runtime.stop()
+        source_unchanged = seal_source()
+        if not source_unchanged:
+            receipt['verdict'] = 'BLOCKED'
+            receipt['source_integrity_failure'] = True
         receipt['cleanup'] = dict(owned_api_gateway_groups_stopped=True, private_postgres_stopped=True)
         (workspace / 'result.json').write_text(json.dumps(receipt, indent=2) + '\n')
         evidence.parent.mkdir(parents=True, exist_ok=True)
@@ -381,6 +391,8 @@ def main():
         with os.fdopen(fd, 'w') as stream:
             stream.write(json.dumps(receipt, indent=2) + '\n')
         print('Retained private full-app fixture:', workspace, flush=True)
+        if not source_unchanged:
+            raise AssertionError('Source integrity changed; receipt cannot certify the candidate')
 
 
 if __name__ == '__main__':
