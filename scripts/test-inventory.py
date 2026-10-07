@@ -59,6 +59,7 @@ def declarations(root: Path) -> list[dict]:
             first_line = source.count('\n', 0, match.start()) + 1
             result.append({
                 'name': json.loads(match.group(1)),
+                'imported_label': re.sub(r'\W+', '_', json.loads(match.group(1))).strip('_').lower(),
                 'path': path.relative_to(root).as_posix(),
                 'line': first_line,
                 'body_sha256': hashlib.sha256(body.encode()).hexdigest(),
@@ -151,7 +152,18 @@ def main() -> int:
     if not binding.get('source_manifest') or '0.37.23' not in binding.get('runtime_version', ''):
         binding_errors.append('Missing source manifest or pinned runtime identity.')
     expected = {item['name'] for item in definitions if item['core_expected']}
-    passed = {item['name'] for item in actual if item['result'] == 'PASSED'}
+    aliases = {}
+    ambiguous = set()
+    for definition in definitions:
+        for label in {definition['name'], definition['imported_label']}:
+            if label in aliases and aliases[label] != definition['name']:
+                ambiguous.add(label)
+            aliases[label] = definition['name']
+    unmapped = sorted({item['name'] for item in actual} - aliases.keys())
+    for item in actual:
+        item['definition_name'] = aliases.get(item['name'])
+    passed = {item['definition_name'] for item in actual
+              if item['result'] == 'PASSED' and item['definition_name'] is not None}
     missing = sorted(expected - passed)
     unsuccessful = [item for item in actual if item['result'] != 'PASSED']
     inventory = {
@@ -164,6 +176,8 @@ def main() -> int:
         'declarations': definitions, 'outcomes': actual,
         'expected_distinct': len(expected), 'passed_distinct': len(passed),
         'execution_count': len(actual), 'missing_expected': missing,
+        'reported_distinct_labels': len({item['name'] for item in actual}),
+        'ambiguous_labels': sorted(ambiguous), 'unmapped_labels': unmapped,
         'unsuccessful_outcomes': unsuccessful,
         'scope': 'Named definitions and lexical assertion locations, not branch coverage. '
                  'Assertion locations are lexical tokens and may include comments/strings; '
@@ -186,7 +200,7 @@ def main() -> int:
     args.output.write_text(json.dumps(inventory, indent=2) + '\n', encoding='utf-8')
     print(f'Core inventory: {len(passed)}/{len(expected)} expected names; '
           f'{len(actual)} executions; {len(unsuccessful)} non-pass outcomes.')
-    if not actual or missing or unsuccessful or binding_errors:
+    if not actual or missing or unsuccessful or binding_errors or ambiguous or unmapped:
         print('Inventory refused: missing/unsuccessful outcomes or mismatched source binding.')
         return 1
     return 0
