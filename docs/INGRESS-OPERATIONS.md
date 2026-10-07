@@ -25,6 +25,10 @@ operator procedure. Assets can be served through the same lane while starting.
 Periodic health then checks native metadata plus the exact nine-field guest
 `current_session` response under the original overall five-second limit, without
 repeating catalog traversal or forwarding a caller's credentials.
+The native DTO may include exactly four official string metadata fields:
+`_jac_type`, `_jac_id`, `_jac_archetype` and `_jac_type_id`. All nine guest fields
+must retain their exact values/types; unknown, partial or malformed metadata is
+refused. Health returns only `{ "ready": true }` or `{ "ready": false }`.
 
 A disposable warm database outage on official Jac 0.37.23 showed native metadata
 still returned ready while both session and catalog RPCs returned HTTP 500.
