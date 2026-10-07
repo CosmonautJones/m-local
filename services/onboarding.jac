@@ -1,5 +1,9 @@
 """Passwordless onboarding; verified inbox ownership, never enrollment or merchant authority."""
 import from services.onboarding_support { request_code, verify_code, account_details, may_claim, demo_student }
+import from services.production_guard { exit_unless_production_ready }
+
+# Opt-in (MLOCAL_ENV=production): exit before serving with unsafe private-state config.
+glob _production_config_checked: bool = exit_unless_production_ready();
 
 obj EmailCodeResult {
     has ok: bool = False, message: str = "", challenge: str = "",
