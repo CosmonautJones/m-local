@@ -6,7 +6,7 @@ import {app,home,offer,feedItem,rpc,until} from './harness.mjs';
 const heart=(ui,word)=>ui.document.querySelector(`[aria-label="${word} Fixture Kitchen ${word==='Add'?'to':'from'} favorites"]`);
 const has=(ui,text)=>ui.find(text)!==undefined;
 
-test('guest gets the sign-in screen and never sees or loads deals',async()=>{
+test('guest sign-in hides app data and exposes no private operations',async()=>{
  const ui=await app({role:'guest'});
  try{
   await openSignIn(ui);
@@ -16,10 +16,10 @@ test('guest gets the sign-in screen and never sees or loads deals',async()=>{
   assert.equal(has(ui,'Nearby'),false);assert.equal(has(ui,'Account'),false);assert.equal(has(ui,'Log out'),false);
   assert.equal(heart(ui,'Add'),null);
   assert.equal(has(ui,'Keep browsing'),false);
-  assert.equal(ui.calls.some(c=>['home_feed','list_offers','get_offer'].includes(c.name)),false,'no deals are requested before sign-in');
-  ui.click('Back');await until(()=>has(ui,'Find local deals'));
-  assert.equal(has(ui,'Current bowl'),false);
-  assert.equal(ui.calls.some(c=>['home_feed','list_offers','get_offer'].includes(c.name)),false);
+  assert.equal(ui.calls.some(c=>['claim_offer','merchant_portal','merchant_insights'].includes(c.name)),false,'public browsing grants no private authority');
+  ui.click('Back');await until(()=>has(ui,'Current bowl'));
+  assert.equal(has(ui,'Current bowl'),true);
+  assert.equal(ui.calls.some(c=>c.name==='home_feed'),true);
   assert.deepEqual(ui.errors,[]);
  }finally{ui.close();}
 });

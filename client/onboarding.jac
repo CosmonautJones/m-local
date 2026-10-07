@@ -42,7 +42,7 @@ def:pub AudienceWelcome(onChoose: Callable[[str], None]) -> JsxElement {
             </header>
             <div style={{**stack, "gap": 12}}>
                 <button className="mlocal-choice ml-welcome-choice" type="button" style={{**choice, "background": "var(--ml-accent)", "borderColor": "var(--ml-accent)", "color": "var(--ml-accent-text)"}} onClick={lambda { onChoose("student"); }}>
-                    <span style={{**stack, "gap": 8, "color": "inherit"}}><span style={{"fontSize": 21, "fontWeight": 750}}>Find local deals</span><span style={{"fontSize": 14, "lineHeight": 1.5, "fontWeight": 400}}>Join with your U-M email.<br/>Discover offers from local favorites.</span></span><span aria-hidden="true" style={{"fontSize": 26}}>→</span>
+                    <span style={{**stack, "gap": 8, "color": "inherit"}}><span style={{"fontSize": 21, "fontWeight": 750}}>Find local deals</span><span style={{"fontSize": 14, "lineHeight": 1.5, "fontWeight": 400}}>Browse offers before signup.<br/>Sign in with your U-M email to claim.</span></span><span aria-hidden="true" style={{"fontSize": 26}}>→</span>
                 </button>
                 <button className="mlocal-choice ml-welcome-choice" type="button" style={choice} onClick={lambda { onChoose("business"); }}>
                     <span style={{**stack, "gap": 8, "color": "inherit"}}><span style={{"fontSize": 21, "fontWeight": 750}}>List my business</span><span style={{"fontSize": 14, "lineHeight": 1.5, "fontWeight": 400}}>Create your business profile.<br/>Connect with the U-M community.</span></span><span aria-hidden="true" style={{"fontSize": 26}}>→</span>

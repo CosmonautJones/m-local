@@ -5,6 +5,7 @@ to the internal helpers. Privacy between real accounts is checked over HTTP."""
 
 import from services.promo { _claim, _redeem, list_offers }
 import from services.session { _merchant_for_actor }
+import from services.models { samples_visible }
 import from unittest.mock { patch }
 import from jaclang.data.serializer { Serializer }
 
@@ -247,12 +248,52 @@ test "production home omits a demo offer the caller has claimed or redeemed" {
 test "hosted dataset replaces starter fixture discovery without deleting starter records" {
     _ensure_seed();
     original = [jid(r) for r in [root.shared -->[?:Restaurant]] if r.source == "demo-seed"];
-    with patch.dict(os.environ, {"MLOCAL_HOSTED_DATASET": "1"}) {
+    with patch.dict(os.environ, {"MLOCAL_HOSTED_DATASET": "1", "MLOCAL_DEMO_MODE": "1"}) {
         home = _home("", "", "any", "", time.time());
         assert home.show_samples;
         assert not [item for item in home.items if item.offer.restaurant.endswith(" (Demo)")];
     }
     assert [jid(r) for r in [root.shared -->[?:Restaurant]] if r.source == "demo-seed"] == original;
+}
+
+test "hosted dataset cannot override disabled sample discovery favorites or direct favorite writes" {
+    _ensure_seed();
+    p = _reset();
+    now = time.time();
+    demo = Restaurant(slug="hidden-sample-favorite", name="Hidden sample favorite", is_demo=True);
+    root.shared ++> demo;
+    real = Restaurant(slug="real-favorite-with-sample", name="Real favorite", is_demo=False);
+    root.shared ++> real;
+    sample = Offer(title="Hidden sample", price_cents=300, start_ts=now - 60, end_ts=now + 3600, quantity=3, is_demo=True);
+    demo +>:Publishes():+> sample;
+    demo +>:Publishes():+> Offer(title="Unmarked offer at sample parent", price_cents=300, start_ts=now - 60, end_ts=now + 3600, quantity=3, is_demo=False);
+    real +>:Publishes():+> Offer(title="Sample at real favorite", price_cents=200, start_ts=now - 60, end_ts=now + 3600, quantity=3, is_demo=True);
+    with patch.dict(os.environ, {"MLOCAL_DEMO_MODE": "1"}) {
+        assert _toggle_favorite(demo.slug, now).ok;
+        assert _toggle_favorite(real.slug, now).ok;
+    }
+    with patch.dict(os.environ, {"MLOCAL_DEMO_MODE": "0", "MLOCAL_HOSTED_DATASET": "1"}) {
+        quiet = _home("", "", "any", "", now);
+        assert not quiet.show_samples;
+        assert not [i for i in quiet.items if i.offer.is_demo];
+        assert not [i for i in quiet.items if i.offer.restaurant == demo.name];
+        favorites = _favorite_places(_favorite_slugs(p), now);
+        assert not [f for f in favorites if f.slug == demo.slug];
+        visible = [f for f in favorites if f.slug == real.slug];
+        assert len(visible) == 1 and visible[0].live_offers == 0 and visible[0].best_offer_id == "";
+        assert not _toggle_favorite(demo.slug, now).ok;
+        assert demo.slug in _favorite_slugs(p), "Visibility changes must preserve stored favorites";
+    }
+}
+
+test "explicit sample visibility overrides demo fallback and hosted fixtures" {
+    with patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "0", "MLOCAL_DEMO_MODE": "1", "MLOCAL_HOSTED_DATASET": "1"}) {
+        assert not samples_visible();
+        assert not _home("", "", "any", "", time.time()).show_samples;
+    }
+    with patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "1", "MLOCAL_DEMO_MODE": "0", "MLOCAL_HOSTED_DATASET": "0"}) {
+        assert samples_visible();
+    }
 }
 
 
@@ -310,7 +351,9 @@ test "home retains a real saved QR after pause or shortened offer end until hold
 test "home retains only the owner's live claim across price diet and time filters" {
     _ensure_seed();
     _reset();
-    now = time.time();
+    # A real clock near midnight makes tomorrow's offer part of "today" after
+    # the hold deadline. Keep this filter fixture on one local calendar day.
+    now = datetime.fromtimestamp(time.time(), ZoneInfo("America/Detroit")).replace(hour=12, minute=0, second=0, microsecond=0).timestamp();
     o = _claim_fixture("filtered-claim-cafe", now);
     oid = jid(o);
     actor = "filtered-claim-student";
@@ -333,7 +376,7 @@ test "home retains only the owner's live claim across price diet and time filter
             assert not [i for i in _home(stranger, price, window, diets, now + 1).items if i.offer.id == oid];
             assert _listed_claim(stranger, oid, now + 1, budget, window, diets) == [];
         }
-        assert not [i for i in _home(actor, price, window, diets, expires).items if i.offer.id == oid];
+        assert not [i for i in _home(actor, price, window, diets, expires).items if i.offer.id == oid], "Expired hold visible for price=" + price + ", window=" + window + ", diets=" + diets + ", start=" + str(o.start_ts) + ", deadline=" + str(expires) + ", status=" + _view(o, expires, actor).my_status;
         assert _listed_claim(actor, oid, expires, budget, window, diets) == [];
     }
 }

@@ -72,7 +72,8 @@ test('blocked theme storage does not prevent switching or entering either sign-i
     assert.equal(ui.document.documentElement.dataset.theme,'dark');
     ui.click('Back');await until(()=>ui.find('Find local deals'));
     assert.equal(ui.document.querySelector('[data-testid="theme-toggle"]').getAttribute('aria-label'),'Switch to light mode');
-    ui.click('Find local deals');await until(()=>ui.document.querySelector('[placeholder="uniqname"]'));
+    ui.click('Find local deals');await until(()=>ui.find('Sign in'));
+    ui.click('Sign in');await until(()=>ui.document.querySelector('[placeholder="uniqname"]'));
     assert.deepEqual(ui.errors,[]);
   }finally{ui.close();}
 });

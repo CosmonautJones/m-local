@@ -1,12 +1,13 @@
 """Run only in the isolated test workspace supplied by scripts/test.sh."""
 
 import uuid;
+import os;
 import tempfile;
 import from unittest.mock { patch }
 import from services.models { Location, HasLocation, Offer, Redemption, ClaimedAs }
 import from services.session { current_session }
 import from services.promo { _claim, list_offers, get_offer }
-import from services.foryou { _home }
+import from services.foryou { _home, DEMO_MODE_ENV }
 
 
 def _profile_fixture(name: str = "Same public name") -> Restaurant {
@@ -160,6 +161,7 @@ test "demo mode gates sample businesses and offers for both lookup paths" {
     demo.is_demo = True;
     demo_offer = _profile_offer(demo, "Sample lunch", now);
     demo_offer.is_demo = True;
+    unmarked = _profile_offer(demo, "Unmarked offer at sample parent", now);
     real = _profile_fixture("Real cafe");
     regular = _profile_offer(real, "Regular lunch", now);
     sample = _profile_offer(real, "Sample at real cafe", now);
@@ -178,8 +180,9 @@ test "demo mode gates sample businesses and offers for both lookup paths" {
         assert len(_public_business(real.slug, "", now).offers) == 2;
     }
     with patch.dict(os.environ, {DEMO_MODE_ENV: "0", "MLOCAL_HOSTED_DATASET": "1"}) {
-        assert _public_business(demo.slug, "", now).ok;
-        assert _public_business("", jid(demo_offer), now).ok;
+        assert not _public_business(demo.slug, "", now).ok;
+        assert not _public_business("", jid(demo_offer), now).ok;
+        assert not _public_business("", jid(unmarked), now).ok;
     }
 }
 
@@ -202,13 +205,16 @@ test "missing or invalid identifiers return a safe empty result" {
 }
 
 
-test "anonymous direct calls are rejected before catalog access" {
+test "anonymous business lookup exposes the sanitized public projection only" {
+    r = _profile_fixture();
+    o = _profile_offer(r, "Guest lunch", time.time());
     with patch.dict(get_business_profile.__globals__, {"_actor_id": lambda () -> str { return ""; }}) {
-        with patch.dict(get_business_profile.__globals__, {"_ensure_seed": lambda () { testfail("Guest reached catalog"); }}) {
-            v = get_business_profile("anything");
-            assert not v.ok and v.message == "Sign in to view this business.";
-            assert v.offers == [] and v.slug == "";
-        }
+        v = get_business_profile(r.slug);
+        assert v.ok and v.slug == r.slug;
+        assert not hasattr(v, "owner_actor_id") and not hasattr(v, "merchant_key");
+        assert [item.id for item in v.offers] == [jid(o)];
+        assert v.offers[0].my_qr_payload == "" and v.offers[0].my_claim_id == "";
+        assert not get_business_profile().ok;
     }
 }
 

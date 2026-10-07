@@ -53,20 +53,22 @@ test('business account path accepts work email and preserves manual entry fallba
  }finally{ui.close();}
 });
 
-test('first visit asks for a path and choosing deals removes business signup',async()=>{
+test('first visit offers public student browsing and a recoverable sign-in path',async()=>{
  const ui=await app({role:'guest',audience:''});
  try{
   assert.ok(ui.find('Find local deals'));assert.ok(ui.find('List my business'));
   assert.equal(ui.document.querySelector('input'),null);
-  ui.click('Find local deals');await until(()=>ui.document.querySelector('input[placeholder="uniqname"]'));
+  ui.click('Find local deals');await until(()=>ui.find('Current bowl'));
   assert.equal(ui.window.localStorage.getItem('mlocal_audience'),null);
   assert.equal(ui.find('List my business'),undefined);
   assert.equal(ui.find('Existing restaurant sign-in'),undefined);
   assert.equal(ui.document.querySelector('input[placeholder="you@business.com"]'),null);
-  assert.equal(ui.find('Current bowl'),undefined,'deals need a signed-in account');
+  assert.ok(ui.find('Current bowl'),'public deals are useful before signup');
   assert.equal(ui.find('Business owner'),undefined);
-  ui.click('Back');await until(()=>ui.find('Find local deals'));
-  assert.equal(ui.find('Current bowl'),undefined,'deals need a signed-in account');
+  ui.click('Sign in');await until(()=>ui.document.querySelector('input[placeholder="uniqname"]'));
+  ui.click('Back');await until(()=>ui.find('Current bowl'));
+  ui.click('Choose account type');await until(()=>ui.find('Find local deals'));
+  assert.equal(ui.find('Current bowl'),undefined,'the welcome screen does not show app data');
   assert.deepEqual(ui.errors,[]);
  }finally{ui.close();}
 });
