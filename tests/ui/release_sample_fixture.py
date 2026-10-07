@@ -25,7 +25,7 @@ def validate_fixture_store():
             or any(path.is_symlink() or not path.is_dir()
                    or path.stat().st_uid != os.geteuid()
                    or path.stat().st_mode & 0o777 != 0o700 for path in owned_directories)
-            or any(os.environ.get(name) for name in ("JAC_DB_URL", "JAC_DATA_PATH", "JAC_DEV_SOURCE"))):
+            or any(os.environ.get(name) for name in ("JAC_DB_URL", "JAC_DATA_PATH", "JAC_DEV_SOURCE", "JACPATH"))):
         raise RuntimeError("Sample fixture refuses a non-disposable application store")
     return app
 
