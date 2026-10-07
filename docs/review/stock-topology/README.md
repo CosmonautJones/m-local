@@ -57,7 +57,7 @@ bash scripts/test-runtime-transaction.sh
 # Minimal native transaction/acknowledgement/process-death proof.
 bash scripts/test-stock-topology.sh --evidence docs/review/stock-topology/native-fault.json
 
-# Actual app and gateway simultaneous correctness proof.
+# Actual app/gateway simultaneous correctness and actual mutation faults.
 bash scripts/test-stock-topology-app.sh
 
 # Final integration proof also exercises the two-active-hold policy.
@@ -78,6 +78,18 @@ actual M-Local publication/claim paths, complete native 5xx followed by clean
 readback, and accepted-COMMIT/lost-response reconciliation using the application
 publication key. Minimal-node fault proof does not close those application gates.
 The current verdict is **not hosting certified**.
+
+The full-app runner now prepares a test-only entry in its disposable copy, wraps
+PgStore.commit with `stock_topology_app_hook.py`, and injects each actual app fault
+once only after the Offer or Redemption row has been flushed. The default runner
+includes rollback 57P01/40001/08006 and accepted-COMMIT acknowledgement loss on
+publication and claim, plus publication process death before/after COMMIT. It
+checks independent durable rows, clean readback after complete native errors,
+publication-key and claim/QR reconciliation, and gateway closure plus a restart
+of both processes after transport uncertainty. `--skip-faults` is available for a
+bounded normal-path diagnostic and cannot close the topology fault gate. These
+new cases are implemented but await the final combined-candidate run; the earlier
+20-check receipt does not cover them.
 
 A candidate constrained topology must have one public gateway serialization
 lane, one private backend, and no bypass ingress. Every upstream request,

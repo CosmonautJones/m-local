@@ -30,6 +30,7 @@ from zoneinfo import ZoneInfo
 
 from recovery_http import (Api, copy_application, digest, input_manifest,
                            private_dir, run_logged, scrub_environment, stable_json, stop_process)
+from stock_topology_app_faults import verify_actual_faults
 
 ROOT = Path(__file__).resolve().parents[2]
 NATIVE_PORT, GATEWAY_PORT = 18880, 18881
@@ -59,6 +60,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--require-hold-cap', action='store_true',
                         help='Require the integrated two-active-hold-per-student policy')
+    parser.add_argument('--skip-faults', action='store_true',
+                        help='Run only normal correctness races; cannot close the topology fault gate')
     args = parser.parse_args()
     if sys.platform != 'linux' or os.geteuid() == 0:
         raise RuntimeError('Run as an unprivileged WSL/Linux user')
@@ -81,6 +84,16 @@ def main():
     inputs = input_manifest(app)
     environment = scrub_environment(jac, cache, app / '.jac/onboarding')
     environment['MLOCAL_DEMO_MODE'] = '1'
+    instrumentation = {}
+    if not args.skip_faults:
+        entry = app / 'main.jac'
+        original = entry.read_bytes()
+        entry.write_bytes(original + b'\nimport from tests.integration.stock_topology_app_hook { install_fault_hook }\nwith entry { install_fault_hook(); }\n')
+        environment['STOCK_APP_PROOF_ROOT'] = str(workspace)
+        instrumentation = dict(test_only=True, kind='appended disposable entry imports one-shot PgStore.commit hook',
+            original_entry_sha256=hashlib.sha256(original).hexdigest(), instrumented_entry_sha256=digest(entry),
+            hook_sha256=digest(app / 'tests/integration/stock_topology_app_hook.py'),
+            installed_runtime_edited=False, private_session_methods_modified=False)
     from jaclang.data.pgembed import PgRuntime
     from jaclang.data.store import PgStore
     with socket.socket() as probe:
@@ -102,6 +115,8 @@ def main():
             'existing stock competing-writer retry defect remains; exclusive topology is mandatory',
             'final integrated candidate requires a fresh receipt'])
     receipt['configuration']['require_hold_cap'] = args.require_hold_cap
+    receipt['configuration']['actual_app_faults_required'] = not args.skip_faults
+    receipt['test_only_instrumentation'] = instrumentation
     native = 'http://127.0.0.1:' + str(NATIVE_PORT)
     gateway = 'http://127.0.0.1:' + str(GATEWAY_PORT)
     active_backend = active_gateway = None
@@ -167,6 +182,15 @@ def main():
             return observer.rows(query, params or {})
         finally:
             observer.close()
+
+    def restart_both():
+        nonlocal active_gateway, active_backend
+        stop_process(active_gateway)
+        active_gateway = None
+        stop_process(active_backend)
+        active_backend = None
+        start_backend()
+        start_gateway()
 
     def durable(record_id):
         observer = PgStore(conninfo=connection, auto_schema=False)
@@ -246,6 +270,9 @@ def main():
         persisted = durable(claim['claim_id']).props['archetype']
         check(persisted['status'] == 'redeemed' and persisted['redeemed_ts'] > 0,
               'independent database observer confirms durable redemption')
+        if not args.skip_faults:
+            verify_actual_faults(workspace, merchant, students[2], public, rows, durable,
+                                 restart_both, check, receipt)
         if args.require_hold_cap:
             cap_offers = []
             for index in range(8):
