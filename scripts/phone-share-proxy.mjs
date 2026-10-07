@@ -50,7 +50,7 @@ function routeLabel(path) {
   if(path==='/healthz')return 'readiness';
   if(path.startsWith('/function/')&&functions.has(path.slice(10)))return path.slice(10);
   if(path==='/'||path==='/index.html'||path==='/favicon.ico'||path==='/static/client.js'||
-      path==='/static/assets/manifest.webmanifest'||path.startsWith('/assets/')||path.startsWith('/static/assets/brand/')||path.startsWith('/static/photos/'))return 'asset';
+      path==='/static/assets/manifest.webmanifest'||/^\/static\/assets\/[\w-]+\.js$/.test(path)||path.startsWith('/assets/')||path.startsWith('/static/assets/brand/')||path.startsWith('/static/photos/'))return 'asset';
   return 'blocked';
 }
 
@@ -159,6 +159,7 @@ export function createShareProxy({upstreamHost='localhost',upstreamPort=8200,
     const allowed=read&&(path==='/'||path==='/index.html'||path==='/favicon.ico'||path==='/static/client.js'
       ||/^\/assets\/[\w-]+\.(js|css|png|svg|ico|webp|woff2?)$/.test(path)
       ||path==='/static/assets/manifest.webmanifest'
+      ||/^\/static\/assets\/[\w-]+\.js$/.test(path)
       ||/^\/static\/assets\/brand\/[\w-]+\.(png|ttf|svg)$/.test(path)
       ||/^\/static\/photos\/[a-f0-9]{32}\.jpg$/.test(path))
       ||req.method==='POST'&&path.startsWith('/function/')&&functions.has(path.slice(10));
