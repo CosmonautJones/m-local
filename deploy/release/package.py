@@ -18,6 +18,7 @@ import sqlite3
 import subprocess
 import tarfile
 import time
+import tomllib
 import urllib.request
 from urllib.parse import urlsplit, unquote
 import posixpath
@@ -647,6 +648,19 @@ def require_free_ports(config):
                 raise ReleaseError("Configured backend/gateway port is occupied; establish prior process termination before launch") from None
 
 
+def require_canonical_project_entry(app):
+    # No-target `jac run` reads this declaration from cwd. Do not let a changed
+    # entry select another source path/native namespace after migration.
+    try:
+        with (app / "jac.toml").open("rb") as stream:
+            project = tomllib.load(stream).get("project", {})
+        entry = project.get("entry-point") if isinstance(project, dict) else None
+    except (OSError, ValueError):
+        raise ReleaseError("The canonical project entry must be explicitly declared as main in valid jac.toml") from None
+    if entry != "main":
+        raise ReleaseError("The canonical project entry must be explicitly declared as main in valid jac.toml")
+
+
 def launch(package, config, evidence):
     package = Path(package)
     app = validate_config(config)
@@ -673,6 +687,7 @@ def launch(package, config, evidence):
     # Node/gateway provenance and explicit trusted edge are host capabilities.
     if environment.get("MLOCAL_INGRESS") not in {"render", "funnel", "restricted-edge"}:
         raise ReleaseError("Select the verified restricted HTTPS edge; production direct ingress is prohibited")
+    require_canonical_project_entry(app)
     lock = acquire_lock(config)
     processes = []
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
@@ -688,7 +703,10 @@ def launch(package, config, evidence):
             raise ReleaseError("Production configuration guard refused startup: " + (", ".join(names) or "required setting names unavailable; inspect protected guard check"))
         # Guard is also run by Jac onboarding import. Failure of either process
         # terminates both process groups; no restart while queue outcome is unknown.
-        processes.append(subprocess.Popen([str(package / "runtime/jac"), "run", str(app / "main.jac"), "--no-dev", "--host", "127.0.0.1", "--port", str(config["backend_port"])], cwd=app, env=environment, start_new_session=True))
+        # In official 0.37.23, options following a positional target become
+        # script arguments. Run the declared project from its canonical cwd so
+        # --no-dev/host/port stay CLI options and no default Vite server starts.
+        processes.append(subprocess.Popen([str(package / "runtime/jac"), "run", "--no-dev", "--host", "127.0.0.1", "--port", str(config["backend_port"])], cwd=app, env=environment, start_new_session=True))
         processes.append(subprocess.Popen(["node", str(app / "scripts/hosted-gateway.mjs")], cwd=app, env=environment, start_new_session=True))
         ready = False
         deadline = time.monotonic() + 300

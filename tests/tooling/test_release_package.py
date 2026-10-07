@@ -191,6 +191,8 @@ class ReleasePackageTests(unittest.TestCase):
 
     def test_launcher_accepts_preserved_native_base_override(self):
         app = self.root / "canonical"
+        app.mkdir()
+        (app / "jac.toml").write_text('[project]\nentry-point="main"\n')
         base = self.root / "state/existing-native-base"
         config = self.config(app)
         config["native_data_dir"] = str(base / ".jac/data")
@@ -206,6 +208,55 @@ class ReleasePackageTests(unittest.TestCase):
                                     "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
             with self.assertRaisesRegex(RuntimeError, "PASSED_SIGNING_POLICY"):
                 PACKAGE.launch(self.root / "package", config, {})
+
+    def test_launcher_preserves_production_flags_and_canonical_project_cwd(self):
+        app = self.root / "canonical"
+        app.mkdir()
+        (app / "jac.toml").write_text('[project]\nentry-point="main"\n')
+        config = self.config(app)
+        manifest = {"dependencies": {"archive": "libraries.tar"}, "build": {"artifact": "fixture.jab"},
+                    "runtime": {"jac": "fixture", "jacpython": "fixture"}}
+        with patch.object(PACKAGE, "verify_package", return_value=manifest), \
+             patch.object(PACKAGE, "require_launch_evidence"), \
+             patch.object(PACKAGE, "state_inventory"), \
+             patch.object(PACKAGE, "verify_installed_source"), \
+             patch.object(PACKAGE, "acquire_lock", return_value=99), \
+             patch.object(PACKAGE, "require_free_ports"), \
+             patch.object(PACKAGE.signal, "signal"), \
+             patch.object(PACKAGE.os, "close"), \
+             patch.object(PACKAGE.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), \
+             patch.object(PACKAGE.subprocess, "Popen", side_effect=RuntimeError("CAPTURE_NATIVE_COMMAND")) as spawn, \
+             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://localhost/disposable",
+                                    "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "CAPTURE_NATIVE_COMMAND"):
+                PACKAGE.launch(self.root / "package", config, {})
+            self.assertEqual(spawn.call_args.args[0],
+                             [str(self.root / "package/runtime/jac"), "run", "--no-dev", "--host",
+                              "127.0.0.1", "--port", str(config["backend_port"])])
+            self.assertEqual(spawn.call_args.kwargs["cwd"], app)
+            self.assertTrue(spawn.call_args.kwargs["start_new_session"])
+
+    def test_launcher_refuses_project_entry_drift_before_lock_or_children(self):
+        app = self.root / "canonical"
+        app.mkdir()
+        manifest = {"dependencies": {"archive": "libraries.tar"}, "build": {"artifact": "fixture.jab"},
+                    "runtime": {"jac": "fixture", "jacpython": "fixture"}}
+        for toml in ('[project]\nentry-point="other"\n', '[project]\n', 'malformed SECRET'):
+            with self.subTest(toml_index=len(toml)):
+                (app / "jac.toml").write_text(toml)
+                with patch.object(PACKAGE, "verify_package", return_value=manifest), \
+                     patch.object(PACKAGE, "require_launch_evidence"), \
+                     patch.object(PACKAGE, "state_inventory"), \
+                     patch.object(PACKAGE, "verify_installed_source"), \
+                     patch.object(PACKAGE, "acquire_lock", side_effect=RuntimeError("UNEXPECTED_LOCK")) as lock, \
+                     patch.object(PACKAGE.subprocess, "Popen") as spawn, \
+                     patch.dict(os.environ, {"JAC_DB_URL": "postgresql://localhost/disposable",
+                                            "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
+                    with self.assertRaisesRegex(ValueError, "canonical project entry") as caught:
+                        PACKAGE.launch(self.root / "package", self.config(app), {})
+                    self.assertNotIn("SECRET", str(caught.exception))
+                    lock.assert_not_called()
+                    spawn.assert_not_called()
 
     def test_launcher_rejects_signing_directory_misused_as_native_base(self):
         app = self.root / "canonical"

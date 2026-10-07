@@ -148,6 +148,14 @@ official binary digests, artifact digest and dependency declarations. Any
 modified/missing/injected package file fails verification. Do not publish the
 private recovery set with this public engineering artifact.
 
+The backend starts with official `jac run --no-dev --host 127.0.0.1 --port
+BACKEND_PORT` from the recorded canonical app directory. The launcher requires
+`[project] entry-point = "main"` before acquiring its lock or starting children.
+Do not insert a positional filename before those flags: official 0.37.23 treats
+the following options as script arguments, allowing default development startup.
+Meaningful native readiness at the configured port and absence of default
+development listeners/children must be verified on the actual packaged candidate.
+
 ## Configuration and preflight
 
 Copy `deploy/release/config.example.json` into a protected operator directory
