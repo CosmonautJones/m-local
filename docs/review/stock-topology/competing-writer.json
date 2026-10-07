@@ -1,0 +1,16 @@
+{
+  "runtime": "0.37.23",
+  "session_source": "/home/runner/_work/jac/jac/.zig-cache/o/821846603e426eb20d0a06bdbd8b744f/payload.tar.zst.work/site/jaclang/server/impl/session.impl.jac",
+  "database": "disposable PostgreSQL",
+  "original_version": 0,
+  "competitor": {
+    "competitor_committed": true,
+    "version": 1
+  },
+  "commit_calls": 2,
+  "commit_error": "",
+  "final_name": "Stale request value",
+  "final_version": 2,
+  "after_abort": "Stale request value",
+  "lost_competing_write": true
+}

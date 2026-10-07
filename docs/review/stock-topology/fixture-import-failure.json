@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "verdict": "INCOMPLETE",
+  "candidate_sha": "c581d142a08f733e0ebc0324ff6987a9d12c8f8b",
+  "version": "jac 0.37.23  (Linux x86_64)",
+  "jac_sha256": "2c3c697616b08516caf01704571e7e7020f4b294cd2bef7f04e8ef1ceec9d6ad",
+  "jacpython_sha256": "198225fb91707f48461f3fec1684d444ab0fd7b5a1e0913f0a0a8f11c9d02542",
+  "source_override": false,
+  "fixture_manifest": {
+    "jac.toml": "ac9b1ec42fbe4984d6eab121b7ba6adef26f422098925c10e9469db6554a379b",
+    "main.jac": "e18f69ac4f56632a6c275f7ada3040e66b6fc1a3aa940b0053fb09528359d24e",
+    "services/models.jac": "5ec51be2992d1a9ca5a96165e781fd6c0ff1d073011caa333b1707808c813227",
+    "stock_topology_hook.py": "f00f90344ea432f577e03859d15d5676cc1677428f943c68908c40a5422995e6",
+    "stock_topology_hook.pyi": "4b1b5b9cbcdd0c92397fcbfc59d4a0f1262e60f0fa6385388800d78f931913d7"
+  },
+  "workspace": "/var/tmp/m-local-stock-topology.t085p5ko",
+  "topology": "one native API; requests issued serially; independent read-only PgStore observer",
+  "instrumentation": "test-only PgStore.commit hook; real ROLLBACK or accepted COMMIT then PgWireError",
+  "cases": [],
+  "limitations": [
+    "minimal native HTTP fixture, not full-app/ingress certification",
+    "not sustained capacity, SMTP, deployment, or scaling evidence"
+  ],
+  "failure_type": "RuntimeError",
+  "failure": "Native proof API exited; inspect private API log",
+  "cleanup": {
+    "owned_api_groups_stopped": true,
+    "private_postgres_stopped": true
+  },
+  "events": []
+}
