@@ -18,10 +18,13 @@ def rpc(api, function, **params):
         with urllib.request.urlopen(request, timeout=30) as response:
             return response.status, json.load(response)
     except urllib.error.HTTPError as error:
+        raw = error.read(65537)
         try:
-            envelope = json.load(error)
-        except (ValueError, OSError):
-            envelope = {'ok': False, 'non_json_error': True}
+            envelope = json.loads(raw)
+        except (ValueError, UnicodeError):
+            envelope = {'ok': False, 'non_json_error': True,
+                        'error_content_type': error.headers.get('Content-Type', '').split(';', 1)[0].strip(),
+                        'error_text': raw.decode('utf-8', errors='replace') if len(raw) <= 65536 else None}
         return error.code, envelope
     except (OSError, urllib.error.URLError):
         return 0, {'ok': False, 'transport_lost': True}
@@ -32,16 +35,31 @@ def result(envelope):
     return data.get('result') if isinstance(data, dict) else None
 
 
-def lost_mutation_response(status, envelope):
-    """The active socket failure is 502; the closed lane refuses later work with 503."""
+def ingress_events(workspace):
+    events = []
+    for log in sorted(workspace.glob('gateway-*.log'), key=lambda p: int(p.stem.split('-')[-1])):
+        for line in log.read_text(errors='replace').splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(event, dict) and event.get('kind') == 'mlocal_ingress_failure':
+                events.append(event)
+    return events
+
+
+def lost_mutation_response(status, envelope, events, operation):
+    """Match fixed plaintext failure plus a fresh, redacted gateway classification."""
     if envelope.get('ok') is not False:
         return False
     if status == 0:
         return envelope.get('transport_lost') is True
-    error = envelope.get('error')
-    code = error.get('code') if isinstance(error, dict) else None
-    return ((status == 502 and code == 'UPSTREAM_FAILURE') or
-            (status == 503 and code == 'SERIALIZATION_CLOSED'))
+    code = {502: 'UPSTREAM_FAILURE', 503: 'SERIALIZATION_CLOSED'}.get(status)
+    message = 'M-Local is starting or unavailable. Ask the host to check the launcher, then reload.'
+    return (code is not None and envelope.get('non_json_error') is True and
+            envelope.get('error_content_type') == 'text/plain' and envelope.get('error_text') == message and
+            any(event.get('code') == code and event.get('route') == operation and
+                event.get('status') == status for event in events))
 
 
 def verify_actual_faults(workspace, merchant, student, public, rows, durable,
@@ -85,6 +103,7 @@ def verify_actual_faults(workspace, merchant, student, public, rows, durable,
     for mode, sqlstate in all_modes:
         title = 'Stock actual publish fault ' + secrets.token_hex(8)
         post = offer(title)
+        event_offset = len(ingress_events(workspace))
         control = arm('Offer', 'title', title, mode, sqlstate)
         status, envelope = rpc(merchant, 'save_offer', **post)
         check(not control.exists(), 'actual publication flush consumes its one-shot fault')
@@ -93,12 +112,16 @@ def verify_actual_faults(workspace, merchant, student, public, rows, durable,
                    response_ok=envelope.get('ok'), durable_offers_after_response=committed)
         recorded.append(row)
         observed_fault(mode, row)
+        row['gateway_failure_events'] = ingress_events(workspace)[event_offset:]
         if mode.startswith('process_death'):
-            check(lost_mutation_response(status, envelope), 'actual native process death loses the publication response')
+            check(lost_mutation_response(status, envelope, row['gateway_failure_events'], 'save_offer'), 'actual native process death loses the publication response')
             check(committed == (1 if mode == 'process_death_after_commit' else 0),
                   'independent database observes correct publication before/after process death')
-            closed_status, _ = rpc(public, 'home_feed')
-            check(closed_status == 503, 'uncertain native process death closes the serialized ingress')
+            closed_status, closed_envelope = rpc(public, 'home_feed')
+            check(closed_status == 503 and lost_mutation_response(closed_status, closed_envelope,
+                  ingress_events(workspace)[event_offset:], 'home_feed'),
+                  'uncertain native process death closes the serialized ingress')
+            row['gateway_failure_events'] = ingress_events(workspace)[event_offset:]
             restart_both()
         else:
             check(status in (200, 409, 500), 'actual publication fault returns a complete bounded native response')
@@ -133,6 +156,7 @@ def verify_actual_faults(workspace, merchant, student, public, rows, durable,
         made = merchant.call('save_offer', **offer(title))
         check(made.get('ok'), 'created a distinct actual claim fault fixture offer')
         offer_id = made['code']
+        event_offset = len(ingress_events(workspace))
         control = arm('Redemption', 'offer_title_snapshot', title, mode, sqlstate)
         status, envelope = rpc(student, 'claim_offer', offer_id=offer_id)
         check(not control.exists(), 'actual claim flush consumes its one-shot fault')
@@ -141,12 +165,16 @@ def verify_actual_faults(workspace, merchant, student, public, rows, durable,
                    response_ok=envelope.get('ok'), durable_claims_after_response=committed)
         recorded.append(row)
         observed_fault(mode, row)
+        row['gateway_failure_events'] = ingress_events(workspace)[event_offset:]
         if mode.startswith('process_death'):
-            check(lost_mutation_response(status, envelope), 'actual native process death loses the claim response')
+            check(lost_mutation_response(status, envelope, row['gateway_failure_events'], 'claim_offer'), 'actual native process death loses the claim response')
             check(committed == (1 if mode == 'process_death_after_commit' else 0),
                   'independent database observes correct held claim before/after process death')
-            check(rpc(public, 'home_feed')[0] == 503,
+            closed_status, closed_envelope = rpc(public, 'home_feed')
+            check(closed_status == 503 and lost_mutation_response(closed_status, closed_envelope,
+                  ingress_events(workspace)[event_offset:], 'home_feed'),
                   'uncertain claim process death closes the serialized ingress')
+            row['gateway_failure_events'] = ingress_events(workspace)[event_offset:]
             restart_both()
         else:
             check(status in (200, 409, 500), 'actual claim fault returns a complete bounded native response')
@@ -195,6 +223,7 @@ def verify_actual_faults(workspace, merchant, student, public, rows, durable,
         claim_id = held['claim_id']
         before = durable(claim_id).props['archetype']
         check(before['status'] == 'claimed', 'independent database observes original held redemption status')
+        event_offset = len(ingress_events(workspace))
         control = arm('Redemption', 'status', 'redeemed', mode, sqlstate, target_id=claim_id)
         status, envelope = rpc(merchant, 'redeem_claim', qr_payload=held['qr_payload'])
         check(not control.exists(), 'actual redeemed-status flush consumes its one-shot targeted fault')
@@ -204,12 +233,16 @@ def verify_actual_faults(workspace, merchant, student, public, rows, durable,
                    claim_id=claim_id, durable_status_after_response=stored['status'])
         recorded.append(row)
         observed_fault(mode, row)
+        row['gateway_failure_events'] = ingress_events(workspace)[event_offset:]
         if mode.startswith('process_death'):
-            check(lost_mutation_response(status, envelope), 'actual native process death loses the redemption response')
+            check(lost_mutation_response(status, envelope, row['gateway_failure_events'], 'redeem_claim'), 'actual native process death loses the redemption response')
             check(stored['status'] == ('redeemed' if mode == 'process_death_after_commit' else 'claimed'),
                   'independent database observes correct redemption before/after process death')
-            check(rpc(public, 'home_feed')[0] == 503,
+            closed_status, closed_envelope = rpc(public, 'home_feed')
+            check(closed_status == 503 and lost_mutation_response(closed_status, closed_envelope,
+                  ingress_events(workspace)[event_offset:], 'home_feed'),
                   'uncertain redemption process death closes the serialized ingress')
+            row['gateway_failure_events'] = ingress_events(workspace)[event_offset:]
             restart_both()
         else:
             check(status in (200, 409, 500), 'actual redemption fault returns a complete bounded native response')

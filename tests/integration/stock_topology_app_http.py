@@ -120,7 +120,7 @@ def main():
         environment.pop(name, None)
     environment.update(MLOCAL_ENV='development', MLOCAL_DEMO_MODE='1',
                        MLOCAL_SHOW_SAMPLES='1', MLOCAL_DEMO_COMPANIES='0',
-                       MLOCAL_HOSTED_DATASET='0')
+                       MLOCAL_HOSTED_DATASET='0', MLOCAL_INGRESS_EVENT_LOG='stderr')
     instrumentation = {}
     if not args.skip_faults:
         entry = app / 'main.jac'
@@ -151,7 +151,7 @@ def main():
         configuration=dict(native_port=NATIVE_PORT, gateway_port=GATEWAY_PORT,
             max_queued_requests=64, queue_wait_ms=10000, backend_workers='stock default',
             isolated_native_signing_state=True, development_fixture=True,
-            fictional_samples_enabled=True),
+            fictional_samples_enabled=True, gateway_observer_events=True),
         limitations=['local correctness under bounded50-client bursts, not capacity certification',
             'no SMTP/physical-device/hosted or multi-host proof',
             'existing stock competing-writer retry defect remains; exclusive topology is mandatory',
