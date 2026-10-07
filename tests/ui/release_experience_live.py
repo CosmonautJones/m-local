@@ -55,6 +55,93 @@ def scanner_chunk(url):
     return path.startswith(("/assets/", "/static/assets/")) and bool(re.search(r"/assets/(?:assets/)?index-[A-Za-z0-9_-]+\.js$", path))
 
 
+def capture_qr_controls(browser, app, workspace, payload, actual_svg):
+    """Private controls use the same payload, size and library as the product."""
+    renderer = "const fs=require('node:fs'),{createRequire}=require('node:module');const pkg=createRequire(process.argv[1]+'/.jac/client/configs/package.json');const React=pkg('react'),{renderToStaticMarkup}=pkg('react-dom/server'),{QRCodeSVG}=pkg('qrcode.react');process.stdout.write(renderToStaticMarkup(React.createElement(QRCodeSVG,{value:fs.readFileSync(0,'utf8'),size:240,level:'M',marginSize:4,bgColor:'#FFFFFF',fgColor:'#000000'})));"
+    with (workspace / "qr-control-node.log").open("ab") as log:
+        independent_svg = subprocess.check_output(["node", "-e", renderer, str(app)], input=payload.encode(), stderr=log, timeout=10).decode()
+    (workspace / "independent-qr.svg").write_text(independent_svg)
+    control = browser.new_context(viewport={"width": 390, "height": 844})
+    try:
+        page = control.new_page()
+        for name, svg in (("actual-svg-isolated.png", actual_svg), ("independent-qr-240.png", independent_svg)):
+            page.set_content(svg)
+            page.locator("svg").screenshot(path=str(workspace / name))
+    finally:
+        control.close()
+
+
+def qr_diagnostic_summary(workspace, merchant):
+    """Export fixed categories and measurements; raw frames/logs stay private."""
+    messages = {
+        "No readable claim QR was found": "image_decode_failed",
+        "This is not an M-Local claim QR": "wrong_payload_shape",
+        "Could not check the claim": "native_resolution_transport_failed",
+        "The QR scanner could not load": "module_load_failed",
+        "Reading the QR image": "image_decode_pending",
+        "Checking the claim": "native_resolution_pending",
+    }
+    state = merchant.get("state_text", "")
+    summary = {"state_category": next((category for text, category in messages.items() if text in state), "unclassified"),
+        "page_error_count": len(merchant["errors"]), "csp_error_count": len(merchant["csp"]),
+        "assets": [{"path": row["path"], "status": row["status"], "javascript": "javascript" in row["content_type"]}
+                   for row in merchant["assets"] if re.fullmatch(r"/(?:static/(?:assets/)?|assets/)[A-Za-z0-9_.-]+\.js", row["path"])],
+        "resolve": [{"status": row["status"], "ok": row.get("ok") if isinstance(row.get("ok"), bool) else None} for row in merchant["resolve"]],
+        "merchant_visibility": merchant.get("merchant_visibility") if merchant.get("merchant_visibility") in {"visible", "hidden"} else None,
+        "student_visibility": merchant.get("student_visibility") if merchant.get("student_visibility") in {"visible", "hidden"} else None}
+    if summary["state_category"] == "unclassified" and any(row.get("ok") is False for row in merchant["resolve"]):
+        summary["state_category"] = "native_resolution_refused"
+    if (workspace / "qr-layout.json").exists():
+        summary["layout"] = json.loads((workspace / "qr-layout.json").read_text())
+    images = {}
+    from PIL import Image
+    for name in ("claim-qr.png", "actual-svg-isolated.png", "independent-qr-240.png"):
+        path = workspace / name
+        if not path.exists():
+            continue
+        image = Image.open(path).convert("RGB")
+        gray = image.convert("L")
+        (workspace / (name + ".gray")).write_bytes(gray.tobytes())
+        colors = image.getcolors(image.width * image.height)
+        regions = {"top": (0, 0, image.width, 20), "bottom": (0, image.height - 20, image.width, image.height),
+                   "left": (0, 0, 20, image.height), "right": (image.width - 20, 0, image.width, image.height)}
+        edges = {}
+        for edge, box in regions.items():
+            strip = gray.crop(box)
+            edges[edge] = round(sum(value > 245 for value in strip.tobytes()) / (strip.width * strip.height), 4)
+        images[name] = {"width": image.width, "height": image.height,
+                       "non_gray_pixels": sum(count for count, rgb in colors if max(rgb) - min(rgb) > 8),
+                       "quiet_edge_white_fractions": edges}
+    summary["images"] = images
+    if images:
+        (workspace / "qr-image-metadata-all.json").write_text(json.dumps(images))
+        reader = r"""
+const fs=require('node:fs'),{createRequire}=require('node:module'),{createHash}=require('node:crypto');
+const root=process.argv[1],pkg=createRequire(root+'/app/.jac/client/configs/package.json');
+const {RGBLuminanceSource,BinaryBitmap,HybridBinarizer,QRCodeReader}=pkg('@zxing/library');
+const images=JSON.parse(fs.readFileSync(root+'/qr-image-metadata-all.json','utf8'));
+const expected=JSON.parse(fs.readFileSync(root+'/qr-payload-proof.json','utf8')).payload_sha256,results={};
+for(const [name,meta] of Object.entries(images)){
+ const pixels=new Uint8ClampedArray(fs.readFileSync(root+'/'+name+'.gray'));
+ try{const value=new QRCodeReader().decode(new BinaryBitmap(new HybridBinarizer(new RGBLuminanceSource(pixels,meta.width,meta.height)))).getText();
+ results[name]={decoded:true,is_native_claim_payload:/^mlocal:v1:[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(value),matches_expected_payload:createHash('sha256').update(value).digest('hex')===expected};}
+ catch{results[name]={decoded:false};}
+}
+process.stdout.write(JSON.stringify(results));
+"""
+        with (workspace / "qr-readability-node.log").open("ab") as log:
+            summary["readability"] = json.loads(subprocess.check_output(["node", "-e", reader, str(workspace)], stderr=log, timeout=10))
+    if (workspace / "actual-qr.svg").exists() and (workspace / "independent-qr.svg").exists():
+        from xml.etree import ElementTree
+        actual = ElementTree.fromstring((workspace / "actual-qr.svg").read_text())
+        control = ElementTree.fromstring((workspace / "independent-qr.svg").read_text())
+        def matrix(svg):
+            return [element.get("d") for element in svg.iter() if element.tag.rsplit("}", 1)[-1] == "path" and element.get("fill") == "#000000"]
+        summary["matrix_equal"] = bool(matrix(actual)) and matrix(actual) == matrix(control)
+        summary["viewbox_equal"] = actual.get("viewBox") == control.get("viewBox")
+    return summary
+
+
 def stop_private_postgres(workspace):
     """Stop the embedded daemon only after all owned API writers are stopped."""
     workspace = workspace.resolve()
@@ -160,6 +247,7 @@ def main():
     phase = "install"
     completed = False
     redemption_transition_ms = None
+    merchant_diagnostic = {"assets": [], "resolve": [], "errors": [], "csp": []}
     student_scanner_requests = []
     scanner_chunk_responses = []
     started = time.monotonic()
@@ -262,8 +350,27 @@ def main():
                 qr_path = workspace / "claim-qr.png"
                 page.locator('[data-testid="claim-qr"]').screenshot(path=str(qr_path))
                 check(not student_scanner_requests, "actual student QR display does not request the merchant scanner chunk")
+                actual_svg = page.locator('[data-testid="claim-qr"]').evaluate("node => node.outerHTML")
+                (workspace / "actual-qr.svg").write_text(actual_svg)
+                (workspace / "qr-payload-proof.json").write_text(json.dumps({"payload_sha256": hashlib.sha256(detail["my_qr_payload"].encode()).hexdigest(), "size": 240, "margin": 4}))
+                layout = page.locator('[data-testid="claim-qr"]').evaluate("node => {const r=node.getBoundingClientRect();let blocked=0;for(const x of [.05,.5,.95])for(const y of [.05,.5,.95]){const top=document.elementFromPoint(r.x+r.width*x,r.y+r.height*y);if(!top||!node.contains(top))blocked++;}return {x:r.x,y:r.y,width:r.width,height:r.height,viewport_width:innerWidth,viewport_height:innerHeight,within_viewport:r.x>=0&&r.y>=0&&r.right<=innerWidth&&r.bottom<=innerHeight,occluded_sample_points:blocked};}")
+                (workspace / "qr-layout.json").write_text(json.dumps(layout))
                 merchant_context = browser.new_context(viewport={"width": 390, "height": 844}, reduced_motion="reduce")
                 merchant_page = merchant_context.new_page()
+                merchant_page.on("pageerror", lambda error: merchant_diagnostic["errors"].append(str(error)))
+                merchant_page.on("console", lambda message: merchant_diagnostic["csp"].append(message.text) if "Content Security Policy" in message.text else None)
+                def merchant_response(response):
+                    path = urlsplit(response.url).path
+                    if path.endswith(".js"):
+                        merchant_diagnostic["assets"].append({"path": path, "status": response.status, "content_type": response.headers.get("content-type", "")})
+                    if path == "/function/resolve_claim":
+                        try:
+                            envelope = response.json()
+                            body = envelope.get("data", {}).get("result", {}) if envelope.get("ok") else {"ok": False}
+                            merchant_diagnostic["resolve"].append({"status": response.status, "ok": body.get("ok"), "message": body.get("message", "")})
+                        except Exception as error:
+                            merchant_diagnostic["resolve"].append({"status": response.status, "error_type": type(error).__name__})
+                merchant_page.on("response", merchant_response)
                 merchant_page.goto(origin)
                 merchant_page.evaluate("token => {localStorage.setItem('jac_token',token);localStorage.setItem('mlocal_audience','business');localStorage.removeItem('mlocal_public_offer_intent');}", merchant["token"])
                 merchant_page.reload()
@@ -276,7 +383,18 @@ def main():
                 check(scanner_chunk_responses and all(row["status"] == 200 and "javascript" in row["content_type"] for row in scanner_chunk_responses),
                       "actual merchant scanner downloads its emitted JavaScript chunk successfully")
                 image_input.set_input_files(str(qr_path))
-                expect(merchant_page.get_by_role("button", name="Confirm redemption", exact=True)).to_be_visible()
+                try:
+                    expect(merchant_page.get_by_role("button", name="Confirm redemption", exact=True)).to_be_visible()
+                except AssertionError:
+                    merchant_diagnostic["state_text"] = merchant_page.locator('section[aria-label="Scan a student claim"]').inner_text()
+                    merchant_diagnostic["merchant_visibility"] = merchant_page.evaluate("document.visibilityState")
+                    merchant_diagnostic["student_visibility"] = page.evaluate("document.visibilityState")
+                    (workspace / "scanner-diagnostic.json").write_text(json.dumps(merchant_diagnostic, indent=2) + "\n")
+                    try:
+                        capture_qr_controls(browser, app, workspace, detail["my_qr_payload"], actual_svg)
+                    except Exception as diagnostic_error:
+                        (workspace / "control-generation-error.txt").write_text(type(diagnostic_error).__name__)
+                    raise
                 check(student.call("get_offer", offer_id=sample["id"])["my_status"] == "claimed", "local QR image decoding previews native claim without redeeming")
                 redemption_started = time.monotonic()
                 merchant_page.get_by_role("button", name="Confirm redemption", exact=True).click()
@@ -379,9 +497,15 @@ def main():
         for process in reversed(processes):
             stop_process(process)
         stop_private_postgres(workspace)
+        try:
+            qr_diagnostics = qr_diagnostic_summary(workspace, merchant_diagnostic)
+        except Exception as diagnostic_error:
+            (workspace / "diagnostic-summary-error.txt").write_text(type(diagnostic_error).__name__)
+            qr_diagnostics = {"status": "diagnostic_summary_unavailable"}
         receipt = {**binding, "status": "passed" if completed else "failed", "checks": checks, "passed": len(checks), "phase": phase,
                    "seconds": round(time.monotonic() - started, 2), "redemption_transition_ms": redemption_transition_ms,
                    "student_scanner_requests": student_scanner_requests, "scanner_chunk_responses": scanner_chunk_responses,
+                   "qr_diagnostics": qr_diagnostics,
                    "owned_processes_stopped": True,
                    "private_postgres_stopped": True}
         (args.evidence / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
