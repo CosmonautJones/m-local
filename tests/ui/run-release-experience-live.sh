@@ -28,7 +28,7 @@ python="$fixture_root/source/.jac/venv/bin/python"
 npm install --prefix "$fixture_root/node" --no-audit --no-fund axe-core@4.10.3
 browser_packages=$("$python" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')
 export PYTHONPATH="$browser_packages"
-exec bash scripts/python.sh -c 'import runpy,sys; script=sys.argv.pop(1); sys.argv[0]=script; runpy.run_path(script,run_name="__main__")' \
-  "$fixture_root/source/tests/ui/release_experience_live.py" --source "$fixture_root/source" --source-ref "$candidate" \
+exec bash scripts/python.sh -c 'import runpy,sys; sys.path.insert(0,sys.argv.pop(1)); script=sys.argv.pop(1); sys.argv[0]=script; runpy.run_path(script,run_name="__main__")' \
+  "$browser_packages" "$fixture_root/source/tests/ui/release_experience_live.py" --source "$fixture_root/source" --source-ref "$candidate" \
   --gateway-repo "$repo" --gateway-ref "$candidate" --evidence "$evidence" --base-port "$base_port" \
   --axe "$fixture_root/node/node_modules/axe-core/axe.min.js"

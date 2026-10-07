@@ -297,6 +297,62 @@ test "explicit sample visibility overrides demo fallback and hosted fixtures" {
 }
 
 
+test "disabled sample taste responses preserve stored favorites and restore them when enabled" {
+    _ensure_seed();
+    p = _reset();
+    now = time.time();
+    demo = Restaurant(slug="taste-hidden-sample", name="Hidden taste sample", is_demo=True);
+    real = Restaurant(slug="taste-real-favorite", name="Real taste favorite", is_demo=False);
+    root.shared ++> demo;
+    root.shared ++> real;
+    with patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "1"}) {
+        assert toggle_favorite(slug=demo.slug).ok;
+        assert toggle_favorite(slug=real.slug).ok;
+    }
+    p +>:Keeps():+> Favorite(slug="preserved-unlisted-favorite", since_ts=now + 1);
+    original = _favorite_slugs(p);
+    with patch.dict(taste_choices.__globals__, {"_actor_id": lambda () -> str { return "taste-owner"; }}) {
+        with patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "0", "MLOCAL_DEMO_MODE": "1", "MLOCAL_HOSTED_DATASET": "1"}) {
+            choices = taste_choices();
+            saved = save_taste("pizza", "", "");
+            refused = toggle_favorite(slug=demo.slug);
+            for response in [choices, saved, refused] {
+                assert demo.slug not in response.favorites, "Disabled sample slugs must not leak through taste responses";
+                assert real.slug in response.favorites and "preserved-unlisted-favorite" in response.favorites;
+            }
+            assert not refused.ok;
+            assert _favorite_slugs(p) == original, "Visibility must not delete or alter saved favorite marks";
+        }
+        with patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "1", "MLOCAL_DEMO_MODE": "0"}) {
+            assert taste_choices().favorites == original, "Re-enabling samples must restore their stored favorites";
+        }
+    }
+}
+
+
+test "disabled sample offer lookup cannot toggle a real parent favorite" {
+    _ensure_seed();
+    p = _reset();
+    now = time.time();
+    real = Restaurant(slug="favorite-real-parent-sample-child", name="Real parent", is_demo=False);
+    demo = Restaurant(slug="favorite-sample-parent-unmarked-child", name="Sample parent", is_demo=True);
+    root.shared ++> real;
+    root.shared ++> demo;
+    sample = Offer(title="Hidden sample child", is_demo=True, start_ts=now - 60, end_ts=now + 3600, quantity=3);
+    unmarked = Offer(title="Unmarked child", is_demo=False, start_ts=now - 60, end_ts=now + 3600, quantity=3);
+    real +>:Publishes():+> sample;
+    demo +>:Publishes():+> unmarked;
+    with patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "0", "MLOCAL_DEMO_MODE": "1", "MLOCAL_HOSTED_DATASET": "1"}) {
+        assert not toggle_favorite(offer_id=jid(sample)).ok, "Hidden sample offers cannot create favorites through their real parent";
+        assert not toggle_favorite(offer_id=jid(unmarked)).ok, "A sample parent hides even an unmarked child";
+        assert _favorite_slugs(p) == [];
+        assert toggle_favorite(slug=real.slug).ok, "The legitimate real parent remains directly favoriteable";
+        assert not toggle_favorite(offer_id=jid(sample)).ok;
+        assert _favorite_slugs(p) == [real.slug], "Hidden offer requests must also preserve an existing real favorite";
+    }
+}
+
+
 def _claim_fixture(slug: str, now: float) -> Offer {
     r = Restaurant(slug=slug, name="Claim visibility cafe", cuisine="Cafe", source="test-fixture");
     root.shared ++> r;
