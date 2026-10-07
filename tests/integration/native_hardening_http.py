@@ -150,11 +150,12 @@ def main():
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, interrupted)
 
-    def start(env):
+    def start(env, guarded=False):
         nonlocal active
         log_path = workspace / ('api-' + str(len(processes)) + '.log')
         with log_path.open('wb') as log:
-            active = subprocess.Popen([str(jac), 'run', '--no-dev', '--no-client',
+            command = (['bash', 'scripts/production-start.sh'] if guarded else [str(jac), 'run'])
+            active = subprocess.Popen(command + ['--no-dev', '--no-client',
                 '--host', '127.0.0.1', '--port', str(port)], cwd=app, env=env,
                 stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         processes.append(active)
@@ -185,15 +186,17 @@ def main():
             probe.settimeout(.5)
             return probe.connect_ex(('127.0.0.1', port)) != 0
 
-    def reject_start(env, label):
-        process, log_path = start(env)
+    def reject_start(env, label, settings=('MLOCAL_DURABLE_ROOT',), guarded=False):
+        process, log_path = start(env, guarded=guarded)
         code = process.wait(timeout=300)
         check(code != 0, label + ' actual server process exits unsuccessfully')
+        if guarded:
+            check(code == 78, label + ' exits with the configuration refusal status before native startup')
         check(not process_group_alive(process) and not_listening(), label + ' leaves no owned serving child or listener')
         log = log_path.read_text(errors='replace')
-        check('M-Local refuses to start' in log and 'MLOCAL_DURABLE_ROOT' in log,
+        check('M-Local refuses to start' in log and all(name in log for name in settings),
               label + ' reports actionable setting names')
-        check(not any(value in log for value in ('hardening-secret-path', 'fixture-db-password', 'hardening-secret-smtp')),
+        check(not any(value in log for value in ('hardening-secret-path', 'fixture-db-password', 'hardening-secret-smtp', 'fixture-signing-config-secret')),
               label + ' does not disclose supplied secret values')
 
     started = time.monotonic()
@@ -208,9 +211,9 @@ def main():
                    'MLOCAL_SMTP_PASSWORD': 'hardening-secret-smtp'}
         reject_start(invalid, 'invalid production configuration')
         PHASE = 'development native startup'
-        start(environment)
+        start(environment, guarded=True)
         anonymous = ready()
-        check(True, 'development server reaches authenticated-session and catalog readiness')
+        check(True, 'development preflight entry reaches native session and catalog readiness')
         with SmtpSink(workspace / 'smtp') as sink:
             environment.update(MLOCAL_SMTP_HOST='127.0.0.1', MLOCAL_SMTP_PORT=str(sink.port),
                 MLOCAL_SMTP_FROM=sink.sender, MLOCAL_SMTP_USERNAME=sink.username,
@@ -351,6 +354,40 @@ def main():
             check(Api(origin, original_token).call('current_session')['actor_id'] == actor,
                   'valid production startup preserves the preexisting native token and root')
             stop_process(active)
+            original_signing_bytes = (durable / 'native/jwt_secret').read_bytes()
+            for name, value in (
+                ('JAC_DATA_PATH', str(app) + ' '),
+                ('MLOCAL_ONBOARDING_DIR', str(onboarding) + ' '),
+                ('MLOCAL_DURABLE_ROOT', ' ' + str(durable)),
+            ):
+                reject_start({**production, name: value}, 'preflight rejects ambiguous ' + name + ' path', (name,), guarded=True)
+            check((durable / 'native/jwt_secret').read_bytes() == original_signing_bytes,
+                  'ambiguous path refusal preserves original native signing key')
+            check(not (Path(str(app) + ' ') / '.jac/data/jwt_secret').exists()
+                  and not Path(str(onboarding) + ' ').exists(),
+                  'ambiguous path refusal creates no replacement signing or onboarding store')
+            configuration = app / 'jac.toml'
+            original_configuration = configuration.read_bytes()
+            try:
+                configuration.write_bytes(original_configuration + b'\n[serve.auth]\nalgorithm = " HS256 "\n')
+                reject_start(production, 'raw TOML signing algorithm', ('JAC_SERVE_AUTH_ALGORITHM',))
+                configuration.write_bytes(original_configuration + b'\n[serve.auth]\nsecret = "fixture-signing-config-secret"\n')
+                reject_start({**production, 'JAC_SERVE_AUTH_SECRET': '   '},
+                             'environment signing fallback mismatch', ('JAC_SERVE_AUTH_SECRET',))
+                configuration.write_bytes(original_configuration + b'\n[serve.auth]\nsecret = " ' + original_signing_bytes.strip() + b' "\n')
+                start({**production, 'JAC_SERVE_AUTH_SECRET': '   ', 'JAC_SERVE_AUTH_ALGORITHM': '   '}, guarded=True)
+                ready()
+                with urllib.request.urlopen(origin + '/healthz/ready', timeout=5) as response:
+                    check(response.status == 200 and json.load(response).get('ready') is True,
+                          'supported preflight reaches canonical native JSON readiness')
+                check(True, 'supported preflight reaches real native readiness with official environment fallback')
+                check(Api(origin, original_token).call('current_session')['actor_id'] == actor,
+                      'supported preflight preserves returning token and root with official signing fallback')
+                check((durable / 'native/jwt_secret').read_bytes() == original_signing_bytes,
+                      'supported preflight preserves the original signing file after native initialization')
+                stop_process(active)
+            finally:
+                configuration.write_bytes(original_configuration)
             no_mount = {**production, 'MLOCAL_DURABLE_ROOT': str(workspace)}
             reject_start(no_mount, 'writable unmounted production state')
             deliveries = sink.count()

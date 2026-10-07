@@ -98,9 +98,18 @@ def validate_production_config(env: Mapping[str, str], app_root: Path) -> list[s
     if not is_production(env):
         return []
     problems: list[str] = []
+    # Native authcrypt and CodeStore consume these raw values. Validating a
+    # trimmed path could approve preserved state while startup creates another
+    # store. Reject the ambiguity before touching either location.
+    for name in ('MLOCAL_DURABLE_ROOT', ONBOARDING_DIR, 'JAC_DATA_PATH'):
+        value = env.get(name, '')
+        if value != value.strip():
+            problems.append(f'{name} must not contain leading or trailing whitespace; preserve the exact existing state path.')
+    if problems:
+        return problems
     root = Path(os.path.realpath(app_root))
     durable = None
-    raw_root = env.get('MLOCAL_DURABLE_ROOT', '').strip()
+    raw_root = env.get('MLOCAL_DURABLE_ROOT', '')
     if not raw_root:
         problems.append('MLOCAL_DURABLE_ROOT is not set. Mount and preserve the coordinated state volume.')
     elif not os.path.isabs(raw_root):
@@ -112,7 +121,7 @@ def validate_production_config(env: Mapping[str, str], app_root: Path) -> list[s
         if not durable.is_dir() or not _mounted_volume(durable):
             problems.append('MLOCAL_DURABLE_ROOT requires an existing writable dedicated persistent-volume mount; the root filesystem and temporary filesystems are insufficient.')
 
-    raw_dir = env.get(ONBOARDING_DIR, '').strip()
+    raw_dir = env.get(ONBOARDING_DIR, '')
     directory = Path(os.path.realpath(raw_dir)) if raw_dir and os.path.isabs(raw_dir) else None
     if not raw_dir:
         problems.append(f'{ONBOARDING_DIR} is not set. Restore its database and original key on the state volume.')
@@ -142,7 +151,7 @@ def validate_production_config(env: Mapping[str, str], app_root: Path) -> list[s
             problems.append(f'{ONBOARDING_DIR} requires the existing onboarding.sqlite3 and complete original code.key; do not generate replacement state during rollout.')
 
     native_base = root
-    raw_native = env.get('JAC_DATA_PATH', '').strip()
+    raw_native = env.get('JAC_DATA_PATH', '')
     if raw_native:
         if not os.path.isabs(raw_native):
             problems.append('JAC_DATA_PATH must be an absolute preserved native-data location inside MLOCAL_DURABLE_ROOT.')
@@ -179,8 +188,10 @@ def validate_production_config(env: Mapping[str, str], app_root: Path) -> list[s
         auth = serve.get('auth', {})
         if not isinstance(auth, Mapping):
             raise ValueError
-        configured_secret = env.get('JAC_SERVE_AUTH_SECRET', '') or auth.get('secret', '')
-        configured_algorithm = env.get('JAC_SERVE_AUTH_ALGORITHM', '') or auth.get('algorithm', 'HS256')
+        # Official env_value trims overrides before falling back to TOML. Its
+        # secret resolver trims the selected secret; the TOML algorithm stays raw.
+        configured_secret = env.get('JAC_SERVE_AUTH_SECRET', '').strip() or auth.get('secret', '')
+        configured_algorithm = env.get('JAC_SERVE_AUTH_ALGORITHM', '').strip() or auth.get('algorithm', 'HS256')
         if not isinstance(configured_secret, str) or not isinstance(configured_algorithm, str):
             raise ValueError
         configured_secret = configured_secret.strip()
@@ -190,7 +201,7 @@ def validate_production_config(env: Mapping[str, str], app_root: Path) -> list[s
             configured_secret.encode(), secret.strip()
         ):
             problems.append('JAC_SERVE_AUTH_SECRET or [serve.auth] secret must match the preserved native jwt_secret recovery state; rotating it is a separate approved migration.')
-        if configured_algorithm.strip() != 'HS256':
+        if configured_algorithm != 'HS256':
             problems.append('JAC_SERVE_AUTH_ALGORITHM or [serve.auth] algorithm must use the supported release signing policy (HS256).')
     except (OSError, ValueError):
         problems.append('JAC_SERVE_AUTH_SECRET, JAC_SERVE_AUTH_ALGORITHM and [serve.auth] require valid string settings; check the preserved signing configuration.')
