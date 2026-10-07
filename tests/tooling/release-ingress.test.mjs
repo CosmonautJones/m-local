@@ -301,3 +301,28 @@ test('install metadata exposes only the exact public manifest and authored brand
   assert.equal((await fetch(origin+'/static/assets/manifest.webmanifest',{method:'POST'})).status,403);
   assert.equal(reached.length,before,'private/static alternatives never reach native');
 });
+
+test('emitted lazy JavaScript chunks are readable assets without exposing private paths',async t=>{
+  const reached=[],events=[];
+  const {origin}=await serve(t,(req,res)=>{
+    reached.push([req.method,req.url]);
+    res.writeHead(req.url.endsWith('failed.js')?500:200,{'content-type':'text/javascript'});
+    res.end('export const loaded=true;');
+  },{eventSink:event=>events.push(event)});
+  const path='/static/assets/index-DD9CTm96.js';
+  const response=await fetch(origin+path);
+  assert.equal(response.status,200);
+  assert.match(response.headers.get('content-type'),/javascript/);
+  assert.equal(await response.text(),'export const loaded=true;');
+  assert.equal((await fetch(origin+path,{method:'HEAD'})).status,200);
+  assert.equal((await fetch(origin+'/static/assets/failed.js')).status,500);
+  assert.equal(events.at(-1).route,'asset');
+  const before=reached.length;
+  for(const blocked of ['/static/assets/private/key.pem','/static/assets/.env',
+    '/static/assets/private/chunk.js','/static/assets/index-DD9CTm96.js.map',
+    '/static/assets/%2e%2e/private/key.js','/static/assets/index.js%2fprivate']) {
+    assert.equal((await fetch(origin+blocked)).status,403,blocked);
+  }
+  assert.equal((await fetch(origin+path,{method:'POST'})).status,403);
+  assert.equal(reached.length,before,'private paths and asset writes never reach native');
+});
