@@ -37,14 +37,24 @@ cd -- "$test_root"
 # Isolated workspaces need the declared Python dependencies too.
 "$JAC_BIN" install --no-npm
 export JAC_TEST_STRICT=1
+core_paths=(services/promo.test.jac services/qr.test.jac services/session.test.jac services/business_onboarding.test.jac
+    services/taste.test.jac services/taste_sandbox.test.jac services/foryou.test.jac
+    services/nearby.test.jac services/business_profile.test.jac services/hosted_dataset.test.jac services/dataset_activity.test.jac)
+if [[ "$suite" == core || "$suite" == all ]]; then
+    binding="$PROJECT_ROOT/.jac/release-core-binding.json"
+    binding_log="$PROJECT_ROOT/.jac/release-core-outcomes.log"
+    mkdir -p "$PROJECT_ROOT/.jac"
+    python3 "$PROJECT_ROOT/scripts/test-inventory.py" record-start "$PROJECT_ROOT" "$test_root" "$JAC_BIN" "$binding" "$binding_log" "${core_paths[@]}"
+fi
+suite_exit=0
 if [[ "$suite" == context ]]; then
-    "$JAC_BIN" test services/context.test.jac
+    "$JAC_BIN" test --verbose services/context.test.jac
 elif [[ "$suite" == insights ]]; then
-    "$JAC_BIN" test tests/analytics/backend_tests.jac
+    "$JAC_BIN" test --verbose tests/analytics/backend_tests.jac
 else
-    "$JAC_BIN" test services/promo.test.jac services/qr.test.jac services/session.test.jac services/business_onboarding.test.jac \
-        services/taste.test.jac services/taste_sandbox.test.jac services/foryou.test.jac \
-        services/nearby.test.jac services/business_profile.test.jac services/hosted_dataset.test.jac services/dataset_activity.test.jac
+    "$JAC_BIN" test --verbose "${core_paths[@]}" 2>&1 | tee -a "$binding_log" || suite_exit=$?
+    python3 "$PROJECT_ROOT/scripts/test-inventory.py" record-finish "$PROJECT_ROOT" "$test_root" "$JAC_BIN" "$binding" "$binding_log" "$suite_exit"
+    if [[ "$suite_exit" -ne 0 ]]; then exit "$suite_exit"; fi
 fi
 if [[ "$suite" == all ]]; then
     exit_code=0
