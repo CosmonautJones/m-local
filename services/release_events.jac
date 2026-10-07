@@ -18,7 +18,7 @@ def _write_event(operation: str, code: str, hourly: int = -1, daily: int = -1) {
             fields["daily_attempts"] = daily;
             fields["daily_limit"] = 300;
         }
-        print(json.dumps(fields, separators=(",", ":")), file=sys.stderr, flush=True);
+        print(json.dumps(fields), file=sys.stderr, flush=True);
     } except Exception {
         # Event output is optional; sink failure never changes the operation.
     }
@@ -26,7 +26,7 @@ def _write_event(operation: str, code: str, hourly: int = -1, daily: int = -1) {
 
 
 def record_outcome(operation: str, ok: bool) {
-    if operation in ("email_request", "claim", "redeem") and ok is False {
+    if operation in ("email_request", "claim", "redeem") and isinstance(ok, bool) and not ok {
         _write_event(operation, "OPERATION_FAILED");
     }
 }
