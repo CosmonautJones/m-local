@@ -246,6 +246,12 @@ def _restaurant_of(o: Offer) -> Restaurant | None {
 }
 
 
+def _sample_offer(o: Offer) -> bool {
+    restaurant = _restaurant_of(o);
+    return o.is_demo or (restaurant is not None and restaurant.is_demo);
+}
+
+
 def _location_of(r: Restaurant) -> Location | None {
     locs = [r ->:HasLocation:->];
     return locs[0] if locs else None;
@@ -465,7 +471,7 @@ def _view(
         terms=o.terms,
         dietary=o.dietary,
         menu_item=o.menu_item,
-        is_demo=o.is_demo,
+        is_demo=o.is_demo or (r is not None and r.is_demo),
         access_context=context,
         fits=fits,
         reasons=reasons
@@ -503,7 +509,7 @@ def _claim(offer_id: str, actor_id: str, now: float) -> ActionResult {
     }
     o = _find_offer(offer_id);
     if o is None { return ActionResult(message="That offer no longer exists."); }
-    if o.is_demo and not samples_visible() {
+    if _sample_offer(o) and not samples_visible() {
         return ActionResult(message="That offer is not available.");
     }
     for c in [o ->:ClaimedAs:->] {
@@ -795,7 +801,7 @@ def:pub list_offers(
     for r in [root.shared -->[?:Restaurant]] {
         visible = listing_visible(r.slug, r.source);
         for o in [r ->:Publishes:->] {
-            if o.is_demo and not samples_visible() { continue; }
+            if _sample_offer(o) and not samples_visible() { continue; }
             v = _view(o, now, _actor_id(), budget, window, wanted);
             # A saved live QR remains reachable after reload even when the
             # merchant pauses/edits an offer or student changes discovery filters.
@@ -826,7 +832,7 @@ def:pub get_offer(
 ) -> OfferView | None {
     _ensure_seed();
     o = _find_offer(offer_id);
-    if o is None or (o.is_demo and not samples_visible()) {
+    if o is None or (_sample_offer(o) and not samples_visible()) {
         return None;
     }
     now = time.time();
