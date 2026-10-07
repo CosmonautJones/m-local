@@ -1,9 +1,10 @@
 # Public U-M / Ann Arbor release acceptance
 
-This release candidate starts at `bb475ca`. Travis requested an A for product,
-production readiness, and scaling, with agreement from independent reviewers,
-and work held at the final review / PR boundary. Passing this document is not a
-substitute for running its checks against the actual candidate and deployment.
+The foundation starts at `bb475ca` and PR55 `c581d142`. The October 7 instruction
+authorizes implementation, review, branch pushes and PRs while retaining merge,
+deployment and live-data approval with Travis. `RELEASE-GATES.md` classifies the
+current candidate's engineering, live/human and deferred requirements. Passing
+local checks is not a substitute for acceptance on the actual deployment.
 
 Baseline independent reviews on October 4, 2026: product B+, production/security
 C−, scaling D. None approved A. Reviewer feedback and measured results must be
@@ -86,6 +87,6 @@ not measured capacity. Scale the target if launch requirements exceed it.
 
 Reviewers must inspect the final diff and evidence independently. A gate is open
 when proof is missing, indirect, stale, or scoped more narrowly than its claim.
-Do not mark the goal complete, request a PR, or call the whole release A until
-all reviewers agree and all required evidence is current. Publication remains
-at Travis's requested final review boundary.
+Open the authorized review PRs with accurate scope and evidence; unfinished work
+remains draft. Do not mark hosted acceptance complete or call the whole release A
+while required gates remain open. Merge and deployment require Travis's approval.

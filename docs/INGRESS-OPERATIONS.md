@@ -10,7 +10,7 @@ must bind to loopback and must never receive public traffic directly.
 
 `MLOCAL_DEPLOYMENT_TOPOLOGY=single-instance-serialized` opts into one upstream
 HTTP request at a time in one gateway process. That includes assets, authenticated
-RPCs, `/ready` and the anonymous `home_feed` readiness probe. The lane is retained
+RPCs, internal `/healthz/ready` and the anonymous `home_feed` readiness probe. The lane is retained
 until the entire upstream response has ended; receiving headers is insufficient.
 A downstream client disconnect removes waiting work, but an active upstream
 request is drained through completion before another request starts.
@@ -29,6 +29,14 @@ for that gateway process. All later application requests return 503 with
 public or private reset operation. An HTTP/socket abort does not establish that
 Jac stopped finalizing an already accepted write. A complete upstream 5xx is
 reported and releases the lane normally; it is not automatically replayed.
+
+Downstream delivery is bounded independently from native completion. A paused
+browser cannot prevent upstream draining: at most 8 MiB per response and 16 MiB
+across all clients may wait for delivery. Overflow or a delivery deadline closes
+only that client response while draining continues. It does not latch the
+application lane closed. Incomplete upstream execution retains the fail-closed
+policy above. Paused 1/2/16 MiB assets and aggregate budget regression checks
+passed in the corrected 40-check focused suite.
 
 After a closed-lane incident, the release operator must:
 
@@ -55,6 +63,7 @@ After a closed-lane incident, the release operator must:
 | `maxConnections` | 96 | Maximum accepted gateway sockets, including keepalive and partially received bodies; constructor accepts 1–256. |
 | Header / request receipt | 10000 / 15000 ms | Bounds incomplete header/body receipt. RPC bodies also have a 15-second receipt deadline. |
 | Ordinary / photo RPC body | 65536 / 1400000 bytes | Declared and chunked oversized bodies are rejected before joining the lane or reaching the backend. |
+| Response / shared delivery budget | 8 / 16 MiB | Bounds slow downstream delivery; overflow closes that client and continues upstream draining. |
 | `MLOCAL_INGRESS_EVENT_LOG` | unset in development | `stderr` selects structured redacted JSON failure events. The production launcher validates this choice. |
 | `secureProductionIngress` | false | The hosting launcher sets true only after validating the intended HTTPS edge; it enables HSTS. Caller forwarding headers cannot enable it. |
 
@@ -108,7 +117,7 @@ with readiness 503. Sustained `UPSTREAM_5XX` requires application investigation;
 `QUEUE_FULL`/`QUEUE_DEADLINE` indicate the supported single-lane capacity has been
 exceeded, and must not trigger unapproved autoscaling. `BODY_TOO_LARGE`,
 `BODY_DEADLINE`, `ROUTE_DENIED` and `ONBOARDING_RATE_LIMITED` are bounded refusal
-signals. Test the chosen sink with disposable events and record operator
+signals. `DELIVERY_LIMIT` and `DELIVERY_DEADLINE` close a client response while upstream draining continues; they do not justify restarting the backend. Investigate oversized assets/responses and slow clients. Test the chosen sink with disposable events and record operator
 acknowledgement without sending real mail or exposing private accounts.
 
 ## Isolated checks
@@ -123,7 +132,7 @@ node --test tests/tooling/release-ingress.test.mjs \
 
 The initial failing-first run reproduced weak upstream header overrides and
 overlap after response headers, including readiness bypass. The corrected run
-passes 33 checks on isolated loopback HTTP servers: fourteen release regressions
+passes 40 checks on isolated loopback HTTP servers: twenty-one release regressions
 and nineteen retained hosted, onboarding, photo and sharing checks. The release
 regressions cover full response completion, readiness serialization, saturation,
 waiting expiry, queued/active client aborts, incomplete upstream failure, latched

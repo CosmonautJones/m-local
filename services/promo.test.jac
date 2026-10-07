@@ -647,6 +647,125 @@ def _raise_lock_test_error() {
 }
 
 
+def _hold_limit_fixture(slug: str, now: float) -> list[Offer] {
+    restaurant = Restaurant(slug=slug, name="Hold limit fixture", source="manual");
+    root.shared ++> restaurant;
+    offers: list[Offer] = [];
+    for number in range(3) {
+        offer = Offer(title=f"Limit offer {number}", start_ts=now - 60,
+            end_ts=now + 3600, quantity=5, qr_ready=True, terms="Original promise");
+        restaurant +>:Publishes():+> offer;
+        offers.append(offer);
+    }
+    return offers;
+}
+
+
+test "sample restaurant cannot expose an unmarked offer through list detail or claim" {
+    now = time.time();
+    offers = _hold_limit_fixture("sample-parent-projection", now);
+    restaurant = _restaurant_of(offers[0]) as Restaurant;
+    restaurant.is_demo = True;
+    assert not offers[0].is_demo;
+    with patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "0", "MLOCAL_DEMO_MODE": ""}) {
+        assert jid(offers[0]) not in [view.id for view in list_offers()];
+        assert get_offer(jid(offers[0])) is None;
+        blocked = _claim(jid(offers[0]), "sample-parent-student", now);
+        assert not blocked.ok and "not available" in blocked.message;
+        assert _remaining(offers[0], now) == 5;
+    }
+}
+
+
+test "sample restaurant labels an unmarked offer without rewriting stored flags" {
+    now = time.time();
+    offers = _hold_limit_fixture("sample-parent-label", now);
+    restaurant = _restaurant_of(offers[0]) as Restaurant;
+    restaurant.is_demo = True;
+    assert _view(offers[0], now).is_demo;
+    assert not offers[0].is_demo;
+}
+
+
+test "samples off preserves a legitimate owner's paused claim and original snapshot" {
+    now = time.time();
+    offers = _hold_limit_fixture("legitimate-saved-no-samples", now);
+    held = _claim(jid(offers[0]), "legitimate-saved-student", now);
+    assert held.ok;
+    offers[0].status = "paused";
+    offers[0].terms = "Changed terms";
+    with patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "0", "MLOCAL_DEMO_MODE": ""}) {
+        with patch.dict(get_offer.__globals__, {"_actor_id": lambda () -> str { return "legitimate-saved-student"; }}) {
+            view = get_offer(jid(offers[0])) as OfferView;
+            assert view.my_status == "claimed" and view.my_qr_payload == held.qr_payload;
+            assert view.my_terms == "Original promise";
+            assert jid(offers[0]) in [item.id for item in list_offers()];
+        }
+    }
+}
+
+
+test "student active holds are capped across offers while retry retains the same claim" {
+    now = time.time();
+    offers = _hold_limit_fixture("hold-limit-cap", now);
+    first = _claim(jid(offers[0]), "hold-limit-cap-student", now);
+    second = _claim(jid(offers[1]), "hold-limit-cap-student", now);
+    assert first.ok and second.ok;
+    rejected = _claim(jid(offers[2]), "hold-limit-cap-student", now);
+    assert not rejected.ok and "2 active holds" in rejected.message;
+    assert _remaining(offers[2], now) == 5;
+    retry = _claim(jid(offers[0]), "hold-limit-cap-student", now);
+    assert retry.ok and retry.claim_id == first.claim_id and retry.qr_payload == first.qr_payload;
+    assert _claim(jid(offers[2]), "hold-limit-other-student", now).ok;
+}
+
+
+test "cancellation expiry and redemption immediately free the student hold slot" {
+    now = time.time();
+    offers = _hold_limit_fixture("hold-limit-release", now);
+    offers[1].end_ts = now + 10;
+    first = _claim(jid(offers[0]), "hold-limit-release-student", now);
+    second = _claim(jid(offers[1]), "hold-limit-release-student", now);
+    assert first.ok and second.ok;
+    assert not _claim(jid(offers[2]), "hold-limit-release-student", now).ok;
+    assert _cancel(jid(offers[0]), "hold-limit-release-student", now).ok;
+    third = _claim(jid(offers[2]), "hold-limit-release-student", now);
+    assert third.ok;
+    # At the exact deadline the second hold no longer occupies a slot.
+    replaced = _claim(jid(offers[0]), "hold-limit-release-student", now + 10);
+    assert replaced.ok and replaced.claim_id != first.claim_id;
+    restaurant = _restaurant_of(offers[0]) as Restaurant;
+    assert _redeem(restaurant, replaced.qr_payload, now + 10).ok;
+    assert _cancel(jid(offers[2]), "hold-limit-release-student", now + 10).ok;
+    offers[1].end_ts = now + 3600;
+    assert _claim(jid(offers[1]), "hold-limit-release-student", now + 10).ok;
+    preserved = _find_claim(restaurant, replaced.qr_payload) as Redemption;
+    assert preserved.status == "redeemed" and preserved.terms_snapshot == "Original promise";
+}
+
+
+test "hold limit rollout preserves every pre-existing claim above the cap" {
+    now = time.time();
+    offers = _hold_limit_fixture("hold-limit-existing", now);
+    preserved: list[ActionResult] = [];
+    with patch.dict(_claim.__globals__, {"MAX_ACTIVE_HOLDS": 10}) {
+        for offer in offers {
+            held = _claim(jid(offer), "hold-limit-existing-student", now);
+            assert held.ok;
+            preserved.append(held);
+        }
+    }
+    for number in range(3) {
+        retry = _claim(jid(offers[number]), "hold-limit-existing-student", now);
+        assert retry.ok and retry.claim_id == preserved[number].claim_id;
+        assert retry.qr_payload == preserved[number].qr_payload;
+        restaurant = _restaurant_of(offers[number]) as Restaurant;
+        claim = _find_claim(restaurant, retry.qr_payload) as Redemption;
+        assert claim.status == "claimed" and claim.terms_snapshot == "Original promise";
+    }
+}
+
+
 test "lock refresh failure closes the file descriptor" {
     fd = os.open(mutation_lock_path(), os.O_CREAT | os.O_RDWR, 384);
     closed = False;

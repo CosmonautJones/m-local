@@ -49,6 +49,8 @@ import from services.email_codes { store, mutation_lock_path }
 import from services.context_models { AccessContextView }
 import from services.context { get_access_context }
 
+glob MAX_ACTIVE_HOLDS: int = 2;
+
 
 def _lock -> int {
     fd = os.open(mutation_lock_path(), os.O_CREAT | os.O_RDWR, 384);
@@ -243,6 +245,13 @@ def _money(v: float) -> str {
 def _restaurant_of(o: Offer) -> Restaurant | None {
     owners = [o <-:Publishes:<-];
     return owners[0] if owners else None;
+}
+
+
+
+def _sample_offer(o: Offer) -> bool {
+    restaurant = _restaurant_of(o);
+    return o.is_demo or (restaurant is not None and restaurant.is_demo);
 }
 
 
@@ -465,7 +474,7 @@ def _view(
         terms=o.terms,
         dietary=o.dietary,
         menu_item=o.menu_item,
-        is_demo=o.is_demo,
+        is_demo=o.is_demo or (r is not None and r.is_demo),
         access_context=context,
         fits=fits,
         reasons=reasons
@@ -497,13 +506,26 @@ def _my_claim(o: Offer, actor_id: str, now: float) -> Redemption | None {
 }
 
 
+def _active_hold_count(actor_id: str, now: float) -> int {
+    wanted_actor = actor_id;
+    count = 0;
+    for restaurant in [root.shared -->[?:Restaurant]] {
+        for offer in [restaurant ->:Publishes:->] {
+            count += len([claim for claim in [offer ->:ClaimedAs:->[?:Redemption, actor_id == wanted_actor]]
+                if claim.actor_id == actor_id and claim.qr_payload and _claim_status(claim, now) == "claimed"]);
+        }
+    }
+    return count;
+}
+
+
 def _claim(offer_id: str, actor_id: str, now: float) -> ActionResult {
     if not actor_id {
         return ActionResult(message="Sign in to claim this offer.");
     }
     o = _find_offer(offer_id);
     if o is None { return ActionResult(message="That offer no longer exists."); }
-    if o.is_demo and not samples_visible() {
+    if _sample_offer(o) and not samples_visible() {
         return ActionResult(message="That offer is not available.");
     }
     for c in [o ->:ClaimedAs:->] {
@@ -531,6 +553,12 @@ def _claim(offer_id: str, actor_id: str, now: float) -> ActionResult {
     if r is None { return ActionResult(message="This offer has no restaurant."); }
     if not listing_visible(r.slug, r.source) {
         return ActionResult(message="This business is not available for new claims.");
+    }
+    # The public caller holds the mutation lock through this count and commit.
+    # Existing live claims returned above remain idempotent, including accounts
+    # that already held more than the new limit before rollout.
+    if _active_hold_count(actor_id, now) >= MAX_ACTIVE_HOLDS {
+        return ActionResult(message=f"You have {MAX_ACTIVE_HOLDS} active holds. Cancel one or wait for it to expire before claiming another offer.");
     }
     o.qr_ready = True;
     expires = min(now + CLAIM_HOLD_MINUTES * 60, o.end_ts);
@@ -795,7 +823,7 @@ def:pub list_offers(
     for r in [root.shared -->[?:Restaurant]] {
         visible = listing_visible(r.slug, r.source);
         for o in [r ->:Publishes:->] {
-            if o.is_demo and not samples_visible() { continue; }
+            if _sample_offer(o) and not samples_visible() { continue; }
             v = _view(o, now, _actor_id(), budget, window, wanted);
             # A saved live QR remains reachable after reload even when the
             # merchant pauses/edits an offer or student changes discovery filters.
@@ -826,7 +854,7 @@ def:pub get_offer(
 ) -> OfferView | None {
     _ensure_seed();
     o = _find_offer(offer_id);
-    if o is None or (o.is_demo and not samples_visible()) {
+    if o is None or (_sample_offer(o) and not samples_visible()) {
         return None;
     }
     now = time.time();
