@@ -39,6 +39,7 @@ def verify_actual_faults(workspace, merchant, student, public, rows, durable,
     modes = (('rollback', '57P01'), ('rollback', '40001'), ('rollback', '08006'),
              ('transport_loss_before_commit', '08006'),
              ('accepted_ack_loss', '08006'))
+    all_modes = (*modes, ('process_death_before_commit', ''), ('process_death_after_commit', ''))
 
     def count(arch, field, value):
         return int(rows("SELECT COUNT(*) FROM anchors WHERE arch_type=:arch AND props->'archetype'->>:field=:value",
@@ -69,7 +70,7 @@ def verify_actual_faults(workspace, merchant, student, public, rows, durable,
             end_local=(now + timedelta(hours=1)).strftime('%Y-%m-%d %H:%M'), quantity='1',
             eligibility='Fixture student ID', terms='Synthetic test only', dietary='', menu_item='')
 
-    for mode, sqlstate in (*modes, ('process_death_before_commit', ''), ('process_death_after_commit', '')):
+    for mode, sqlstate in all_modes:
         title = 'Stock actual publish fault ' + secrets.token_hex(8)
         post = offer(title)
         control = arm('Offer', 'title', title, mode, sqlstate)
@@ -115,7 +116,7 @@ def verify_actual_faults(workspace, merchant, student, public, rows, durable,
               public.call('get_offer', offer_id=offer_id)['title'] == post['title'],
               'each fault-reconciled publication preserves its original durable ID after restart')
 
-    for mode, sqlstate in modes:
+    for mode, sqlstate in all_modes:
         title = 'Stock actual claim fault ' + secrets.token_hex(8)
         made = merchant.call('save_offer', **offer(title))
         check(made.get('ok'), 'created a distinct actual claim fault fixture offer')
@@ -128,21 +129,32 @@ def verify_actual_faults(workspace, merchant, student, public, rows, durable,
                    response_ok=envelope.get('ok'), durable_claims_after_response=committed)
         recorded.append(row)
         observed_fault(mode, row)
-        check(status in (200, 409, 500), 'actual claim fault returns a complete bounded native response')
-        value = result(envelope)
-        succeeded = status == 200 and envelope.get('ok') and isinstance(value, dict) and value.get('ok')
-        if succeeded:
-            persisted = durable(value['claim_id']).props['archetype']
-            check(committed == 1 and persisted['status'] == 'claimed' and persisted['offer_title_snapshot'] == title,
-                  'successful actual claim response names one durable held claim')
+        if mode.startswith('process_death'):
+            check(status in (0, 503), 'actual native process death loses the claim response')
+            check(committed == (1 if mode == 'process_death_after_commit' else 0),
+                  'independent database observes correct held claim before/after process death')
+            check(rpc(public, 'home_feed')[0] == 503,
+                  'uncertain claim process death closes the serialized ingress')
+            restart_both()
         else:
-            check(committed == 0, 'failed actual claim leaves no durable hidden hold')
+            check(status in (200, 409, 500), 'actual claim fault returns a complete bounded native response')
+            value = result(envelope)
+            succeeded = status == 200 and envelope.get('ok') and isinstance(value, dict) and value.get('ok')
+            if succeeded:
+                persisted = durable(value['claim_id']).props['archetype']
+                check(committed == 1 and persisted['status'] == 'claimed' and persisted['offer_title_snapshot'] == title,
+                      'successful actual claim response names one durable held claim')
+            else:
+                check(committed == 0, 'failed actual claim leaves no durable hidden hold')
         view = student.call('get_offer', offer_id=offer_id)
         check(view['remaining'] == 1 - committed and bool(view['my_claim_id']) == bool(committed),
               'first read after complete claim fault reports committed stock and private claim only')
         retry = student.call('claim_offer', offer_id=offer_id)
         check(retry.get('ok') and count('Redemption', 'offer_title_snapshot', title) == 1,
               'actual claim retry reconciles to one durable held claim')
+        if committed:
+            check(retry['claim_id'] == view['my_claim_id'] and retry['qr_payload'] == view['my_qr_payload'],
+                  'lost-response or committed claim retry preserves the already durable claim and QR')
         stable = student.call('claim_offer', offer_id=offer_id)
         check(stable.get('ok') and stable['claim_id'] == retry['claim_id'] and stable['qr_payload'] == retry['qr_payload'],
               'reconciled actual claim keeps its original claim and QR')
@@ -161,7 +173,7 @@ def verify_actual_faults(workspace, merchant, student, public, rows, durable,
               'cancelled actual fault fixture restores one stock unit')
         row['durable_claims_after_retry'] = count('Redemption', 'offer_title_snapshot', title)
 
-    for mode, sqlstate in (*modes, ('process_death_before_commit', ''), ('process_death_after_commit', '')):
+    for mode, sqlstate in all_modes:
         title = 'Stock actual redemption fault ' + secrets.token_hex(8)
         made = merchant.call('save_offer', **offer(title))
         check(made.get('ok'), 'created a distinct actual redemption fault fixture offer')
@@ -223,6 +235,6 @@ def verify_actual_faults(workspace, merchant, student, public, rows, durable,
               view['my_claim_id'] == held['claim_id'] and
               not merchant.call('redeem_claim', qr_payload=held['qr_payload'])['ok'],
               'each fault-reconciled redemption stays durable and single use after restart')
-    receipt['actual_app_fault_restart_readbacks'] = dict(publications=len(published), held_claims=len(modes),
+    receipt['actual_app_fault_restart_readbacks'] = dict(publications=len(published), held_claims=len(all_modes),
                                                        redemptions=len(redeemed_claims))
     receipt['actual_app_fault_events'] = json.loads((workspace / 'fault-events.json').read_text())

@@ -97,8 +97,8 @@ once only after the Offer or Redemption row has been flushed. Redemption updates
 target one unique claim anchor and its transitioned `redeemed` status, so the
 initial lock transaction cannot consume the fault on an existing held claim. The default runner
 includes rollback 57P01/40001/08006 and accepted-COMMIT acknowledgement loss on
-publication, claim and redemption, plus publication and redemption process death
-before/after COMMIT. It
+publication, claim and redemption, plus process death before/after COMMIT in all
+three mutation paths. It
 also closes the actual PgWire TCP socket before COMMIT in each mutation path,
 leaving the official store to classify its own transport error and reconnect;
 the receipt must record an observed stock `PgWireError` with SQLSTATE `08006`.
