@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "original_receipt_sha256": "ab435c6e348068ea55735e8ccf89f731255cdd0b962c9190b6f07aebdbd24dee",
+  "source_ref": "cf5c0780411a19c1dc6b8d2da2446be12f330a35",
+  "gateway_ref": "cf5c0780411a19c1dc6b8d2da2446be12f330a35",
+  "source_sha256": "7989472a74f98b8d4981f44c18a2599b42b3f591327fc32ef2494abda2c566f1",
+  "runtime": {
+    "jac": "0.37.23",
+    "version_pin_sha256": "d6bd6fe9e6b248fb2bc5fec05960b57f3a6c65033a169bb99f75773955d96b4a",
+    "project_config_sha256": "fefd59af700d0f6d54f4ee1e6723ac0b9c848551d58285894f6e495ec7edbb76",
+    "wrapper_sha256": "a761908c91d43964f18725db50db20e0d6db285de1d0ca16e4b81cf3746f9029"
+  },
+  "ci": {
+    "event": "push",
+    "run_id": 37600094113,
+    "url": "https://github.com/CosmonautJones/m-local/actions/runs/37600094113",
+    "artifact_id": 11472857398
+  },
+  "status": "failed",
+  "passed_checks": 61,
+  "seconds": 609.64,
+  "scenarios": {
+    "native_bootstrap_before_fixture": "passed",
+    "bound_candidate_source_unchanged": "passed",
+    "mixed_sample_records_visible": "passed",
+    "guest_browse_and_sanitized_profile": "passed",
+    "public_offer_intent_verify_reload": "passed",
+    "responsive_keyboard": "passed",
+    "axe_wcag_a_aa": "passed",
+    "qr_unobstructed": "passed",
+    "scanner_lazy_chunk": "passed",
+    "native_qr_preview_confirm_and_visible_refresh": "passed",
+    "availability_rechecked": "passed",
+    "metadata_csp": "passed",
+    "sample_feed_detail_profile_claims": "passed",
+    "sample_favorites_policy_and_restoration": "not_verified"
+  },
+  "redemption_transition_ms": 2000.07,
+  "qr_diagnostics": {
+    "collected": true,
+    "layout": {
+      "x": 72,
+      "y": 546,
+      "width": 240,
+      "height": 240,
+      "viewport_width": 390,
+      "viewport_height": 844,
+      "occluded_sample_points": 0,
+      "within_viewport": true
+    },
+    "page_error_count": 0,
+    "csp_error_count": 0,
+    "image_decoded": true,
+    "native_payload_shape": true,
+    "matches_expected": true,
+    "image": {
+      "width": 240,
+      "height": 240,
+      "non_gray_pixels": 38,
+      "quiet_edges": {
+        "top": 1.0,
+        "bottom": 1.0,
+        "left": 1.0,
+        "right": 1.0
+      }
+    }
+  },
+  "owned_processes_stopped": true,
+  "private_postgres_stopped": true
+}

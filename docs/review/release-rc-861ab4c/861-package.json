@@ -1,0 +1,41 @@
+{
+  "artifact_sha256": "7d17243c987e5dfe97a264e9ce678a60d85c9497092ab7c9d00a1bf9dd8a1306",
+  "candidate_sha": "861ab4c3e4fcf127c2fcdad6b45d813bf11820f5",
+  "ci": {
+    "conclusion": "success",
+    "head_sha": "861ab4c3e4fcf127c2fcdad6b45d813bf11820f5",
+    "jobs": [
+      {
+        "conclusion": "success",
+        "name": "package"
+      }
+    ],
+    "run_id": 37597938509,
+    "status": "completed",
+    "url": "https://github.com/CosmonautJones/m-local/actions/runs/37597938509",
+    "workflow": "Offline release package and authenticated recovery proof"
+  },
+  "cleanup": {
+    "local_mail_sink_closed": true,
+    "owned_groups_stopped": true,
+    "private_postgres_stopped": true
+  },
+  "dependency_archive_sha256": "63533de1eb8d7a70fae5c8c25ac16827ccc49c7a6dec5d4116ef463fa872010a",
+  "disposable_fixture_only": true,
+  "external_email": false,
+  "fixture_sha256": "25e9c82794c126ed4c6366c09b1d0618783e9f393282b17051f06f84f43f3048",
+  "hosted_acceptance": false,
+  "live_deployment": false,
+  "official_runtime": {
+    "jac": "2c3c697616b08516caf01704571e7e7020f4b294cd2bef7f04e8ef1ceec9d6ad",
+    "jacpython": "198225fb91707f48461f3fec1684d444ab0fd7b5a1e0913f0a0a8f11c9d02542"
+  },
+  "original_receipt_sha256": "21432fb0c3e0886cb56146a8716af33183f2a74a47381299cdb0bcc447c8b8d0",
+  "package_manifest_sha256": "db11e6f73929295afef9ac142dfdcdf624e7856503a612c98b3ff834b2f66b08",
+  "passed_check_count": 66,
+  "rollout_approval": false,
+  "schema": 1,
+  "scope": "disposable exact-source offline package and authenticated logical recovery",
+  "source_tree": "2caca5e60c8ece8f388a0bb149c00e00e34c670d",
+  "verdict": "PASS"
+}

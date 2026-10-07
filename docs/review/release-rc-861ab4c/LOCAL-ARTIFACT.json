@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "candidate_sha": "861ab4c3e4fcf127c2fcdad6b45d813bf11820f5",
+  "source_tree": "2caca5e60c8ece8f388a0bb149c00e00e34c670d",
+  "archive_sha256": "f83089b74b8104c040c678de49a24c37150676b2b381f06965f2344a5813de15",
+  "archive_bytes": 363801374,
+  "compiled_jab_sha256": "03ff48bf0799f9b420849874464a140cc4e6a5c03bb1d61aeaa3bf1efb69d2e9",
+  "dependency_archive_sha256": "bedac5fe1853219038b7c6ec5b996f1ffbdc1a91e7b28592839eac2dad7af6ea",
+  "package_manifest_sha256": "9c9a5685ae4d9b517db63574f2eabb1a9e75bf890d2e5ddae411425b44dd364e",
+  "fixture_sha256": "25e9c82794c126ed4c6366c09b1d0618783e9f393282b17051f06f84f43f3048",
+  "official_runtime": {
+    "jac": "2c3c697616b08516caf01704571e7e7020f4b294cd2bef7f04e8ef1ceec9d6ad",
+    "jacpython": "198225fb91707f48461f3fec1684d444ab0fd7b5a1e0913f0a0a8f11c9d02542"
+  },
+  "original_receipt_sha256": "309b090e5ca95c7083e43ea1f5c1f1c12b5a8db37a2d1d3ce168565605aeeebb",
+  "passed_check_count": 66,
+  "cleanup": {
+    "owned_groups_stopped": true,
+    "private_postgres_stopped": true,
+    "local_mail_sink_closed": true
+  },
+  "disposable_fixture_only": true,
+  "live_deployment": false,
+  "external_email": false,
+  "hosted_acceptance": false,
+  "rollout_approval": false,
+  "archive_published": false,
+  "publication_gate": "Full tracked-source archive includes existing research material and remains private pending issue41 policy."
+}

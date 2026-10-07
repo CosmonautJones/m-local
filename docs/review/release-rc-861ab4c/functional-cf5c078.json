@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "source_ref": "cf5c0780411a19c1dc6b8d2da2446be12f330a35",
+  "runtime": "jac 0.37.23  (Linux x86_64)",
+  "runtime_sha256": "2c3c697616b08516caf01704571e7e7020f4b294cd2bef7f04e8ef1ceec9d6ad",
+  "ci": {
+    "event": "push",
+    "run_id": 37600093688,
+    "job_id": 112722074790,
+    "artifact_id": 11473266848,
+    "functional_status": "success",
+    "source_share_status": "failure",
+    "source_share_percent": 36.85,
+    "required_percent": 40
+  },
+  "core": {
+    "executions": 478,
+    "expected_distinct": 131,
+    "passed_distinct": 131,
+    "missing": 0,
+    "unsuccessful": 0,
+    "binding_errors": 0,
+    "source_unchanged": true,
+    "core_log_sha256": "6a93df775c7900a8480b80bfa263b43a92edbaff693326d1376839bbdd49d956",
+    "binding_sha256": "231cf9f5c358211acdea78c8cd5909d2ea5f7ac1fa0ccbd1eb2cc4de3e9a414e",
+    "inventory_sha256": "ca4150d278452908439838b6674dc1ad59d4ce5ca51ef89e95a05c4be1149dba"
+  },
+  "other_checks": {
+    "source_checks": 1,
+    "context_executions": 13,
+    "insights_python_tests": 12,
+    "insights_node_tests": 11,
+    "insights_jac_executions": 65,
+    "onboarding_tests": 75,
+    "shared_onboarding_python_tests": 7,
+    "photo_tests": 7,
+    "deployment_source_tests": 25,
+    "coordinated_recovery_checks": 71,
+    "gateway_ui_node_tests": 60,
+    "compiled_browser_tests": 162
+  },
+  "artifact": {
+    "name": "m-local.jab",
+    "bytes": 13024535,
+    "sha256": "eabd020f1399434501b9bc30827c4b70042151fabf709719d753e5ba13d304a3"
+  }
+}

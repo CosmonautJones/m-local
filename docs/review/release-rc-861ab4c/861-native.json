@@ -1,0 +1,217 @@
+{
+  "candidate_sha": "861ab4c3e4fcf127c2fcdad6b45d813bf11820f5",
+  "ci": {
+    "conclusion": "success",
+    "head_sha": "861ab4c3e4fcf127c2fcdad6b45d813bf11820f5",
+    "jobs": [
+      {
+        "conclusion": "success",
+        "name": "native-hardening"
+      },
+      {
+        "conclusion": "success",
+        "name": "serialized-stock-runtime"
+      }
+    ],
+    "run_id": 37597938773,
+    "status": "completed",
+    "url": "https://github.com/CosmonautJones/m-local/actions/runs/37597938773",
+    "workflow": "Release native preservation and topology proof"
+  },
+  "cleanup": {
+    "owned_api_gateway_groups_stopped": true,
+    "private_postgres_stopped": true
+  },
+  "copied_source_unchanged": true,
+  "engineering_source_inputs_match_committed_blobs": true,
+  "external_email": false,
+  "fault_case_count": 21,
+  "fault_cases": [
+    {
+      "expected_sqlstate": "57P01",
+      "http_status": 500,
+      "mode": "rollback",
+      "operation": "save_offer",
+      "response_ok": false
+    },
+    {
+      "expected_sqlstate": "40001",
+      "http_status": 200,
+      "mode": "rollback",
+      "operation": "save_offer",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "08006",
+      "http_status": 200,
+      "mode": "rollback",
+      "operation": "save_offer",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "08006",
+      "http_status": 200,
+      "mode": "transport_loss_before_commit",
+      "operation": "save_offer",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "08006",
+      "http_status": 200,
+      "mode": "accepted_ack_loss",
+      "operation": "save_offer",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "",
+      "http_status": 502,
+      "mode": "process_death_before_commit",
+      "operation": "save_offer",
+      "response_ok": false
+    },
+    {
+      "expected_sqlstate": "",
+      "http_status": 502,
+      "mode": "process_death_after_commit",
+      "operation": "save_offer",
+      "response_ok": false
+    },
+    {
+      "expected_sqlstate": "57P01",
+      "http_status": 500,
+      "mode": "rollback",
+      "operation": "claim_offer",
+      "response_ok": false
+    },
+    {
+      "expected_sqlstate": "40001",
+      "http_status": 200,
+      "mode": "rollback",
+      "operation": "claim_offer",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "08006",
+      "http_status": 200,
+      "mode": "rollback",
+      "operation": "claim_offer",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "08006",
+      "http_status": 200,
+      "mode": "transport_loss_before_commit",
+      "operation": "claim_offer",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "08006",
+      "http_status": 200,
+      "mode": "accepted_ack_loss",
+      "operation": "claim_offer",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "",
+      "http_status": 502,
+      "mode": "process_death_before_commit",
+      "operation": "claim_offer",
+      "response_ok": false
+    },
+    {
+      "expected_sqlstate": "",
+      "http_status": 502,
+      "mode": "process_death_after_commit",
+      "operation": "claim_offer",
+      "response_ok": false
+    },
+    {
+      "expected_sqlstate": "57P01",
+      "http_status": 500,
+      "mode": "rollback",
+      "operation": "redeem_claim",
+      "response_ok": false
+    },
+    {
+      "expected_sqlstate": "40001",
+      "http_status": 200,
+      "mode": "rollback",
+      "operation": "redeem_claim",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "08006",
+      "http_status": 200,
+      "mode": "rollback",
+      "operation": "redeem_claim",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "08006",
+      "http_status": 200,
+      "mode": "transport_loss_before_commit",
+      "operation": "redeem_claim",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "08006",
+      "http_status": 200,
+      "mode": "accepted_ack_loss",
+      "operation": "redeem_claim",
+      "response_ok": true
+    },
+    {
+      "expected_sqlstate": "",
+      "http_status": 502,
+      "mode": "process_death_before_commit",
+      "operation": "redeem_claim",
+      "response_ok": false
+    },
+    {
+      "expected_sqlstate": "",
+      "http_status": 502,
+      "mode": "process_death_after_commit",
+      "operation": "redeem_claim",
+      "response_ok": false
+    }
+  ],
+  "hardening_cleanup_assertion_passed": true,
+  "hardening_elapsed_seconds": 354.581,
+  "hosted_acceptance": false,
+  "installed_runtime_edited": false,
+  "integrated_runtime_check_count": 266,
+  "local_sink_delivery_count": 4,
+  "local_tls_smtp": true,
+  "multi_writer_or_capacity_acceptance": false,
+  "native_check_count": 80,
+  "native_input_verification": {
+    "engineering_inputs_verified": 262,
+    "research_file_contents_examined": false,
+    "research_inputs_omitted": 14
+  },
+  "native_receipt_sha256": "559a52c6e4dab4ff3f38841b3c04e0d1b1303cd3a5a9903fc9dd0cdd2e905979",
+  "native_register_reproduction": true,
+  "native_source_manifest_sha256": "f9fcc7cd0b1f2c338a81b279bebf4182ff9c97b0dacf7b0838e05ae455efe6f8",
+  "official_runtime": {
+    "jac": "2c3c697616b08516caf01704571e7e7020f4b294cd2bef7f04e8ef1ceec9d6ad",
+    "jacpython": "198225fb91707f48461f3fec1684d444ab0fd7b5a1e0913f0a0a8f11c9d02542"
+  },
+  "private_session_methods_modified": false,
+  "production_config_process_checks": true,
+  "provider_durability_acceptance": false,
+  "public_ingress_native_post_denied": true,
+  "repository_source_unchanged": true,
+  "rollout_approval": false,
+  "runtime_input_verification": {
+    "engineering_inputs_verified": 262,
+    "research_file_contents_examined": false,
+    "research_inputs_omitted": 14
+  },
+  "runtime_receipt_sha256": "08ed50a62e48ec308c31b95d08be203eff2ec22e304bae618eca8259fe66faa0",
+  "runtime_source_manifest_sha256": "f9fcc7cd0b1f2c338a81b279bebf4182ff9c97b0dacf7b0838e05ae455efe6f8",
+  "schema": 1,
+  "scope": "disposable account preservation and exclusive serialized stock-runtime safety",
+  "test_only_instrumentation": true,
+  "topology": "one exclusive backend and one serialized gateway; no parallel operator or CLI writes",
+  "verdict": "BOUNDED_SERIALIZED_APP_RACES_PASS_NOT_HOSTING_CERTIFIED"
+}

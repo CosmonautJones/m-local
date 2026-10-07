@@ -1,0 +1,14 @@
+{
+  "revision": "861ab4c3e4fcf127c2fcdad6b45d813bf11820f5",
+  "language_bytes": {
+    "Batchfile": 632,
+    "Jac": 565332,
+    "JavaScript": 347938,
+    "PowerShell": 32634,
+    "Python": 798359,
+    "Shell": 41084
+  },
+  "total_bytes": 1785979,
+  "jac_percent": 31.65,
+  "required_percent": 40.0
+}

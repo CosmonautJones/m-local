@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "source_ref": "529557946989fbeac900832d95b8710a3ebbf61c",
+  "gateway_ref": "529557946989fbeac900832d95b8710a3ebbf61c",
+  "source_sha256": "b78788d45a01f426a6ea1e8aa090b75ecc63cc8845f2364c0eb913ed6a739d60",
+  "runtime": {
+    "jac": "0.37.23",
+    "version_pin_sha256": "d6bd6fe9e6b248fb2bc5fec05960b57f3a6c65033a169bb99f75773955d96b4a",
+    "project_config_sha256": "fefd59af700d0f6d54f4ee1e6723ac0b9c848551d58285894f6e495ec7edbb76",
+    "wrapper_sha256": "a761908c91d43964f18725db50db20e0d6db285de1d0ca16e4b81cf3746f9029"
+  },
+  "ci": {
+    "event": "push",
+    "run_id": 37596657781,
+    "url": "https://github.com/CosmonautJones/m-local/actions/runs/37596657781",
+    "artifact_id": 11471570467,
+    "conclusion": "failure",
+    "fixture_isolation_tests": "passed"
+  },
+  "status": "failed",
+  "passed_checks": 5,
+  "seconds": 160.86,
+  "failure_category": "fixture_seed_order",
+  "scenarios": {
+    "bound_source_unchanged": "passed",
+    "mixed_flag_parent_and_child_native_visibility": "passed",
+    "native_browser_journeys": "not_reached",
+    "sample_disabled_and_restore_http": "not_reached"
+  },
+  "redemption_transition_ms": null,
+  "qr_diagnostics": {
+    "collected": false
+  },
+  "owned_processes_stopped": true,
+  "private_postgres_stopped": true,
+  "original_receipt_sha256": "e089e52d68a4693108051b3360d231468b12ceea8d2372e26bcf26979cbf9e89"
+}
