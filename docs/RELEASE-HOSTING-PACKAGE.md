@@ -21,6 +21,14 @@ the gateway. This startup-only probe performs no graph RPC and runs before any
 public traffic or gateway exists. Both startup phases share the original
 300-second deadline. Once the gateway exists, its meaningful readiness and all
 graph RPCs traverse only the serialized lane; operators must not bypass it.
+The hosted entry performs one full anonymous catalog check with the ordinary
+30-second request deadline and existing feed validation before admitting any
+public RPC or healthy response. A failed check stays closed without replay.
+Periodic health uses native metadata plus a strict anonymous `current_session`
+response under the existing overall five-second bound. This detects the tested
+warm private database outage without repeating the cold catalog walk; it is not
+a transaction, schema or durability certificate. Neither the total startup
+deadline, readiness deadline nor uncertainty latch has been relaxed.
 
 This eliminates some concurrent writers; it does **not** establish that stock
 Jac acknowledges only durable commits. Official-runtime commit failure,

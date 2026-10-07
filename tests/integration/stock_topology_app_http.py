@@ -151,7 +151,8 @@ def main():
         configuration=dict(native_port=NATIVE_PORT, gateway_port=GATEWAY_PORT,
             max_queued_requests=64, queue_wait_ms=10000, backend_workers='stock default',
             isolated_native_signing_state=True, development_fixture=True,
-            fictional_samples_enabled=True, gateway_observer_events=True),
+            fictional_samples_enabled=True, gateway_observer_events=True,
+            startup_catalog_admission='disabled only in this test gateway to retain simultaneous cold-feed stress; actual hosted entry always enables it'),
         limitations=['local correctness under bounded50-client bursts, not capacity certification',
             'no SMTP/physical-device/hosted or multi-host proof',
             'existing stock competing-writer retry defect remains; exclusive topology is mandatory',
@@ -199,7 +200,7 @@ def main():
             probe.bind(('127.0.0.1', GATEWAY_PORT))
         source = ('import {createShareProxy} from "./scripts/phone-share-proxy.mjs";'
             'createShareProxy({upstreamHost:"127.0.0.1",upstreamPort:18880,trustCloudflare:false,'
-            'healthCheck:true,deploymentTopology:"single-instance-serialized",'
+            'healthCheck:true,startupCatalogCheck:false,deploymentTopology:"single-instance-serialized",'
             'maxQueuedRequests:64,queueWaitMs:10000}).listen(18881,"127.0.0.1");')
         log = workspace / ('gateway-' + str(len(processes)) + '.log')
         with log.open('wb') as stream:
@@ -289,7 +290,7 @@ def main():
               'one durable cold catalog bootstrap')
         with urllib.request.urlopen(gateway + '/healthz', timeout=30) as health:
             check(health.headers.get_content_type() == 'application/json' and json.load(health).get('ready') is True,
-                  'serialized public readiness verifies actual native JSON readiness and feed')
+                  'serialized public readiness verifies actual native JSON readiness and strict guest session')
         check(merchant.call('current_session')['role'] == 'merchant', 'native preserved merchant identity owns fixture catalog')
         check(all(student.call('current_session')['role'] == 'student' for student in students),
               '50distinct disposable native students are recognized')
