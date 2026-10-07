@@ -133,6 +133,65 @@ test('development keeps parallel forwarding without topology opt-in',async t=>{
   assert.equal(max,2);
 });
 
+test('paused asset recipients cannot close serialization or block later RPCs',async t=>{
+  for(const size of [1,2,16].map(mib=>mib*1024*1024)) {
+    await t.test(`${size/1024/1024} MiB asset`,async t=>{
+      const {origin,proxy}=await serve(t,(req,res)=>{
+        if(req.url==='/static/client.js') {
+          res.writeHead(200,{'content-length':String(size)});res.end(Buffer.alloc(size,97));
+        } else res.end('{}');
+      },{deploymentTopology:'single-instance-serialized',upstreamDeadlineMs:200});
+      const request=http.get(origin+'/static/client.js');
+      request.on('error',()=>{});
+      const [response]=await once(request,'response');
+      response.on('error',()=>{});response.pause();
+      t.after(()=>{response.destroy();request.destroy();});
+      await pause(300);
+      assert.equal(proxy.ingressStatus().serialization.closed,false,'downstream backpressure is not uncertain native completion');
+      assert.equal((await fetch(origin+'/function/current_session',{method:'POST',body:'{}'})).status,200);
+    });
+  }
+});
+
+test('incomplete mutation response still closes the lane when its recipient pauses',async t=>{
+  let reached=0;
+  const {origin,proxy}=await serve(t,(_req,res)=>{
+    reached++;res.writeHead(200);res.write('accepted but unfinished');
+  },{deploymentTopology:'single-instance-serialized',upstreamDeadlineMs:100});
+  const request=http.request(origin+'/function/claim_offer',{method:'POST'});
+  request.on('error',()=>{});request.end('{}');
+  const [response]=await once(request,'response');
+  response.on('error',()=>{});response.pause();
+  t.after(()=>{response.destroy();request.destroy();});
+  await pause(150);
+  assert.equal(proxy.ingressStatus().serialization.closed,true);
+  assert.equal((await fetch(origin+'/function/current_session',{method:'POST',body:'{}'})).status,503);
+  assert.equal(reached,1);
+});
+
+test('paused deliveries share one fixed memory budget across client connections',async t=>{
+  const events=[];
+  const size=7*1024*1024;
+  const {origin,proxy}=await serve(t,(_req,res)=>{
+    res.writeHead(200,{'content-length':String(size)});res.end(Buffer.alloc(size,97));
+  },{deploymentTopology:'single-instance-serialized',upstreamDeadlineMs:1000,eventSink:event=>events.push(event)});
+  for(let i=0;i<4;i++) {
+    const request=http.get(origin+'/static/client.js');
+    request.on('error',()=>{});
+    const [response]=await once(request,'response');
+    response.on('error',()=>{});response.pause();
+    t.after(()=>{response.destroy();request.destroy();});
+    for(let attempt=0;attempt<100&&proxy.ingressStatus().serialization.active;attempt++) {
+      assert.ok(proxy.ingressStatus().delivery.bytes<=16*1024*1024);
+      await pause(5);
+    }
+    assert.equal(proxy.ingressStatus().serialization.active,false);
+    assert.equal(proxy.ingressStatus().serialization.closed,false);
+  }
+  assert.ok(events.some(event=>event.code==='DELIVERY_LIMIT'),'combined output is bounded across sockets');
+  assert.ok(proxy.ingressStatus().delivery.bytes<=proxy.ingressStatus().delivery.maxBytes);
+});
+
 test('aborting a queued request removes it without native execution or closing the lane',async t=>{
   const seen=[];
   let finish;

@@ -25,7 +25,11 @@ const contentSecurityPolicy=["default-src 'self'","script-src 'self' 'unsafe-inl
 
 const failureCodes=new Set(['ROUTE_DENIED','BODY_TOO_LARGE','BODY_DEADLINE','ONBOARDING_RATE_LIMITED',
   'QUEUE_FULL','QUEUE_DEADLINE','QUEUE_ABORTED','SERIALIZATION_CLOSED','UPSTREAM_DEADLINE',
-  'UPSTREAM_FAILURE','UPSTREAM_5XX','READINESS_FAILED']);
+  'UPSTREAM_FAILURE','UPSTREAM_5XX','READINESS_FAILED','DELIVERY_LIMIT','DELIVERY_DEADLINE']);
+
+// A process-wide budget, rather than one large buffer per accepted socket.
+// HTTP completion must not depend on a browser continuing to read its socket.
+const maxResponseBytes=8*1024*1024,maxDeliveryBytes=16*1024*1024;
 
 function createObserver(eventSink) {
   const failures=Object.fromEntries([...failureCodes].map(code=>[code,0]));
@@ -79,6 +83,39 @@ export function createShareProxy({upstreamHost='localhost',upstreamPort=8200,
   if(!Number.isInteger(readinessDeadlineMs)||readinessDeadlineMs<1||readinessDeadlineMs>5000)throw new Error('Invalid readiness deadline.');
   const lane=deploymentTopology==='single-instance-serialized'?createSerializedIngress({maxQueuedRequests,queueWaitMs}):null;
   const observer=createObserver(eventSink),limit=createOnboardingLimit();
+  let deliveryBytes=0;
+
+  function deliver(response,res,route,deadlineMs) {
+    if(res.destroyed){response.resume();return;}
+    let reserved=0,released=false,deliveryStopped=false;
+    const release=()=>{
+      if(released)return;
+      released=true;clearTimeout(deadline);
+      deliveryBytes-=reserved;reserved=0;
+    };
+    const stop=code=>{
+      if(deliveryStopped)return;
+      deliveryStopped=true;
+      observer.fail(code,route,502);
+      // Close only downstream delivery. Continue consuming the native response
+      // to establish completion; a delivery problem never clears its lane.
+      res.destroy();
+    };
+    const deadline=setTimeout(()=>stop('DELIVERY_DEADLINE'),deadlineMs);
+    res.once('finish',release);res.once('close',release);
+    res.writeHead(response.statusCode,responseHeaders(response.headers,secureProductionIngress));
+    response.on('data',chunk=>{
+      if(deliveryStopped||res.destroyed)return;
+      if(reserved+chunk.length>maxResponseBytes||deliveryBytes+chunk.length>maxDeliveryBytes) {
+        stop('DELIVERY_LIMIT');return;
+      }
+      reserved+=chunk.length;deliveryBytes+=chunk.length;
+      // Deliberately consume upstream even if write returns false. The shared
+      // byte budget bounds the outstanding output references until finish/close.
+      res.write(chunk);
+    });
+    response.on('end',()=>{if(!deliveryStopped&&!res.destroyed)res.end();});
+  }
 
   function upstreamRequest(options,{body,onResponse,signal,deadlineMs}) {
     return new Promise((resolve,reject)=>{
@@ -195,12 +232,7 @@ export function createShareProxy({upstreamHost='localhost',upstreamPort=8200,
       dispatch(signal=>upstreamRequest({path:req.url,method:req.method,headers},
         {body,signal,deadlineMs,onResponse:response=>{
           if(response.statusCode>=500)observer.fail('UPSTREAM_5XX',route,response.statusCode);
-          if(res.destroyed){response.resume();return;}
-          res.writeHead(response.statusCode,responseHeaders(response.headers,secureProductionIngress));
-          response.pipe(res);
-          // A downstream abort does not cancel native execution or free the
-          // lane. Drain the response to observe complete upstream finalization.
-          res.on('close',()=>{if(!res.writableEnded){response.unpipe(res);response.resume();}});
+          deliver(response,res,route,deadlineMs);
         }}),{signal:waiting.signal,deadlineMs}).catch(error=>{
           const code=failureCodes.has(error.code)?error.code:'UPSTREAM_FAILURE';
           const status=['QUEUE_FULL','QUEUE_DEADLINE','SERIALIZATION_CLOSED'].includes(code)?503:502;
@@ -228,7 +260,8 @@ export function createShareProxy({upstreamHost='localhost',upstreamPort=8200,
     req.on('error',()=>{clearTimeout(deadline);res.destroy();});
     res.on('close',()=>clearTimeout(deadline));
   });
-  proxy.ingressStatus=()=>({failures:observer.status(),serialization:lane?.status()??{enabled:false}});
+  proxy.ingressStatus=()=>({failures:observer.status(),serialization:lane?.status()??{enabled:false},
+    delivery:{bytes:deliveryBytes,maxBytes:maxDeliveryBytes,maxResponseBytes}});
   // Bound sockets and partially received requests as well as queued bodies.
   proxy.maxConnections=maxConnections;
   proxy.headersTimeout=10000;
