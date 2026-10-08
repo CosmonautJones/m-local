@@ -244,7 +244,8 @@ def:pub buildStyles(T: dict[str, str]) -> any {
                 "borderRadius": R["pill"]
             },
             "statusText": {"fontFamily": "Figtree, system-ui, sans-serif", "fontSize": F["xs"], "fontWeight": "800"},
-            "masthead": {"paddingHorizontal": 20, "paddingTop": 16, "paddingBottom": 4, "flexDirection": "row", "alignItems": "center", "justifyContent": "space-between", "gap": 12},
+            "masthead": {"paddingHorizontal": 20, "paddingTop": 16, "paddingBottom": 4, "flexDirection": "row", "flexWrap": "wrap", "alignItems": "center", "justifyContent": "space-between", "gap": 12},
+            "headerActions": {"flexDirection": "row", "flexWrap": "wrap", "alignItems": "center", "gap": S["sm"], "minWidth": 0, "maxWidth": "100%", "flexShrink": 1},
             "sessionPanel": {"marginHorizontal": 20, "marginTop": 12, "padding": 16, "gap": 12, "borderRadius": 18, "backgroundColor": T["surface"], "borderWidth": 1, "borderColor": T["border"]},
             "filterPanel": {"padding": 14, "gap": 12, "backgroundColor": T["surface"], "borderRadius": 16, "borderWidth": 1, "borderColor": T["border"]},
             "claimPass": {"backgroundColor": "var(--ml-ticket)", "padding": 20, "borderRadius": 24, "gap": 14},

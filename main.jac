@@ -791,12 +791,12 @@ def:pub app -> JsxElement {
 
     def LogoutLink() -> JsxElement {
         if not session or not session.authenticated {
-            return <View style={styles.row}><ThemeControl />
+            return <View style={styles.headerActions}><ThemeControl />
                 <Pressable accessibilityRole="button" style={styles.btnGhost} onPress={lambda { openSignIn(); }}><Text style={styles.btnGhostText}>Sign in</Text></Pressable>
                 <Pressable accessibilityRole="button" style={styles.btnGhost} onPress={lambda { closeDetail(); audience = ""; }}><Text style={styles.btnGhostText}>Choose account type</Text></Pressable>
             </View>;
         }
-        return <View style={styles.row}><ThemeControl /><Pressable accessibilityRole="button" accessibilityLabel="Log out" style={styles.btnGhost} disabled={authBusy} onPress={lambda { logout(); }}><Text style={styles.btnGhostText}>Log out</Text></Pressable></View>;
+        return <View style={styles.headerActions}><ThemeControl /><Pressable accessibilityRole="button" accessibilityLabel="Log out" style={styles.btnGhost} disabled={authBusy} onPress={lambda { logout(); }}><Text style={styles.btnGhostText}>Log out</Text></Pressable></View>;
     }
 
     def AuthScreen() -> JsxElement {
