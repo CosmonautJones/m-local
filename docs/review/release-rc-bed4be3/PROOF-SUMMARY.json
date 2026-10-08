@@ -1,0 +1,100 @@
+{
+  "schema": 1,
+  "combined_source_sha": "bed4be3d43ec12b949bc2d7799ff14883be3639f",
+  "combined_source_tree": "d3736bc1c94bcefdcfc21003ed33e97c88d3fd82",
+  "runtime": "official Jac 0.37.23",
+  "all_new_ci_runs": 24,
+  "direct_push_dispatch": 15,
+  "supplemental_pr": 9,
+  "all_runs_terminal_success": true,
+  "combined": {
+    "core_executions": 493,
+    "core_expected_and_passed_names": 134,
+    "named_binding_errors": 0,
+    "missing_nonpass_ambiguous_unmapped": 0,
+    "context_executions": 13,
+    "insights": {
+      "python_tests": 12,
+      "node_tests": 11,
+      "jac_executions": 68
+    },
+    "onboarding_tests": 109,
+    "shared_unit": 7,
+    "photos": 7,
+    "native_preservation": 80,
+    "shared_native": 84,
+    "shared_local_tls_deliveries": 60,
+    "coordinated_recovery": 71,
+    "monitoring": 23,
+    "tooling_total": 74,
+    "tooling_skipped": 4,
+    "node_tests": 66,
+    "compiled_browser": 162,
+    "actual_browser": 62,
+    "actual_browser_privacy_tests": 12,
+    "axe_scans": 4,
+    "axe_violations": 0,
+    "topology_checks": 266,
+    "application_fault_cases": 21,
+    "package_authenticated_recovery": 66
+  },
+  "components": {
+    "foundation": {
+      "core": 451,
+      "node": 34,
+      "compiled_browser": 130,
+      "shared_native": 82,
+      "tooling_total": 29,
+      "tooling_skipped": 3
+    },
+    "hardening": {
+      "core": 451,
+      "expected_names": 124,
+      "node": 63,
+      "compiled_browser": 130,
+      "onboarding": 101,
+      "shared_native": 84,
+      "native_preservation": 80,
+      "tooling_total": 29,
+      "tooling_skipped": 3,
+      "topology_and_browser": "conditional skips"
+    },
+    "experience": {
+      "core": 478,
+      "expected_names": 131,
+      "node": 66,
+      "compiled_browser": 162,
+      "onboarding": 75,
+      "shared_native": 84,
+      "actual_browser": 62,
+      "tooling_total": 29,
+      "tooling_skipped": 3,
+      "native_and_topology": "conditional skips"
+    }
+  },
+  "local_reporter_regressions": {
+    "final_each_clone": 4,
+    "frozen_old_tests": 4,
+    "frozen_old_expected_failures": 3,
+    "foundation_tooling_total": 29,
+    "foundation_tooling_skipped": 2
+  },
+  "open_visual_finding": {
+    "observed_width": 390,
+    "action": "Choose account type",
+    "problem": "clipped header action",
+    "width_320": "not verified",
+    "issue_url": "https://github.com/CosmonautJones/m-local/issues/48#issuecomment-6049402169"
+  },
+  "artifact": {
+    "cloud_archive_sha256": "0844c67c7aa9e29fd6e1e856bacbb37f969c9db4df1d1fd3646925ea8338745f",
+    "archive_retained": false,
+    "manifest_sha256": "e42ef5cb581f2c1667264127b85b469ed0faeadadd01619dc716b57d8e5d149c",
+    "compiled_sha256": "f3d4c400d5b1e3c4cb0f2ac664c755149d8c0d7d528b2e177f520dc9e32ee329",
+    "dependency_archive_sha256": "824fa69943ca4c50d5ac68256248d4c1613d5bd09300582954986d27ad7dfffc",
+    "old_local_archive_certified": false,
+    "future_artifact_certified": false
+  },
+  "verdict": "BLOCKED for hosting acceptance",
+  "scope_note": "Named outcomes are not branch coverage. Conditional skips are preserved. Green CI does not establish all responsive controls or real-host, inbox, physical-device, policy, migration, monitoring or off-host recovery acceptance."
+}

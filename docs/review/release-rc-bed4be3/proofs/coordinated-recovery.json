@@ -1,0 +1,19 @@
+{
+  "status": "passed",
+  "checks": 71,
+  "elapsed_seconds": 235.992,
+  "runtime_version": "jac 0.37.23  (Linux x86_64)",
+  "runtime_bin_sha256": "2c3c697616b08516caf01704571e7e7020f4b294cd2bef7f04e8ef1ceec9d6ad",
+  "source_input_manifest_sha256": "3cae70d50ad23a20dfd9132a7f368af4cdaa88a2d5b854a7519fa536bde3a62d",
+  "postgres_version": "postgres (PostgreSQL) 16.15 (Ubuntu 16.15-1.pgdg24.04+2)",
+  "postgres_binary_sha256": "3a089a86625851a42ea1561dcdffa30569c24879c4eb6eb7be9055a72172e431",
+  "postgres_distribution_sha256": "3a8102c7b2e819b70a8bdd0f8b25f7223490333f1d4f798a37afe7a23cd66054",
+  "github_sha": "bed4be3d43ec12b949bc2d7799ff14883be3639f",
+  "restore_success": true,
+  "restart_success": true,
+  "actual_smtp": false,
+  "canonical_source_entry_path_preserved": true,
+  "physical_copy_scope": "cold physical PostgreSQL cluster copy; matching Jac/runtime version only",
+  "private_state_scope": "onboarding.sqlite3/photo-ownership.sqlite3 via sqlite3.Connection.backup; code.key/jwt_secret/JPEGs copied",
+  "release_acceptance": false
+}
