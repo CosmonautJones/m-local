@@ -1,0 +1,90 @@
+name: Guest header compiled browser proof
+
+on:
+  pull_request:
+    branches: [release/combined-candidate]
+    types: [opened, synchronize, reopened, edited]
+    paths:
+      - '.jac-version'
+      - 'jac.toml'
+      - 'main.jac'
+      - 'theme.jac'
+      - 'client/**'
+      - 'services/**'
+      - 'assets/brand/**'
+      - 'assets/manifest.webmanifest'
+      - 'scripts/runtime.sh'
+      - 'scripts/check.sh'
+      - 'scripts/build.sh'
+      - 'scripts/python.sh'
+      - 'tests/ui/guest_header_browser.py'
+      - 'tests/ui/run_guest_header_browser.sh'
+      - '.github/workflows/guest-header-proof.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guest-header-proof-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  guest-header:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/data/research/
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Chromium system libraries on the disposable runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          deps=$(mktemp -d "$RUNNER_TEMP/guest-header-deps.XXXXXXXX")
+          mkdir -m 700 "$deps/cache" "$deps/config" "$deps/tmp"
+          env -i HOME="$HOME" PATH="$PATH" LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+            TMPDIR="$deps/tmp" XDG_CACHE_HOME="$deps/cache" XDG_CONFIG_HOME="$deps/config" \
+            PIP_CONFIG_FILE=/dev/null PIP_CACHE_DIR="$deps/cache/pip" PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_INPUT=1 \
+            PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
+            bash --noprofile --norc -euo pipefail -c '
+              python3 -m venv "$1/venv"
+              "$1/venv/bin/python" -m pip install playwright==1.56.0
+              "$1/venv/bin/python" -m playwright install-deps chromium
+            ' bash "$deps"
+      - name: Prove the exact head through synthetic compiled guest UI
+        shell: bash
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          PROOF_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          PROOF_WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          bash tests/ui/run_guest_header_browser.sh \
+            "$GITHUB_WORKSPACE" "$RUNNER_TEMP/guest-header-evidence" "$PR_HEAD_SHA" "$PR_BASE_SHA"
+      # checkout v4 uses blob:none for sparse checkout. The wrapper verifies only
+      # object metadata: excluded research payloads must not exist locally.
+      # Commit/tree metadata remains; build inputs use a separate positive allowlist.
+      # Upload only synthetic review proof, never checkout/archive/JAB/raw logs/state.
+      - name: Preserve minimal source-bound browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: guest-header-${{ github.event.pull_request.head.sha }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/guest-header-evidence/receipt.json
+            ${{ runner.temp }}/guest-header-evidence/source-binding.json
+            ${{ runner.temp }}/guest-header-evidence/compile-source-binding.json
+            ${{ runner.temp }}/guest-header-evidence/*.png
