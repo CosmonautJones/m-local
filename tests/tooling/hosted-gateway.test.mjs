@@ -7,7 +7,7 @@ import { createShareProxy } from '../../scripts/phone-share-proxy.mjs';
 
 const emptyFeed={items:[],favorites:[],note:'',price_range:'',total_deals:0,signed_in:false,personalized:false,completed:false};
 const guest={authenticated:false,actor_id:'',role:'guest',restaurant_id:'',display_name:'',is_demo:false,
-  email_verified:false,business_account:false,catalog_activity:false};
+  email_verified:false,business_account:false,merchant_paused:false,catalog_activity:false};
 
 async function serve(t, handler, options = {}) {
   const upstream = http.createServer(handler).listen(0, '127.0.0.1');

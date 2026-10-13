@@ -31,7 +31,7 @@ const failureCodes=new Set(['ROUTE_DENIED','BODY_TOO_LARGE','BODY_DEADLINE','ONB
 // HTTP completion must not depend on a browser continuing to read its socket.
 const maxResponseBytes=8*1024*1024,maxDeliveryBytes=16*1024*1024;
 const guestSession={authenticated:false,actor_id:'',role:'guest',restaurant_id:'',display_name:'',
-  is_demo:false,email_verified:false,business_account:false,catalog_activity:false};
+  is_demo:false,email_verified:false,business_account:false,merchant_paused:false,catalog_activity:false};
 const guestMetadata=['_jac_type','_jac_id','_jac_archetype','_jac_type_id'];
 
 function validGuestSession(value) {

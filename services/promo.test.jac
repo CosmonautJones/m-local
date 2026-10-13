@@ -795,7 +795,7 @@ test "suspension retains saved claims and stock while denying new claims publica
     now = time.time();
     offers = _hold_limit_fixture("suspension-policy", now);
     restaurant = _restaurant_of(offers[0]) as Restaurant;
-    actor = "d1023456789abcdef0123456789abcdef";
+    actor = "d" * 32;
     with tempfile.TemporaryDirectory() as directory {
         with patch.dict(os.environ, {"MLOCAL_ONBOARDING_DIR": directory,
             "MLOCAL_MERCHANT_OWNERS": json.dumps({restaurant.slug: actor})}) {

@@ -69,7 +69,7 @@ test('readiness metadata and guest application probes use the same serialized ga
     else if(req.url==='/healthz/ready'){res.writeHead(200,{'content-type':'application/json'});res.end('{"ready":true}');}
     else {res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,data:{result:{
       authenticated:false,actor_id:'',role:'guest',restaurant_id:'',display_name:'',is_demo:false,
-      email_verified:false,business_account:false,catalog_activity:false}}}));}
+      email_verified:false,business_account:false,merchant_paused:false,catalog_activity:false}}}));}
   },{deploymentTopology:'single-instance-serialized',healthCheck:true});
   const first=await fetch(origin+'/function/claim_offer',{method:'POST',body:'{}'});
   const ready=fetch(origin+'/healthz');

@@ -6,7 +6,7 @@ import {createShareProxy} from '../../scripts/phone-share-proxy.mjs';
 
 const feed={items:[],favorites:[],note:'',price_range:'',total_deals:0,signed_in:false,personalized:false,completed:false};
 const guest={authenticated:false,actor_id:'',role:'guest',restaurant_id:'',display_name:'',is_demo:false,
-  email_verified:false,business_account:false,catalog_activity:false};
+  email_verified:false,business_account:false,merchant_paused:false,catalog_activity:false};
 const reply=(res,value,status=200)=>{res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(value));};
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
@@ -21,6 +21,24 @@ test('official hydrated guest metadata is accepted but unknown or malformed extr
     {...result,_jac_id:7},{...result,authenticated:true},{...result,actor_id:'another actor'}]) {
     result=invalid;const response=await fetch(origin+'/healthz');assert.equal(response.status,503);
     assert.deepEqual(await response.json(),{ready:false});
+  }
+});
+
+test('guest readiness requires the exact unpaused merchant status field',async t=>{
+  let result={...guest};
+  const {origin}=await serve(t,(req,res)=>reply(res,req.url==='/healthz/ready'?{ready:true}:
+    {ok:true,data:{result:req.url==='/function/home_feed'?feed:result}}));
+  await pause(30);
+  const accepted=await fetch(origin+'/healthz');
+  assert.equal(accepted.status,200);
+  assert.deepEqual(await accepted.json(),{ready:true});
+  const missing={...guest};delete missing.merchant_paused;
+  for(const invalid of [missing,{...guest,merchant_paused:true},{...guest,merchant_paused:'false'},
+    {...guest,unknown:'private value'}]) {
+    result=invalid;
+    const refused=await fetch(origin+'/healthz');
+    assert.equal(refused.status,503);
+    assert.deepEqual(await refused.json(),{ready:false});
   }
 });
 
