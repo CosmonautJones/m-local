@@ -15,12 +15,16 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Report tracked source-byte composition
         run: python3 scripts/check-jac-share.py
   jac:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -53,7 +57,7 @@ jobs:
         run: bash scripts/test-business-approval.sh
       - name: Verify coordinated recovery and recovered restart
         timeout-minutes: 22
-        run: bash scripts/test-recovery.sh
+        run: GITHUB_SHA="$(git rev-parse HEAD)" bash scripts/test-recovery.sh
       - name: Verify redacted domain failures and local SMTP quota events
         timeout-minutes: 17
         run: |

@@ -19,6 +19,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Report tracked source-byte composition
         run: python3 scripts/check-jac-share.py
   shared-onboarding:
@@ -26,6 +28,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Install pinned Jac
         run: bash scripts/setup.sh
       - name: Check the disposable TLS mail sink

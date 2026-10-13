@@ -64,6 +64,12 @@ limits each student to two live holds while preserving existing claims. Repeat
 requests retain the original claim; saved price and terms do not change when an
 offer is edited.
 
+Host-authorized merchant suspension hides public offers and blocks new claims,
+publication and redemption. Existing claims stay visible with support guidance
+and keep their original expiry and terms. Only an attributed, revision-checked
+reinstatement resumes service; routine business edits cannot clear suspension.
+See the [operator commands](docs/BUSINESS-APPROVAL.md#reversible-suspension-and-reinstatement).
+
 U-M email verification does not establish university enrollment. Businesses check
 any stated eligibility at the counter. Sample offers are fictional and cannot be
 redeemed at a real business. Server sample policy applies across public feed,

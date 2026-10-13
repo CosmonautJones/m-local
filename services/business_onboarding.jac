@@ -7,6 +7,7 @@ import from services.business_listing { activate_business_listing }
 import from services.promo { _lock, _unlock }
 import from services.session { _actor_id }
 import from services.onboarding { verified_account }
+import from services.qr_auth { merchant_operations_enabled, merchant_owner, MERCHANT_PAUSED_MESSAGE }
 
 obj BusinessDraftView {
     has ok: bool = False, message: str = "", name: str = "", cuisine: str = "",
@@ -45,7 +46,9 @@ def:protect get_business_draft() -> BusinessDraftView {
         } elif raw.get("status") != "active" and covered {
             raw["status"] = "approved";
         }
-        return _draft_view(raw);
+        slug = "business-" + _actor_id();
+        paused = bool(merchant_owner(slug)) and not merchant_operations_enabled(slug);
+        return _draft_view(raw, MERCHANT_PAUSED_MESSAGE if paused else "");
     } except Exception {
         return BusinessDraftView(message="Could not load your business profile. Please try again.");
     }

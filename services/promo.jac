@@ -18,7 +18,7 @@ import time;
 import secrets;
 import hashlib;
 import json;
-import from services.qr_auth { listing_visible }
+import from services.qr_auth { listing_visible, merchant_operations_enabled, MERCHANT_PAUSED_MESSAGE, CLAIM_SUPPORT_MESSAGE }
 import from datetime { datetime, timedelta }
 import from zoneinfo { ZoneInfo }
 import from services.models {
@@ -119,6 +119,7 @@ obj OfferView {
         my_expires_ts: float = 0.0,
         my_status: str = "",
         my_expires: str = "",
+        claim_support_message: str = "",
         access_context: AccessContextView = AccessContextView();
 }
 
@@ -168,6 +169,7 @@ obj MerchantView {
         note_date: str = "",
         is_demo: bool = False,
         image_url: str = "",
+        operations_paused: bool = False,
         offers: list[OfferView] = [],
         claims: list[ClaimView] = [];
 }
@@ -440,6 +442,8 @@ def _view(
     }
     remaining = _remaining(o, now);
     state = _state(o, now, remaining);
+    operations_paused = r is not None and not merchant_operations_enabled(r.slug);
+    if operations_paused { state = "suspended"; }
     (fits, reasons) = _explain(o, state, remaining, budget, window, wanted, now);
     if state == "active" {
         tlabel = f"Until {_clock(o.end_ts)} · {_span(o.end_ts - now)} left";
@@ -491,6 +495,7 @@ def _view(
         v.my_terms = c.terms_snapshot;
         v.my_eligibility = c.eligibility_snapshot;
         v.my_qr_payload = c.qr_payload if v.my_status == "claimed" else "";
+        if operations_paused { v.claim_support_message = CLAIM_SUPPORT_MESSAGE; }
     }
     return v;
 }
@@ -619,7 +624,8 @@ def _preview(r: Restaurant, qr_payload: str, now: float) -> ClaimPreview {
     messages = {"claimed": "Check eligibility and confirm redemption.",
         "redeemed": "This claim was already redeemed.",
         "cancelled": "This claim was cancelled.", "expired": "This claim has expired."};
-    return ClaimPreview(ok=state == "claimed", message=messages.get(state, "This claim is unavailable."),
+    enabled = merchant_operations_enabled(r.slug);
+    return ClaimPreview(ok=state == "claimed" and enabled, message=messages.get(state, "This claim is unavailable.") if enabled else MERCHANT_PAUSED_MESSAGE,
         claim_id=jid(c), title_snapshot=c.offer_title_snapshot, price_cents=c.price_cents_snapshot,
         terms=c.terms_snapshot, eligibility=c.eligibility_snapshot,
         expires_ts=c.expires_ts, expires_label=_clock(c.expires_ts), status=state, restaurant=r.name);
@@ -661,6 +667,7 @@ def _save_offer(
     create_key: str = "",
     image_url: str | None = None
 ) -> ActionResult {
+    if not merchant_operations_enabled(r.slug) { return ActionResult(message=MERCHANT_PAUSED_MESSAGE); }
     if not offer_id and create_key and re.fullmatch(r"[A-Za-z0-9_-]{20,80}", create_key) is None {
         return ActionResult(message="Refresh the app and try publishing again.");
     }
@@ -795,6 +802,7 @@ def _portal(r: Restaurant, now: float, message: str = "") -> MerchantView {
         message=message,
         name=public_name(r.name),
         image_url=r.image_url,
+        operations_paused=not merchant_operations_enabled(r.slug),
         cuisine=r.cuisine,
         blurb=r.blurb,
         address=loc.address if loc else "",
@@ -865,6 +873,9 @@ def:pub get_offer(
     if v.my_status == "claimed" {
         return v;
     }
+    # During suspension the authenticated claimant may reopen their own saved
+    # snapshot/history. No other account bypasses the hidden public listing.
+    if v.my_claim_id and r is not None and not merchant_operations_enabled(r.slug) { return v; }
     if r is None or not listing_visible(r.slug, r.source) { return None; }
     if o.status == "paused" or now >= o.end_ts {
         return None;
@@ -905,7 +916,7 @@ def:protect merchant_portal() -> MerchantView {
     _ensure_seed();
     r = _merchant();
     if r is None { return MerchantView(message="This account does not own a restaurant."); }
-    return _portal(r, time.time());
+    return _portal(r, time.time(), "" if merchant_operations_enabled(r.slug) else MERCHANT_PAUSED_MESSAGE);
 }
 
 
@@ -1040,6 +1051,8 @@ def:protect set_offer_status(offer_id: str, status: str) -> ActionResult {
             result = ActionResult(ok=False, message="Status must be active or paused.");
         } elif o is None {
             result = ActionResult(ok=False, message="That offer does not belong to your restaurant.");
+        } elif status == "active" and not merchant_operations_enabled(r.slug) {
+            result = ActionResult(message=MERCHANT_PAUSED_MESSAGE);
         } elif status == "active" and o.end_ts <= time.time() {
             result = ActionResult(ok=False, message="Update the offer end time before resuming an expired offer.");
         } else {

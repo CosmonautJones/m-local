@@ -101,8 +101,46 @@ private accounts, approvals/reviews and the onboarding key together.
 
 The current SQLite private store and OS mutation lock remain limited to one
 host. This approval implementation does not establish multi-host correctness,
-suspension, complete restore, monitoring, operator staffing or public deployment
+complete hosted restore, monitoring, operator staffing or public deployment
 readiness. Those remain release gates in `RELEASE-ACCEPTANCE.md`.
+
+## Reversible suspension and reinstatement
+
+Travis approved this behavior on October 13: hide a suspended merchant's offers
+from discovery, block new claims and publication, retain existing claims with
+support guidance, and pause redemption until explicit authorized reinstatement.
+Existing terms, expiry, hold budgets and history do not reset. A claim that
+expires during suspension stays expired after reinstatement. Owners, accounts,
+approval records, offers, photos and claims are preserved. The owner retains
+their merchant identity and read access to their inventory; routine profile
+save, activation retries and another identity approval cannot clear suspension.
+
+The same host filesystem boundary as approval authorizes these commands. The
+operator must use the app's actual private store and configured owner map;
+`--by` supplies attribution, not authentication. Both reviewed signup businesses
+and valid host-provisioned merchant mappings are covered. No public RPC grants
+status authority.
+
+```sh
+bash scripts/review-business.sh status --actor '<merchant actor>'
+bash scripts/review-business.sh suspend --actor '<merchant actor>' \
+  --revision '<current revision from status>' --command-id '<new UUID>' \
+  --by 'Operator name' --note 'Reason for suspension'
+bash scripts/review-business.sh audit --actor '<merchant actor>'
+bash scripts/review-business.sh reinstate --actor '<merchant actor>' \
+  --revision '<current revision from status>' --command-id '<different new UUID>' \
+  --by 'Operator name' --note 'Why reinstatement is authorized'
+```
+
+Keep the command UUID and exact arguments for a lost-response retry. That retry
+returns the original immutable receipt without applying its transition again,
+even after a newer event. A reused token with different details is rejected.
+A stale revision is rejected; read current status and review the new reason
+before issuing a new command. Status and attributed reason/time/audit commit
+together under the shared mutation lock and SQLite transaction. Malformed state
+or incomplete audit fails closed and requires operator recovery; do not reset
+the tables or generate replacement identities. Back up these tables with the
+existing coordinated recovery set.
 
 ## Verification
 

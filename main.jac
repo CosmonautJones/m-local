@@ -1000,12 +1000,13 @@ def:pub app -> JsxElement {
                     <Text style={styles.claimHeading}>{"Your saved claim" if o.my_status == "claimed" else "Saved claim · " + o.my_status}</Text>
                     <Text style={styles.claimHeading}>{o.my_title}</Text>
                     {(<View style={{"gap": 12}}>
-                        <Text style={styles.claimLabel}>Show this QR at the counter</Text>
+                        <Text style={styles.claimLabel}>{"QR retained. Redemption is paused." if o.claim_support_message else "Show this QR at the counter"}</Text>
                         {(<ClaimQr payload={o.my_qr_payload} expiresTs={o.my_expires_ts} />) if isClaimPayload(o.my_qr_payload) else <Text style={styles.claimBody}>Claim QR unavailable. Refresh this offer.</Text>}
                         <Pressable accessibilityRole="button" style={styles.btnGhost} disabled={busy} onPress={lambda { changeClaim(True); }}><Text style={styles.btnGhostText}>{"Updating..." if busy else "Cancel this hold"}</Text></Pressable>
                     </View>) if o.my_status == "claimed" and o.my_qr_payload else <StatusPill state={o.my_status} />}
                     <Text style={styles.claimPrice}>{money(o.my_price_cents / 100)}</Text>
                     <Text style={styles.claimBody}>{o.my_terms or "No additional terms."}</Text>
+                    {(<Message text={o.claim_support_message} good={False} />) if o.claim_support_message else <View style={styles.hidden} />}
                     <Text style={styles.claimBody}>{"For: " + o.my_eligibility}</Text>
                     <Text style={styles.claimBody}>{"Hold expires " + o.my_expires + ". Unused holds release automatically."}</Text>
                 </View>
@@ -1068,11 +1069,12 @@ def:pub app -> JsxElement {
             {(
                 <View style={styles.empty}><Text style={styles.subtitle}>Loading restaurant...</Text></View>
             ) if mLoading else (<View style={styles.hidden} />) if portal is None else <View style={{"gap": 16}}>
+                {(<Message text="This business is temporarily unavailable. Publication and redemption are paused. Contact M-Local support." good={False} />) if portal.operations_paused else <View style={styles.hidden} />}
                 {Editor() if editing else <View style={styles.hidden} />}
                 <View style={styles.section}>
                     <View style={styles.rowBetween}>
                         <Text style={styles.h2}>Your offers</Text>
-                        <Pressable accessibilityRole="button" style={styles.btn} disabled={editing or busy or profileEditing} onPress={lambda { newOffer(); }}>
+                        <Pressable accessibilityRole="button" style={styles.btn} disabled={editing or busy or profileEditing or portal.operations_paused} onPress={lambda { newOffer(); }}>
                             <Text style={styles.btnText}>New offer</Text>
                         </Pressable>
                     </View>

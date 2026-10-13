@@ -5,7 +5,7 @@ import json;
 import os;
 import hmac;
 import from uuid { UUID }
-import from services.email_codes { delivery_ready, send_code, store }
+import from services.email_codes { delivery_ready, send_code, store, merchant_operations_allowed }
 import from services.photo_reference { image_reference }
 import from services.website_import { clean_url }
 
@@ -186,6 +186,9 @@ def prepare_business_activation(actor: str, raw: dict[str, any]) -> dict[str, st
     result = validate_draft(raw, actor);
     if not state.approval_covers(actor, result) {
         raise ValueError("Your business needs host approval before publishing.");
+    }
+    if not merchant_operations_allowed(actor) {
+        raise ValueError("This business is suspended or needs host recovery. Publication and redemption are paused; contact M-Local support.");
     }
     result["status"] = "draft";
     result["slug"] = state.reserve_business(actor);

@@ -207,6 +207,13 @@ def main():
             historical_claim = historical.call('claim_offer', offer_id=offer['code'])
             check(historical_claim.get('ok') and merchant.call('redeem_claim', qr_payload=historical_claim['qr_payload']).get('ok'),
                 'separate original student has a redeemed claim before backup')
+            held_snapshot = student.call('get_offer', offer_id=offer['code'])
+            suspension = state.change_business_status(merchant_actor, 'suspended', 'Fixture operator',
+                'Disposable suspension recovery only', state.business_status(merchant_actor)['revision'],
+                secrets.token_hex(16))
+            suspension_audit = state.business_status_events(merchant_actor)
+            check(suspension['status'] == 'suspended' and bool(suspension_audit),
+                'host-only suspension is durable and attributed before package backup')
             stop_process(dev)
             check(not process_group_alive(dev) and closed(backend_port),
                 'seed TERM stops its complete group and native listener before packaged launch')
@@ -234,7 +241,7 @@ def main():
             environment.update(MLOCAL_INGRESS='restricted-edge', MLOCAL_TRUSTED_HTTPS_EDGE='1')
             os.environ.update(environment)
 
-            def production(label, held=True, redeem_held=False):
+            def production(label, held=True, redeem_held=False, suspended=True):
                 nonlocal phase, backend_port, gateway_port
                 # A closed Linux TCP listener can leave TIME_WAIT sockets. Keep
                 # the conservative production bind guard and use fresh distinct
@@ -260,6 +267,10 @@ def main():
                     and detail.get('my_status') == ('claimed' if held else 'redeemed')
                     and detail.get('my_qr_payload') == (claim['qr_payload'] if held else ''),
                     label + ' preserves original claim identity status and snapshot')
+                check(detail.get('my_expires_ts') == held_snapshot.get('my_expires_ts')
+                    and detail.get('my_price_cents') == held_snapshot.get('my_price_cents')
+                    and detail.get('my_eligibility') == held_snapshot.get('my_eligibility'),
+                    label + ' preserves original claim expiry price and eligibility without resetting it')
                 historical_detail = Api(api.origin, historical_token).call('get_offer', offer_id=offer['code'])
                 check(historical_detail.get('my_claim_id') == historical_claim['claim_id']
                     and historical_detail.get('my_status') == 'redeemed' and historical_detail.get('my_terms') == 'Original package terms'
@@ -271,6 +282,24 @@ def main():
                     label + ' keeps other student unable to inspect original QR')
                 check(any(row['id'] == offer['code'] for row in merchant_api.call('merchant_portal')['offers']),
                     label + ' retains original merchant ownership of published offer')
+                # Read through a fresh private-store instance at the canonical
+                # recovered path. Do not reuse the pre-restore cached object.
+                current_state = CodeStore(onboarding)
+                if suspended:
+                    check(current_state.business_status(merchant_actor)['status'] == 'suspended'
+                        and current_state.business_status_events(merchant_actor) == suspension_audit,
+                        label + ' preserves suspension revision and immutable audit across package restore')
+                    check(bool(detail.get('claim_support_message')) and detail.get('state') == 'suspended',
+                        label + ' keeps saved claim visible with paused-redemption support message')
+                    check(Api(api.origin).call('get_offer', offer_id=offer['code']) is None,
+                        label + ' hides suspended offer from anonymous detail')
+                    check(not merchant_api.call('redeem_claim', qr_payload=claim['qr_payload']).get('ok'),
+                        label + ' refuses held QR redemption while merchant remains suspended')
+                    check(Api(api.origin, student_token).call('get_offer', offer_id=offer['code']).get('my_status') == 'claimed',
+                        label + ' paused redemption preserves existing hold')
+                else:
+                    check(current_state.business_status(merchant_actor)['status'] == 'active',
+                        label + ' preserves explicit reinstatement across restart')
                 with urllib.request.urlopen(api.origin + photo['url'], timeout=10) as response:
                     check(response.status == 200 and response.read().startswith(b'\xff\xd8'), label + ' serves the original owned JPEG')
                 with urllib.request.urlopen(api.origin + '/', timeout=10) as response:
@@ -283,6 +312,11 @@ def main():
                     else:
                         raise AssertionError('Public native route exposed')
                 if redeem_held:
+                    current_state.change_business_status(merchant_actor, 'active', 'Fixture operator',
+                        'Disposable authorized reinstatement after restore',
+                        current_state.business_status(merchant_actor)['revision'], secrets.token_hex(16))
+                    check(Api(api.origin, student_token).call('get_offer', offer_id=offer['code']).get('my_qr_payload') == claim['qr_payload'],
+                        label + ' reinstatement retains the original held QR')
                     check(merchant_api.call('redeem_claim', qr_payload=claim['qr_payload']).get('ok')
                         and not merchant_api.call('redeem_claim', qr_payload=claim['qr_payload']).get('ok'),
                         label + ' redeems restored held QR exactly once')
@@ -321,8 +355,9 @@ def main():
                 'logical restore retains exact backup bytes all SQLite schema and rows and original keys and photos')
             environment['JAC_DB_URL'] = connection_base + 'package_restored'
             os.environ.update(environment)
-            production('packaged-restored-startup', redeem_held=True)
-            production('packaged-post-redemption-restart', held=False)
+            production('packaged-restored-startup')
+            production('packaged-restored-suspension-restart', redeem_held=True)
+            production('packaged-post-redemption-restart', held=False, suspended=False)
             check(all(pkg.digest(path) == keys[name] for name, path in {'code': onboarding / 'code.key', 'jwt': app / '.jac/data/jwt_secret'}.items()),
                 'restored startup never replaces original native and email signing keys')
         sink_closed = sink.closed

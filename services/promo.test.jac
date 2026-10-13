@@ -1,6 +1,7 @@
 """Server-rule checks. Run bash scripts/test.sh core in an isolated store."""
 
 import time;
+import tempfile;
 import from services.seed { seed_demo }
 import from unittest.mock { patch }
 import from jaclang { JacRuntime as Jac }
@@ -786,5 +787,57 @@ test "lock refresh failure closes the file descriptor" {
         assert closed, "Failed lock acquisition must not leak its descriptor";
     } finally {
         if not closed { os.close(fd); }
+    }
+}
+
+
+test "suspension retains saved claims and stock while denying new claims publication and redemption" {
+    now = time.time();
+    offers = _hold_limit_fixture("suspension-policy", now);
+    restaurant = _restaurant_of(offers[0]) as Restaurant;
+    actor = "d1023456789abcdef0123456789abcdef";
+    with tempfile.TemporaryDirectory() as directory {
+        with patch.dict(os.environ, {"MLOCAL_ONBOARDING_DIR": directory,
+            "MLOCAL_MERCHANT_OWNERS": json.dumps({restaurant.slug: actor})}) {
+            state = store();
+            held = _claim(jid(offers[0]), "suspension-student", now);
+            assert held.ok, held.message;
+            cancelled = _claim(jid(offers[1]), "suspension-cancelled-student", now);
+            assert cancelled.ok and _cancel(jid(offers[1]), "suspension-cancelled-student", now).ok;
+            original = _view(offers[0], now, "suspension-student");
+            remaining = _remaining(offers[0], now);
+            state.change_business_status(actor, "suspended", "Fixture operator", "Fixture complaint", 0, "1" * 32);
+            paused = _view(offers[0], now, "suspension-student");
+            assert paused.state == "suspended" and paused.claim_support_message;
+            assert paused.my_qr_payload == held.qr_payload and paused.my_claim_id == held.claim_id;
+            assert paused.my_terms == original.my_terms and paused.my_price_cents == original.my_price_cents;
+            assert paused.my_expires_ts == original.my_expires_ts and paused.my_status == "claimed";
+            assert _claim(jid(offers[0]), "suspension-student", now).qr_payload == held.qr_payload;
+            assert not _claim(jid(offers[1]), "suspension-new-student", now).ok;
+            assert not _preview(restaurant, held.qr_payload, now).ok;
+            assert not _redeem(restaurant, held.qr_payload, now).ok;
+            with patch.dict(get_offer.__globals__, {"_actor_id": lambda () -> str { return "suspension-cancelled-student"; }}) {
+                history = get_offer(jid(offers[1])) as OfferView;
+                assert history.my_status == "cancelled" and history.my_qr_payload == "" and history.claim_support_message;
+            }
+            with patch.dict(get_offer.__globals__, {"_actor_id": lambda () -> str { return "suspension-unrelated-student"; }}) {
+                assert get_offer(jid(offers[1])) is None;
+            }
+            assert _remaining(offers[0], now) == remaining;
+            rejected = _save_offer(restaurant, "", "Suspended publish", "Lunch", "5", "7",
+                _input_fmt(now), _input_fmt(now + 3600), "2", "Valid ID", "Original terms", "", "", now, "blocked-publish-key-123456");
+            assert not rejected.ok and "paused" in rejected.message;
+            assert _portal(restaurant, now).offers;
+            state.change_business_status(actor, "active", "Fixture operator", "Complaint resolved", 1, "2" * 32);
+            assert _preview(restaurant, held.qr_payload, now).ok;
+            assert _redeem(restaurant, held.qr_payload, now).ok;
+            assert not _redeem(restaurant, held.qr_payload, now).ok;
+            assert _view(offers[0], now, "suspension-student").claim_support_message == "";
+            state.change_business_status(actor, "suspended", "Fixture operator", "New fixture complaint", 2, "3" * 32);
+            with patch.dict(get_offer.__globals__, {"_actor_id": lambda () -> str { return "suspension-student"; }}) {
+                history = get_offer(jid(offers[0])) as OfferView;
+                assert history.my_status == "redeemed" and history.my_qr_payload == "" and history.claim_support_message;
+            }
+        }
     }
 }

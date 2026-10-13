@@ -91,6 +91,60 @@ def _approved_business_owner(db: any, slug: str) -> str {
 }
 
 
+def status_actor(actor: str) -> str {
+    try { return UUID(actor).hex; }
+    except (ValueError, TypeError, AttributeError) {
+        raise ValueError("Choose an activated, reviewed business account.") from None;
+    }
+}
+
+
+def configured_owners(text: str) -> dict[str, str] {
+    result: dict[str, str] = {};
+    try {
+        raw = json.loads(text);
+        if not isinstance(raw, dict) { return result; }
+        for (slug, actor) in raw.items() {
+            if not isinstance(slug, str) or not isinstance(actor, str) or not slug { return {}; }
+            result[slug] = UUID(actor).hex;
+        }
+        return result if len(set(result.values())) == len(result) else {};
+    } except (ValueError, TypeError, AttributeError) { return {}; }
+}
+
+
+def _business_status(db: any, actor: str) -> dict[str, any] {
+    configured = configured_owners(os.environ.get("MLOCAL_MERCHANT_OWNERS", "{}"));
+    slugs = [slug for (slug, owner) in configured.items() if owner == actor];
+    provisioned = bool(slugs) and (not slugs[0].startswith("business-") or _approved_business_owner(db, slugs[0]) == actor);
+    if not provisioned and _approved_business_owner(db, "business-" + actor) != actor {
+        raise ValueError("Status changes require an activated, reviewed or host-provisioned merchant. Unknown accounts need host reconciliation.");
+    }
+    return _stored_business_status(db, actor);
+}
+
+
+def _stored_business_status(db: any, actor: str) -> dict[str, any] {
+    tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('business_status','business_status_events')")};
+    # An older valid store has no status tables yet. The host migration adds
+    # both; a partially missing schema must not revive an explicit suspension.
+    if not tables { return {"actor": actor, "status": "active", "revision": 0}; }
+    if len(tables) != 2 { raise ValueError("Business status needs host recovery; do not reset its audit history."); }
+    row = db.execute("SELECT status,revision FROM business_status WHERE actor=?", (actor,)).fetchone();
+    latest = db.execute("SELECT status,revision FROM business_status_events WHERE actor=? ORDER BY revision DESC LIMIT 1", (actor,)).fetchone();
+    if row is None and latest is None { return {"actor": actor, "status": "active", "revision": 0}; }
+    if row is None or latest is None or row["status"] not in ("active", "suspended") or type(row["revision"]) != int or row["revision"] < 1 or row["status"] != latest["status"] or row["revision"] != latest["revision"] {
+        raise ValueError("Business status needs host recovery; do not reset its audit history.");
+    }
+    return {"actor": actor, "status": row["status"], "revision": row["revision"]};
+}
+
+
+def _status_event(row: any) -> dict[str, any] {
+    return {key: row[key] for key in ("command_id", "actor", "status", "expected_revision", "revision", "reviewer", "note", "at")};
+}
+
+
 obj CodeStore {
     has directory: Path,
         clock: any = time.time,
@@ -135,6 +189,8 @@ obj CodeStore {
                 db.execute("ALTER TABLE business_approvals ADD COLUMN body TEXT NOT NULL DEFAULT '{}'");
             }
             db.execute("CREATE TABLE IF NOT EXISTS business_reviews (id INTEGER PRIMARY KEY, actor TEXT NOT NULL, reviewer TEXT NOT NULL, note TEXT NOT NULL, approved REAL NOT NULL, body TEXT NOT NULL)");
+            db.execute("CREATE TABLE IF NOT EXISTS business_status (actor TEXT PRIMARY KEY, status TEXT NOT NULL CHECK(status IN ('active','suspended')), revision INTEGER NOT NULL CHECK(revision>0))");
+            db.execute("CREATE TABLE IF NOT EXISTS business_status_events (command_id TEXT PRIMARY KEY, actor TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('active','suspended')), expected_revision INTEGER NOT NULL, revision INTEGER NOT NULL, reviewer TEXT NOT NULL, note TEXT NOT NULL, at REAL NOT NULL, request_hash TEXT NOT NULL, UNIQUE(actor,revision))");
         }
         os.chmod(self.path, 0o600);
     }
@@ -365,6 +421,62 @@ obj CodeStore {
         return bool(approved) and approved.get("name") == body.get("name") and approved.get("address") == body.get("address");
     }
 
+    # Host-only status foundation. Enforcement of discovery/claim/redemption
+    # policy is separate; this does not delete or reassign application data.
+    def business_status(actor: str) -> dict[str, any] {
+        actor = status_actor(actor);
+        with self.transaction() as db { return _business_status(db, actor); }
+    }
+
+    def business_status_events(actor: str) -> list[dict[str, any]] {
+        actor = status_actor(actor);
+        with self.transaction() as db {
+            rows = db.execute("SELECT * FROM business_status_events WHERE actor=? ORDER BY revision", (actor,)).fetchall();
+            return [_status_event(row) for row in rows];
+        }
+    }
+
+    def change_business_status(actor: str, status: str, reviewer: str, note: str, expected_revision: int, command_id: str) -> dict[str, any] {
+        actor = status_actor(actor);
+        reviewer = validated_name(reviewer);
+        note = note.strip();
+        if not note or len(note) > 500 or `any([ord(c) < 32 or 127 <= ord(c) < 160 for c in note]) {
+            raise ValueError("Record a suspension or reinstatement reason (up to 500 characters).");
+        }
+        if status not in ("active", "suspended") or type(expected_revision) != int or expected_revision < 0 {
+            raise ValueError("Choose suspend/reinstate and the current business status revision.");
+        }
+        try { command_id = UUID(command_id).hex; }
+        except (ValueError, TypeError, AttributeError) {
+            raise ValueError("Supply a unique UUID command ID; keep it for an exact retry.") from None;
+        }
+        request_hash = business_revision({"actor": actor, "status": status, "reviewer": reviewer, "note": note, "expected_revision": expected_revision});
+        # The same single-host lock coordinates approval, app activation and
+        # status writes. The SQLite transaction binds status and audit together.
+        with identity_review_lock(self.directory) {
+            with self.transaction() as db {
+                previous = db.execute("SELECT * FROM business_status_events WHERE command_id=?", (command_id,)).fetchone();
+                if previous {
+                    if not hmac.compare_digest(previous["request_hash"], request_hash) {
+                        raise ValueError("This command ID was already used for different details. Read status before issuing a new command.");
+                    }
+                    # Return the original receipt even after later events;
+                    # never replay its state transition over a newer revision.
+                    return _status_event(previous);
+                }
+                current = _business_status(db, actor);
+                if current["revision"] != expected_revision {
+                    raise ValueError("Business status changed. Read the latest status and review it before issuing a new command.");
+                }
+                revision = expected_revision + 1;
+                at = self.clock();
+                db.execute("INSERT INTO business_status VALUES (?,?,?) ON CONFLICT(actor) DO UPDATE SET status=excluded.status,revision=excluded.revision", (actor, status, revision));
+                db.execute("INSERT INTO business_status_events VALUES (?,?,?,?,?,?,?,?,?)", (command_id, actor, status, expected_revision, revision, reviewer, note, at, request_hash));
+                return {"command_id": command_id, "actor": actor, "status": status, "expected_revision": expected_revision, "revision": revision, "reviewer": reviewer, "note": note, "at": at};
+            }
+        }
+    }
+
     # Host-only operation. There is deliberately no browser RPC for approval.
     def approve_business(actor: str, reviewer: str, note: str, submission: str) -> None {
         try { actor = UUID(actor).hex; }
@@ -434,6 +546,9 @@ obj CodeStore {
         }
         result = {**body, "status": "active"};
         with self.transaction() as db {
+            if _stored_business_status(db, actor)["status"] != "active" {
+                raise ValueError("This business is suspended. Publication and redemption are paused; contact M-Local support.");
+            }
             account = db.execute("SELECT kind FROM accounts WHERE actor=?", (actor,)).fetchone();
             if account is None or account["kind"] != "business" {
                 raise ValueError("Sign in with a verified business account to save a business profile.");
@@ -507,6 +622,22 @@ def registered_business_owner(slug: str) -> str {
         # Unavailable private state must never confer merchant authority.
         return "";
     }
+}
+
+
+def merchant_operations_allowed(actor: str) -> bool {
+    try {
+        actor = status_actor(actor);
+        directory = Path(os.environ.get("MLOCAL_ONBOARDING_DIR", ".jac/onboarding")).resolve();
+        # A legacy provisioned demo can have no private store yet. Once a
+        # private directory exists, missing/damaged files fail closed.
+        if not directory.exists() { return True; }
+        if len((directory / "code.key").read_bytes()) != 32 { return False; }
+        db = sqlite3.connect((directory / "onboarding.sqlite3").as_uri() + "?mode=ro", uri=True, timeout=15);
+        db.row_factory = sqlite3.Row;
+        try { return _stored_business_status(db, actor)["status"] == "active"; }
+        finally { db.close(); }
+    } except (OSError, sqlite3.Error, RuntimeError, ValueError) { return False; }
 }
 
 

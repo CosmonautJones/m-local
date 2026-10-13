@@ -34,10 +34,31 @@ def main():
     api = 'http://127.0.0.1:8252'
     receipt_path = ROOT / '.jac/approval-http.json'
     state = CodeStore(ROOT / '.jac/onboarding')
+    def status_command(actor, command, revision):
+        result = subprocess.run(['bash', 'scripts/review-business.sh', command, '--actor', actor,
+            '--revision', str(revision), '--command-id', secrets.token_hex(16),
+            '--by', 'Fixture operator', '--note', 'Fixture complaint' if command == 'suspend' else 'Fixture complaint resolved'],
+            cwd=ROOT, capture_output=True, text=True, timeout=180)
+        require(result.returncode == 0, 'host status command succeeds: ' + result.stderr[-1000:])
+        return json.loads(result.stdout)
     if args.verify_restart:
         receipt = json.loads(receipt_path.read_text())
         owner = Api(api, receipt['token'])
         require(owner.call('current_session')['role'] == 'merchant', 'approved authority survives restart')
+        require(owner.call('current_session')['merchant_paused'], 'suspension does not erase merchant identity after restart')
+        require(state.business_status(receipt['actor']) == receipt['business_status'] and
+            state.business_status_events(receipt['actor']) == receipt['business_events'], 'status and audit survive restart exactly')
+        student = Api(api, receipt['student_token'])
+        held = student.call('get_offer', offer_id=receipt['offer'])
+        require(held['my_qr_payload'] == receipt['held']['my_qr_payload'] and
+            held['my_terms'] == receipt['held']['my_terms'] and held['my_expires_ts'] == receipt['held']['my_expires_ts'] and
+            held['claim_support_message'], 'suspended student claim retains terms expiry and support message after restart')
+        require(not owner.call('redeem_claim', qr_payload=held['my_qr_payload'])['ok'], 'suspended redemption remains paused after restart')
+        require(not any(item['offer']['id'] == receipt['offer'] for item in Api(api).call('home_feed')['items']),
+            'suspended offer stays hidden after restart')
+        status_command(receipt['actor'], 'reinstate', receipt['business_status']['revision'])
+        require(owner.call('redeem_claim', qr_payload=held['my_qr_payload'])['ok'], 'explicit reinstatement restores live claim redemption')
+        require(not owner.call('redeem_claim', qr_payload=held['my_qr_payload'])['ok'], 'reinstated claim still redeems only once')
         require(owner.call('get_business_profile')['name'] == receipt['name'], 'published profile survives restart')
         require(any(o['id'] == receipt['offer'] for o in owner.call('merchant_portal')['offers']),
                 'self-managed offer survives restart')
@@ -52,9 +73,9 @@ def main():
     anonymous = Api(api)
     run = secrets.token_hex(4)
 
-    def verify(kind):
+    def verify(kind, suffix=''):
         codes = []
-        value = 'ap' + run + kind[0] + ('@example.test' if kind == 'business' else '')
+        value = 'ap' + run + kind[0] + suffix + ('@example.test' if kind == 'business' else '')
         challenge = state.request(value, kind, 'Approval fixture', lambda _email, code: codes.append(code))
         result = anonymous.call('verify_email_code', challenge=challenge['challenge'], code=codes[0])
         require(result['ok'] and result.get('token'), f'{kind} verifies through real HTTP')
@@ -160,7 +181,36 @@ def main():
     require(owner.call('save_offer', **offer_fields, image_url=photo['url'])['ok'], 'owner restores the uploaded offer photo')
     require(any(item['offer']['id'] == offer['code'] for item in student.call('home_feed')['items']),
             'approved offer appears in student discovery')
-    receipt = dict(token=owner.token, actor=actor, name=fields['name'], offer=offer['code'], photo=photo['url'])
+    claimed = student.call('claim_offer', offer_id=offer['code'])
+    require(claimed['ok'], 'student obtains a claim before suspension')
+    held = student.call('get_offer', offer_id=offer['code'])
+    status_command(actor, 'suspend', 0)
+    require(owner.call('current_session')['role'] == 'merchant' and owner.call('current_session')['merchant_paused'],
+        'suspension preserves the merchant identity and reports paused operations')
+    suspended_portal = owner.call('merchant_portal')
+    require(suspended_portal['ok'] and 'paused' in suspended_portal['message'] and
+        any(row['id'] == offer['code'] for row in suspended_portal['offers']), 'merchant retains inventory with a support message')
+    require(not any(item['offer']['id'] == offer['code'] for item in anonymous.call('home_feed')['items']),
+        'suspended offers are hidden from guest discovery')
+    require(anonymous.call('get_offer', offer_id=offer['code']) is None, 'suspended offer detail is hidden from guests')
+    paused_hold = student.call('get_offer', offer_id=offer['code'])
+    require(paused_hold['my_qr_payload'] == held['my_qr_payload'] and paused_hold['my_terms'] == held['my_terms'] and
+        paused_hold['my_expires_ts'] == held['my_expires_ts'] and paused_hold['claim_support_message'],
+        'existing claim retains credential terms expiry and support message')
+    require(any(item['offer']['id'] == offer['code'] and item['offer']['claim_support_message']
+        for item in student.call('home_feed')['items']), 'saved claim remains reachable in the claiming student feed')
+    other_student = verify('student', 'other')
+    require(not other_student.call('claim_offer', offer_id=offer['code'])['ok'], 'suspension blocks new student claims')
+    require(not owner.call('save_offer', **offer_fields)['ok'], 'suspension blocks offer publication')
+    require(not owner.call('set_offer_status', offer_id=offer['code'], status='active')['ok'], 'offer resume cannot bypass suspension')
+    require(not owner.call('resolve_claim', qr_payload=claimed['qr_payload'])['ok'] and
+        not owner.call('redeem_claim', qr_payload=claimed['qr_payload'])['ok'], 'preview and redemption pause without changing the claim')
+    approve()
+    require(not owner.call('save_business_draft', **fields)['ok'] and state.business_status(actor)['status'] == 'suspended',
+        'identity reapproval and activation retry cannot clear suspension')
+    receipt = dict(token=owner.token, student_token=student.token, actor=actor, name=fields['name'],
+        offer=offer['code'], photo=photo['url'], held=held, business_status=state.business_status(actor),
+        business_events=state.business_status_events(actor))
     fd = os.open(receipt_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, 'w') as stream:
         json.dump(receipt, stream)

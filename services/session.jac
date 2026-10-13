@@ -1,7 +1,7 @@
 """Application identity comes only from the authenticated Jac request root."""
 
 import from services.models { Restaurant }
-import from services.qr_auth { merchant_owner }
+import from services.qr_auth { merchant_owner, merchant_operations_enabled }
 import from services.qr_catalog { _ensure_seed }
 import from services.onboarding { verified_account, is_demo_student }
 import from services.onboarding_support { account_name }
@@ -16,6 +16,7 @@ obj SessionView {
         is_demo: bool = False,
         email_verified: bool = False,
         business_account: bool = False,
+        merchant_paused: bool = False,
         catalog_activity: bool = False;
 }
 
@@ -47,6 +48,7 @@ def:pub current_session() -> SessionView {
     if r is not None {
         return SessionView(authenticated=True, actor_id=actor, role="merchant",
             restaurant_id=jid(r), display_name=account_name(actor, r.name), is_demo=r.is_demo,
+            merchant_paused=not merchant_operations_enabled(r.slug),
             email_verified=bool(account), business_account=account.get("kind") == "business", catalog_activity=hosted_dataset_enabled());
     }
     if account {
