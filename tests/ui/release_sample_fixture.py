@@ -15,6 +15,9 @@ def validate_fixture_store():
     app = Path.cwd()
     cache_name = os.environ.get("JAC_CACHE_HOME", "")
     cache = Path(cache_name) if cache_name else None
+    onboarding_name = os.environ.get('MLOCAL_ONBOARDING_DIR', '')
+    onboarding = Path(onboarding_name) if onboarding_name else None
+    expected_onboarding = app / '.jac/onboarding'
     owned_directories = (app.parent, app, cache)
     if (app.parent.parent != Path("/var/tmp")
             or not app.parent.name.startswith("m-local-release-browser.")
@@ -22,12 +25,24 @@ def validate_fixture_store():
             or os.environ.get("MLOCAL_RELEASE_BROWSER_FIXTURE") != "1"
             or not cache or not cache.is_absolute()
             or cache.resolve() != app.parent / "cache"
+            or not onboarding or not onboarding.is_absolute()
+            or onboarding != expected_onboarding or onboarding.resolve() != expected_onboarding
+            or any(path.is_symlink() or path.exists() and (not path.is_dir()
+                   or path.stat().st_uid != os.geteuid() or path.stat().st_mode & 0o777 != 0o700)
+                   for path in (app / '.jac', onboarding))
+            or any((onboarding / name).is_symlink() for name in ('code.key', 'onboarding.sqlite3', 'mutations.lock'))
             or any(path.is_symlink() or not path.is_dir()
                    or path.stat().st_uid != os.geteuid()
                    or path.stat().st_mode & 0o777 != 0o700 for path in owned_directories)
             or any(os.environ.get(name) for name in ("JAC_DB_URL", "JAC_DATA_PATH", "JAC_DEV_SOURCE", "JACPATH"))):
         raise RuntimeError("Sample fixture refuses a non-disposable application store")
     return app
+
+
+def initialize_fixture_onboarding(code_store):
+    app = validate_fixture_store()
+    (app / '.jac').mkdir(mode=0o700, exist_ok=True)
+    return code_store(Path(os.environ['MLOCAL_ONBOARDING_DIR']))
 
 
 def main():
@@ -50,6 +65,13 @@ def main():
         models = load_prepared_module(str(app / "services/models.jac"))
         if models.Restaurant.__module__ != application_namespace(prepared) + ".services.models":
             raise RuntimeError("Sample fixture did not load the native model namespace")
+        codes = load_prepared_module(str(app / 'services/email_codes.jac'))
+        if codes.CodeStore.__module__ != application_namespace(prepared) + '.services.email_codes':
+            raise RuntimeError('Sample fixture did not load the copied private-store namespace')
+        # The native API is stopped for this offline fixture. Provisioned
+        # merchants require the same initialized private state as signup owners.
+        # An existing store retains its original key, accounts and status audit.
+        initialize_fixture_onboarding(codes.CodeStore)
         manager = UserManager(base_path=str(app))
         guest_root = manager.get_root_id(Con.GUEST.value)
         if not guest_root:
@@ -74,7 +96,8 @@ def main():
         Jac.commit()
         path = app / ".jac/release-sample-fixture.json"
         path.write_text(json.dumps({"sample_parent": sample_parent.slug, "real_parent": real_parent.slug,
-            "unmarked_offer": Jac.object_ref(unmarked), "marked_offer": Jac.object_ref(marked)}))
+            "unmarked_offer": Jac.object_ref(unmarked), "marked_offer": Jac.object_ref(marked),
+            "private_onboarding_initialized": True}))
         path.chmod(0o600)
     finally:
         context.close()

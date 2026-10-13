@@ -334,6 +334,35 @@ def offer_fields(now, title, *, price='5', terms='Original recovery terms', elig
         eligibility=eligibility, terms=terms, dietary='', menu_item='')
 
 
+def verify_active_approval(api, state, approval, checks, label):
+    """Read back an already reinstated fixture without repeating its transition."""
+    owner = Api(api.origin, approval['token'])
+    student = Api(api.origin, approval['student_token'])
+    session = owner.call('current_session')
+    check(session.get('role') == 'merchant' and session.get('actor_id') == approval['actor']
+          and session.get('merchant_paused') is False,
+          label + ' preserves the original active merchant identity', checks)
+    check(state.business_status(approval['actor']) == approval['business_status']
+          and state.business_status_events(approval['actor']) == approval['business_events'],
+          label + ' preserves the exact suspension and reinstatement audit without another transition', checks)
+    check(student.call('current_session').get('actor_id') == approval['student_actor'],
+          label + ' preserves the original approval student identity', checks)
+    history = student.call('get_offer', offer_id=approval['offer'])
+    check(history.get('my_status') == 'redeemed' and history.get('my_qr_payload') == ''
+          and all(history.get(key) == approval['held'][key] for key in (
+              'my_claim_id', 'my_title', 'my_price_cents', 'my_terms', 'my_eligibility', 'my_expires_ts')),
+          label + ' preserves the original spent claim identity and immutable snapshot', checks)
+    profile = owner.call('get_business_profile')
+    check(profile.get('name') == approval['name'] and profile.get('image_url') == approval['photo'],
+          label + ' preserves the approved profile and owned business photo', checks)
+    offers = owner.call('merchant_portal')['offers']
+    check(any(row['id'] == approval['offer'] and row['offer_image_url'] == approval['photo'] for row in offers),
+          label + ' preserves the original self-managed offer and owned photo', checks)
+    check(state.business_approved(approval['actor']), label + ' preserves private approval', checks)
+    check(fetch_photo(owner, approval['photo']).startswith(b'\xff\xd8'),
+          label + ' serves the original approved JPEG', checks)
+
+
 def main():
     global PRIVATE_LOG_HINT
     print('RUN coordinated recovery fixture', flush=True)
@@ -424,6 +453,32 @@ def main():
               'approved business JPEG is fetched through HTTP', checks)
         sys.path.insert(0, str(candidate))
         state = __import__('services.email_codes', fromlist=['CodeStore']).CodeStore(onboarding)
+        approval_student_actor = Api(anonymous.origin, approval['student_token']).call('current_session')['actor_id']
+        check(state.business_status(approval['actor']) == approval['business_status']
+              and state.business_status_events(approval['actor']) == approval['business_events'],
+              'initial approval fixture retains its explicit suspension and audit', checks)
+        original_keys = {path: digest(path) for path in (onboarding / 'code.key', candidate / '.jac/data/jwt_secret')}
+        # Complete the helper's one-shot suspension/reinstatement journey on an
+        # actual restart before this rehearsal needs an active publishing owner.
+        stop_process(process)
+        check(not process_group_alive(process), 'initial approval API group stops before suspension restart proof', checks)
+        owned.remove(process)
+        process, anonymous = start_server(candidate, jac, environment, logs / 'api-approval-restarted.log', owned)
+        run_logged('approval suspension restart and reinstatement fixture',
+                   ['bash', str(candidate / 'scripts/python.sh'), '-c', approval_restart_code],
+                   candidate, environment, logs / 'approval-before-recovery.log', 300)
+        active_approval = {**approval, 'student_actor': approval_student_actor,
+            'business_status': state.business_status(approval['actor']),
+            'business_events': state.business_status_events(approval['actor'])}
+        check(active_approval['business_status']['status'] == 'active'
+              and active_approval['business_status']['revision'] == approval['business_status']['revision'] + 1
+              and active_approval['business_events'][:-1] == approval['business_events']
+              and active_approval['business_events'][-1]['status'] == 'active',
+              'one explicit authorized reinstatement precedes recovery publication', checks)
+        check(all(digest(path) == value for path, value in original_keys.items()),
+              'suspension restart and reinstatement preserve original onboarding and signing keys', checks)
+        verify_active_approval(anonymous, state, active_approval, checks, 'pre-backup approval')
+        owner = Api(anonymous.origin, approval['token'])
         run = hashlib.sha256(os.urandom(16)).hexdigest()[:10]
         student_a, student_a_session = verify_code(state, anonymous, 'recovery' + run + 'a', 'student', 'Recovery Student A', anonymous, checks)
         student_b, student_b_session = verify_code(state, anonymous, 'recovery' + run + 'b', 'student', 'Recovery Student B', anonymous, checks)
@@ -482,7 +537,8 @@ def main():
             claim_a=claim_a['claim_id'], claim_b=claim_b['claim_id'],
             business_photo=approval['photo'], offer_photo=offer_photo, create_key=fields['create_key'],
             original_claim={key: original[key] for key in ('title_snapshot', 'price_cents', 'terms', 'eligibility', 'expires_ts')},
-            business_photo_sha256=business_photo_sha, offer_photo_sha256=offer_photo_sha)
+            business_photo_sha256=business_photo_sha, offer_photo_sha256=offer_photo_sha,
+            active_approval=active_approval)
         private_file(private_receipt, stable_json(protected) + b'\n')
         check(private_receipt.stat().st_mode & 0o777 == 0o600, 'recovery receipt with tokens and QR values is private', checks)
         approval_receipt_backup = private / 'approval-http.json'
@@ -590,8 +646,8 @@ def main():
         run_logged('Jac dependency reinstallation after restore', [str(jac), 'install'], candidate, environment,
                    logs / 'install-restored.log', 300)
         process, recovered_api = start_server(candidate, jac, environment, logs / 'api-restored.log', owned)
-        run_logged('approval restart fixture', ['bash', str(candidate / 'scripts/python.sh'), '-c', approval_restart_code],
-                   candidate, environment, logs / 'approval-restored.log', 300)
+        restored_state = __import__('services.email_codes', fromlist=['CodeStore']).CodeStore(restore_onboarding)
+        verify_active_approval(recovered_api, restored_state, protected['active_approval'], checks, 'restored approval')
         restored_owner = Api(recovered_api.origin, protected['owner_token'])
         restored_second = Api(recovered_api.origin, protected['second_token'])
         restored_a = Api(recovered_api.origin, protected['student_a_token'])
@@ -640,8 +696,8 @@ def main():
         check(not process_group_alive(process), 'restored API process group is gone before restart', checks)
         owned.remove(process)
         process, restarted_api = start_server(candidate, jac, environment, logs / 'api-restarted.log', owned)
-        run_logged('approval second restart fixture', ['bash', str(candidate / 'scripts/python.sh'), '-c', approval_restart_code],
-                   candidate, environment, logs / 'approval-restarted.log', 300)
+        restarted_state = __import__('services.email_codes', fromlist=['CodeStore']).CodeStore(restore_onboarding)
+        verify_active_approval(restarted_api, restarted_state, protected['active_approval'], checks, 'restarted approval')
         restarted_owner = Api(restarted_api.origin, protected['owner_token'])
         restarted_a = Api(restarted_api.origin, protected['student_a_token'])
         restarted_b = Api(restarted_api.origin, protected['student_b_token'])
