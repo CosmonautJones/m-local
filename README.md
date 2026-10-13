@@ -19,10 +19,12 @@ Built by **Travis Jones, Rohan Maxa, Manthan Patil and Adam Jiang**. See
 
 ## Release status
 
-The release candidate is implemented and independently reviewed, with source-bound
+This tree contains the release candidate implementation and source-bound
 functional, native HTTP, browser, concurrency/fault and isolated recovery evidence.
-It is **not merged or approved for live rollout**. The default branch and any
-existing hosted app must not be assumed to contain these changes.
+The integrated revision requires complete tests and independent review before
+its authorized engineering merge. **Live rollout remains unapproved.** Check
+the release tracking record for current main/PR status; an existing hosted app
+must not be assumed to contain the repository's latest changes.
 
 | Component | Branch | Review |
 | --- | --- | --- |

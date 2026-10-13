@@ -804,6 +804,9 @@ test "suspension retains saved claims and stock while denying new claims publica
             assert held.ok, held.message;
             cancelled = _claim(jid(offers[1]), "suspension-cancelled-student", now);
             assert cancelled.ok and _cancel(jid(offers[1]), "suspension-cancelled-student", now).ok;
+            expiring = _claim(jid(offers[2]), "suspension-expiring-student", now);
+            assert expiring.ok;
+            deadline = _view(offers[2], now, "suspension-expiring-student").my_expires_ts;
             original = _view(offers[0], now, "suspension-student");
             remaining = _remaining(offers[0], now);
             state.change_business_status(actor, "suspended", "Fixture operator", "Fixture complaint", 0, "1" * 32);
@@ -838,6 +841,12 @@ test "suspension retains saved claims and stock while denying new claims publica
                 history = get_offer(jid(offers[0])) as OfferView;
                 assert history.my_status == "redeemed" and history.my_qr_payload == "" and history.claim_support_message;
             }
+            expired = _view(offers[2], deadline, "suspension-expiring-student");
+            assert expired.my_status == "expired" and expired.my_qr_payload == "" and expired.claim_support_message;
+            state.change_business_status(actor, "active", "Fixture operator", "Second complaint resolved", 3, "4" * 32);
+            expired = _view(offers[2], deadline, "suspension-expiring-student");
+            assert expired.my_status == "expired" and expired.my_qr_payload == "" and expired.my_expires_ts == deadline;
+            assert not _redeem(restaurant, expiring.qr_payload, deadline).ok;
         }
     }
 }

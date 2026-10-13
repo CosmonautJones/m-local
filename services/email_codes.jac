@@ -125,10 +125,12 @@ def _business_status(db: any, actor: str) -> dict[str, any] {
 
 
 def _stored_business_status(db: any, actor: str) -> dict[str, any] {
+    schema_version = db.execute("PRAGMA user_version").fetchone()[0];
     tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('business_status','business_status_events')")};
     # An older valid store has no status tables yet. The host migration adds
     # both; a partially missing schema must not revive an explicit suspension.
-    if not tables { return {"actor": actor, "status": "active", "revision": 0}; }
+    if schema_version == 0 and not tables { return {"actor": actor, "status": "active", "revision": 0}; }
+    if schema_version not in (0, 1) { raise ValueError("Business status needs host recovery; do not reset its audit history."); }
     if len(tables) != 2 { raise ValueError("Business status needs host recovery; do not reset its audit history."); }
     row = db.execute("SELECT status,revision FROM business_status WHERE actor=?", (actor,)).fetchone();
     latest = db.execute("SELECT status,revision FROM business_status_events WHERE actor=? ORDER BY revision DESC LIMIT 1", (actor,)).fetchone();
@@ -175,6 +177,11 @@ obj CodeStore {
         }
         self.path = self.directory / "onboarding.sqlite3";
         with self.transaction() as db {
+            schema_version = db.execute("PRAGMA user_version").fetchone()[0];
+            status_tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('business_status','business_status_events')")};
+            if schema_version not in (0, 1) or len(status_tables) == 1 or (schema_version == 1 and len(status_tables) != 2) {
+                raise RuntimeError("Business status requires host recovery. Restore its database and audit together; do not recreate missing tables.");
+            }
             db.execute("CREATE TABLE IF NOT EXISTS codes (challenge TEXT PRIMARY KEY, email TEXT, kind TEXT, name TEXT, digest TEXT, expires REAL, attempts INTEGER, delivered INTEGER)");
             db.execute("CREATE TABLE IF NOT EXISTS sends (email TEXT, at REAL)");
             db.execute("CREATE INDEX IF NOT EXISTS sends_email_at ON sends(email, at)");
@@ -191,6 +198,7 @@ obj CodeStore {
             db.execute("CREATE TABLE IF NOT EXISTS business_reviews (id INTEGER PRIMARY KEY, actor TEXT NOT NULL, reviewer TEXT NOT NULL, note TEXT NOT NULL, approved REAL NOT NULL, body TEXT NOT NULL)");
             db.execute("CREATE TABLE IF NOT EXISTS business_status (actor TEXT PRIMARY KEY, status TEXT NOT NULL CHECK(status IN ('active','suspended')), revision INTEGER NOT NULL CHECK(revision>0))");
             db.execute("CREATE TABLE IF NOT EXISTS business_status_events (command_id TEXT PRIMARY KEY, actor TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('active','suspended')), expected_revision INTEGER NOT NULL, revision INTEGER NOT NULL, reviewer TEXT NOT NULL, note TEXT NOT NULL, at REAL NOT NULL, request_hash TEXT NOT NULL, UNIQUE(actor,revision))");
+            db.execute("PRAGMA user_version=1");
         }
         os.chmod(self.path, 0o600);
     }
@@ -576,6 +584,7 @@ obj CodeStore {
 
 
 def store() -> CodeStore {
+    if os.environ.get("MLOCAL_ENV", "").strip().lower() == "production" { return existing_store(); }
     return CodeStore(Path(os.environ.get("MLOCAL_ONBOARDING_DIR", ".jac/onboarding")).resolve());
 }
 
@@ -629,9 +638,9 @@ def merchant_operations_allowed(actor: str) -> bool {
     try {
         actor = status_actor(actor);
         directory = Path(os.environ.get("MLOCAL_ONBOARDING_DIR", ".jac/onboarding")).resolve();
-        # A legacy provisioned demo can have no private store yet. Once a
-        # private directory exists, missing/damaged files fail closed.
-        if not directory.exists() { return True; }
+        # A lost directory while the app runs must not revive a configured
+        # merchant. Provisioned merchants need the same initialized store.
+        if not directory.exists() { return False; }
         if len((directory / "code.key").read_bytes()) != 32 { return False; }
         db = sqlite3.connect((directory / "onboarding.sqlite3").as_uri() + "?mode=ro", uri=True, timeout=15);
         db.row_factory = sqlite3.Row;

@@ -16,6 +16,7 @@ class BusinessSuspensionTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
+        self.fixture_cleanup = directory.cleanup
         self.directory = Path(directory.name)
         environment = patch.dict('os.environ', {'MLOCAL_ONBOARDING_DIR': directory.name})
         environment.start()
@@ -167,6 +168,73 @@ class BusinessSuspensionTests(unittest.TestCase):
         with self.state.transaction() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM business_status').fetchone()[0], 0)
         self.assertEqual(len(self.state.business_status_events(self.actor)), 1)
+
+    def test_established_store_missing_both_status_tables_fails_closed_on_read(self):
+        self.change('suspended')
+        with self.state.transaction() as db:
+            db.execute('DROP TABLE business_status')
+            db.execute('DROP TABLE business_status_events')
+        self.assertFalse(email_codes.merchant_operations_allowed(self.actor))
+        with self.state.transaction() as db:
+            names = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        self.assertNotIn('business_status', names)
+        self.assertNotIn('business_status_events', names)
+
+    def test_lost_private_directory_cannot_revive_a_suspended_configured_merchant(self):
+        from services import qr_auth
+        actor = 'd' * 32
+        with patch.dict('os.environ', {'MLOCAL_MERCHANT_OWNERS': json.dumps({'fixture-cafe': actor})}):
+            self.change('suspended', actor=actor)
+            retained = self.directory.with_name(self.directory.name + '-retained')
+            self.directory.rename(retained)
+            self.addCleanup(lambda: retained.rename(self.directory) if retained.exists() else None)
+            self.assertEqual(qr_auth.merchant_owner('fixture-cafe'), actor)
+            self.assertFalse(email_codes.merchant_operations_allowed(actor))
+            self.assertFalse(qr_auth.merchant_operations_enabled('fixture-cafe'))
+            self.assertFalse(qr_auth.listing_visible('fixture-cafe', 'manual'))
+            self.assertFalse(self.directory.exists())
+
+    def test_production_store_does_not_recreate_a_lost_private_directory(self):
+        self.change('suspended')
+        retained = self.directory.with_name(self.directory.name + '-retained')
+        self.directory.rename(retained)
+        def restore():
+            # A failing pre-fix run can create a replacement fixture directory.
+            if self.directory.exists():
+                self.fixture_cleanup()
+            if retained.exists():
+                retained.rename(self.directory)
+        self.addCleanup(restore)
+        with patch.dict('os.environ', {'MLOCAL_ENV': 'production'}):
+            with self.assertRaisesRegex(ValueError, 'existing deployment'):
+                email_codes.store()
+        self.assertFalse(self.directory.exists())
+        self.assertFalse(email_codes.merchant_operations_allowed(self.actor))
+
+    def test_established_store_opener_does_not_recreate_missing_status_tables(self):
+        self.change('suspended')
+        with self.state.transaction() as db:
+            db.execute('DROP TABLE business_status')
+            db.execute('DROP TABLE business_status_events')
+        before = self.state.path.read_bytes()
+        with self.assertRaisesRegex(RuntimeError, 'status.*recovery'):
+            CodeStore(self.directory)
+        self.assertEqual(self.state.path.read_bytes(), before)
+
+    def test_valid_legacy_v0_store_migrates_without_replacing_existing_state(self):
+        before = self.snapshot()
+        with self.state.transaction() as db:
+            db.execute('DROP TABLE business_status')
+            db.execute('DROP TABLE business_status_events')
+            db.execute('PRAGMA user_version=0')
+        self.assertTrue(email_codes.merchant_operations_allowed(self.actor))
+        upgraded = CodeStore(self.directory)
+        with upgraded.transaction() as db:
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 1)
+        self.assertEqual(upgraded.business_status(self.actor),
+            {'actor': self.actor, 'status': 'active', 'revision': 0})
+        self.assertEqual(upgraded.key, self.state.key)
+        self.assertEqual(self.snapshot(), before)
 
     def test_invalid_operator_payloads_do_not_create_events(self):
         for overrides in ({'reviewer': ''}, {'reviewer': 'bad\noperator'}, {'note': ''},

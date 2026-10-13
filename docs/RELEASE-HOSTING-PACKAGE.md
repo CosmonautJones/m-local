@@ -425,6 +425,14 @@ it does not undo database/private-state migrations. For an incompatible schema,
 keep traffic closed and use a reviewed coordinated recovery set on isolated
 storage. Do not discard post-snapshot accepted claims without reconciliation.
 
+The suspension increment adds durable status/audit tables and SQLite schema
+version 1. Do not reopen traffic after rolling source back to a revision that
+does not enforce those statuses: retained data alone would not preserve the
+approved suspension behavior. Select a compatible reviewed package and verify
+suspended/active merchant state, saved claim terms/expiry and paused redemption
+through authenticated requests before opening traffic. An expired hold must
+not revive during reinstatement or rollback.
+
 ## Remaining gates and owners
 
 | Gate | Owner | Required acceptance |
