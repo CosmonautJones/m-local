@@ -1,8 +1,9 @@
 # Public U-M / Ann Arbor release acceptance
 
-The foundation starts at `bb475ca` and PR55 `c581d142`. The October 7 instruction
-authorizes implementation, review, branch pushes and PRs while retaining merge,
-deployment and live-data approval with Travis. `RELEASE-GATES.md` classifies the
+The foundation starts at `bb475ca` and PR55 `c581d142`. The October 13 instruction
+authorizes normal reviewed PR merges after all required engineering gates pass.
+Deployment, live-data changes, real email, outreach and spending remain outside
+this task. `RELEASE-GATES.md` classifies the
 current candidate's engineering, live/human and deferred requirements. Passing
 local checks is not a substitute for acceptance on the actual deployment.
 
@@ -32,8 +33,11 @@ retained; unfinished or unavailable evidence remains an open gate.
 
 - Reconcile JacHammer's five hosting commits with the tested candidate without
   overwriting them. Prove the public artifact's exact revision and current UI.
-- Account, identity/session, owner, draft, OTP/key, offer, and claim state survive
-  replacement of either app instance. Independent replicas share durable state.
+- Account, identity/session, owner, draft, OTP/key, offer, photo and claim state
+  survive non-overlapping replacement of the single backend at its original
+  canonical entry path. Preserve the coordinated PostgreSQL/private SQLite/key/
+  photo recovery set. Multiple production writers and independent replicas are
+  unsupported by the pinned runtime; do not infer safety from a shared database.
 - Restore the complete application into an isolated deployment and verify users,
   ownership, saved prices/terms, pending claims, and redeemed status. Measure RPO
   and RTO; proposed regional targets are 15 minutes and 30 minutes respectively.
@@ -59,7 +63,11 @@ retained; unfinished or unavailable evidence remains an open gate.
   publishing/redemption comprehension, disputes, and return use. Fixture data
   and generated analytics do not prove adoption or merchant value.
 
-## Scaling benchmark
+## Deferred scaling benchmark
+
+This historical regional target is deferred. It is not a requirement to add
+replicas to the supported singleton release. A reviewed runtime fix plus fresh
+coordination, private-state durability and capacity proof is needed first.
 
 Reviewers propose this concrete regional envelope: two Jac app instances, one
 shared Postgres database, one trusted ingress, 30 merchants, 120 active offers,
@@ -89,4 +97,7 @@ Reviewers must inspect the final diff and evidence independently. A gate is open
 when proof is missing, indirect, stale, or scoped more narrowly than its claim.
 Open the authorized review PRs with accurate scope and evidence; unfinished work
 remains draft. Do not mark hosted acceptance complete or call the whole release A
-while required gates remain open. Merge and deployment require Travis's approval.
+while required gates remain open. Travis conditionally authorized reviewed
+engineering merges on October 13. Hosted and policy acceptance remain separate;
+deployment requires a further explicit authorization. Before advancing main,
+establish that no existing main updater can deploy it under this task's scope.

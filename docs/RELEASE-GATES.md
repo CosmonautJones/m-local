@@ -1,11 +1,13 @@
 # Release candidate scope and remaining gates
 
-This classification follows the October 7 release-candidate instruction. Local
+This classification follows the October 13 release-candidate instruction. Local
 fixtures prove engineering behavior only. They do not complete hosted acceptance,
 real inbox delivery, physical-device testing, consented pilots, or business policy.
 Issue #33 remains the durable coordination record. Independent reviewers provide
-findings and evidence; Travis retains merge, deployment, data, outreach and spending
-authority. Keep unfinished PRs draft and bind each receipt to its tested source.
+findings and evidence. Travis authorizes normal reviewed engineering PR merges
+only after required final-head gates pass; deployment, data, outreach and spending
+remain excluded. Confirm main auto-updaters cannot deploy before merging. Keep
+unfinished PRs draft and bind each receipt to its tested source.
 
 | Issue | Classification | Prepared work / remaining acceptance |
 | --- | --- | --- |
@@ -19,7 +21,7 @@ authority. Keep unfinished PRs draft and bind each receipt to its tested source.
 | #41 research-data privacy | Human policy + bounded audit | Inventory existing contact-research material before publishing a release. Travis must decide retention/removal; do not silently delete human-owned research or represent public availability as consent. |
 | #42 privacy/terms/deletion | Human policy, engineering deferred pending policy | Account deletion spans graph, identity, claims, ownership and retention obligations. Do not implement destructive deletion without approved policy and preservation rules. Public release requires approved policy/text or an explicit launch restriction. |
 | #43 active hold limit | Engineering | Server cap of two live holds across offers; retries preserve the existing claim, and expiry/cancellation/redemption release slots. Verify native concurrency on the final candidate; existing over-limit accounts retain their claims. |
-| #44 merchant verification | Engineering + human operations | Use PR55 manual revision-bound business approval and suspension, with an audit trail. Invite-code approval is a dropped approach. A named operator must accept the runbook and verify real submissions. |
+| #44 merchant verification | Engineering + human operations/policy | Revision-bound business approval is implemented. Suspension/reinstatement was absent from PR55 and requires separate host-only durable controls, audit and concurrency/preservation tests. Existing-claim behavior awaits Travis's decision. A named operator must accept the runbook and verify real submissions. Invite-code approval is a dropped approach. |
 | #45 hosted restart/recovery | Engineering + live | Isolated coordinated recovery and source-only rollback package; a host operator must perform an off-host restore with authenticated preservation checks and measure RPO/RTO. Local cold-copy receipts do not prove host recovery. |
 | #46 redeemed feedback | Engineering + device/live | Visible held-claim refresh with account isolation and QR removal/announcement after redemption or expiry; verify real merchant/student interaction and foreground/background behavior on phones. |
 | #47 installability | Engineering + device/live | Manifest and authored icons with no private-data service-worker cache; verify actual HTTPS install behavior and icon appearance on iOS/Android. |

@@ -30,8 +30,12 @@ existing hosted app must not be assumed to contain these changes.
 | Startup and native identity hardening | `release/native-hardening` | [PR #56](https://github.com/CosmonautJones/m-local/pull/56) |
 | Student discovery and safe claim intent | `release/student-experience` | [PR #57](https://github.com/CosmonautJones/m-local/pull/57) |
 
-The combined application checkpoint is
-`2be568a4e1a7fc3bef1a601d78b415ef8d88c99d`. Its
+The last fully qualified combined application checkpoint is
+`bed4be3d43ec12b949bc2d7799ff14883be3639f`. Its
+[immutable combined handoff](https://github.com/CosmonautJones/m-local/blob/7b5344f62176dc3edf7c6a54720e4274daff6931/docs/review/release-rc-bed4be3/HANDOFF.md)
+records final-head receipts. The current integration adds the selective header
+fix from [PR #58](https://github.com/CosmonautJones/m-local/pull/58) and must pass
+the complete workflows at its new head before merging. The older
 [immutable engineering handoff](https://github.com/CosmonautJones/m-local/blob/789a071a49fd683e46982296d94839ec79f245d3/docs/review/release-rc-2be568a/HANDOFF.md)
 preserves passing functional receipts and historical source-share failures.
 Source composition is now [informational](docs/RELEASE-SOURCE-POLICY.md);
@@ -118,7 +122,7 @@ coordinated recovery, deployment safety, Node and compiled-browser checks.
 Required proofs must execute at the final source SHA; absent or skipped proof
 steps are not passing evidence.
 
-At the combined checkpoint, the functional job passed **493 core executions across
+At the historical `2be568a` checkpoint, the functional job passed **493 core executions across
 134 expected names, 66 Node tests and 162 compiled-browser tests**.
 [Actual browser proof](https://github.com/CosmonautJones/m-local/actions/runs/37611016646)
 passed 62 checks;

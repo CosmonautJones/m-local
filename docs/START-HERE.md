@@ -113,7 +113,12 @@ generation, notifications, POS/payments, offline claims, native iOS packaging, A
 garage sales and other peer-to-peer listings. No hosted model is necessary for the
 required flow. A graph visualization is optional presentation material.
 
-## Hackathon requirements
+## Historical hackathon requirements
+
+These are September 26 event notes. Travis retired percentage enforcement for
+the release candidate on October 7; current composition reporting is
+[informational](RELEASE-SOURCE-POLICY.md). Historical eligibility evidence remains
+unchanged and does not override today's engineering gates.
 
 The [official A2Tech guide](https://jachacks.org/a2tech-guide/) was checked on
 September 26, 2026. It requires meaningful Jac use with at least 40% Jac code,

@@ -1,6 +1,15 @@
 # Shared implementation contract v2: QR redemption
 
-Email onboarding increment (2026-09-26): `SessionView` adds the default-false
+Current release contract (October 13, 2026): verified business email permits
+profile submission. An operator reviews the submitted name/address revision;
+only that approval permits the owner to activate the business and manage offers.
+Later name/address changes require review. Routine edits remain self-service.
+See [business approval](BUSINESS-APPROVAL.md) and [release gates](RELEASE-GATES.md).
+The supported runtime is one Linux host, one backend and one serialized gateway,
+with no overlapping replacements. Historical checkpoints below retain their
+original scope and are superseded where they conflict with this contract.
+
+Historical email onboarding increment (2026-09-26): `SessionView` adds the default-false
 `email_verified` field and `business` / `unverified` roles. A verified U-M inbox
 or an explicit demo student root is required for a new claim. Business email
 verification permits business profile setup. Update (2026-09-27): Travis removed

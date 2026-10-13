@@ -2,9 +2,9 @@ name: Shared native onboarding proof
 
 on:
   push:
-    branches: [codex/release-readiness, 'release/**']
+    branches: [main, codex/release-readiness, 'release/**']
   pull_request:
-    branches: [codex/release-readiness]
+    branches: [main, codex/release-readiness]
   workflow_dispatch:
 
 permissions:

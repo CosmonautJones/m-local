@@ -1,8 +1,10 @@
 name: Offline release package and authenticated recovery proof
 
 on:
+  pull_request:
+    branches: [main]
   push:
-    branches: [release/combined-candidate]
+    branches: [main, release/combined-candidate]
   workflow_dispatch:
 
 permissions:

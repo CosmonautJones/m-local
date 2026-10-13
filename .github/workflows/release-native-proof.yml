@@ -2,9 +2,9 @@ name: Release native preservation and topology proof
 
 on:
   pull_request:
-    branches: [codex/release-readiness]
+    branches: [main, codex/release-readiness]
   push:
-    branches: ['release/**']
+    branches: [main, 'release/**']
   workflow_dispatch:
 
 permissions:

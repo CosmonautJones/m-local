@@ -1,7 +1,9 @@
-This fixture is verification infrastructure. Its complete acceptance run has
-**not yet passed**. The implementation at `b4bc6d0` passed source/build checks,
-145 compiled browser tests, 16 UI node tests and 189 focused Jac executions.
-Those synthetic checks do not substitute for this native proof.
+This fixture is verification infrastructure. The full native browser proof
+passed 62 checks at combined `bed4be3` in
+[run 37704939160](https://github.com/CosmonautJones/m-local/actions/runs/37704939160).
+That receipt certifies its exact inputs, not later source. The current final
+integration must rerun this fixture and the separate guest-header proof.
+Historical failed/partial observations below remain intact.
 
 Run in unprivileged WSL Bash or Ubuntu with the official pinned Jac 0.37.23
 wrappers, Node/npm, OpenSSL and Chromium's Linux system libraries:

@@ -1,6 +1,14 @@
 # Backup and recovery
 
-The public release recovery gate is still open. The current disposable CI
+The public release recovery gate is still open. The latest combined `bed4be3`
+packaged proof passed 66 authenticated checks in
+[run 37704939138](https://github.com/CosmonautJones/m-local/actions/runs/37704939138).
+Its archive was not retained, so it does not certify a newly recreated rollout
+artifact. Final integration requires a retained private manifest-bound archive
+and a fresh authenticated restore/restart certificate for that exact package.
+Provider backups of an older deployed revision are a separate recovery input.
+
+Historical foundation evidence: the disposable CI
 rehearsal passed 71 checks at `b0f2321`, including coordinated database, signing
 state, onboarding, photo ownership and JPEG recovery followed by another
 restart. It took 221.171 seconds in total, using Jac 0.37.23 and the runner's

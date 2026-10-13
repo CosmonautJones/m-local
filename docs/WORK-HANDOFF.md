@@ -3,6 +3,23 @@
 Travis requested this transfer on 2026-09-26 and explicitly chose **ChatGPT Work**.
 He wants an efficient agentic workflow supporting a four-human JacHacks team.
 
+## Current integration instruction (October 13, 2026)
+
+Finish the existing combined release and selective header fix; do not restart
+the app or overwrite human work. Main remains `bb475ca` at the start of this
+task. Clean local integration `c0a2c5f` has the same tree as header `d192dd4` and
+preserves PR55 history. Its complete final-head qualification is still required.
+Use the current release gates, business approval, hosting package and runtime
+transaction contracts over older checkpoints below. Conditional merge authority
+now covers normal reviewed engineering PRs after complete tests and independent
+review; public deployment, credentials, real email, live data and contact remain
+excluded. Confirm no main updater can deploy before merging.
+
+JacHammer's provider confirmed a free preservation hold until October 16 at
+23:59 EDT and supplied a PostgreSQL 18 custom dump. That older deployed source
+revision is unknown; the provider dump does not certify the release candidate's
+complete SQLite/key/photo backup. Provider correspondence stays with the parent.
+
 ## Product and current decisions
 
 Help Ann Arbor students find affordable, time-limited restaurant offers, understand
