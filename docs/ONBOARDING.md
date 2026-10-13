@@ -116,9 +116,14 @@ card, without a separate Business profile toggle. Paste a public `https://`
 homepage or type details manually. Import reads at most the homepage and one
 same-site menu HTML page; PDF menus remain links. JavaScript-only sites may
 require manual entry. It reads structured business data, metadata, text, menu
-URLs and image URLs. The card shows one https logo for review. Images are
-linked, not copied into an owned media library. The browser loads the saved
-https address. The server does not download, store, or proxy the image bytes.
+URLs and photo candidates. Website photos appear as selectable thumbnails,
+with a preview of the selected photo. Owners can also upload, replace or remove
+a phone photo. Selecting a website photo imports an owned copy; uploads and
+imports are normalized to JPEG with metadata removed. Uploaded photos live in
+`assets/photos/`, with ownership recorded privately in the onboarding directory.
+Preserve both together during deployment and recovery. Physical Safari/HEIC
+compatibility remains an open device check; export a JPG if the browser cannot
+open a HEIC photo.
 
 To additionally organize site text with Jac's real `by llm()` implementation,
 set `MLOCAL_IMPORT_MODEL` and its provider credential in the same private env
@@ -128,12 +133,14 @@ No model call occurs when `MLOCAL_IMPORT_MODEL` is empty. Metadata import and
 manual editing continue if AI is unavailable. No model has authority to publish,
 assign roles, fetch arbitrary URLs, or perform actions from website instructions.
 
-Review facts and prices, correct the https logo and menu link, confirm representation and
-content rights, and choose **Save business profile**. The verified business
-account immediately receives its own restaurant and the app opens **Insights**.
-There is no approval step or business-approval admin page. Travis enabled this
-self-service flow on September 27 for team testing. Email verification and the
-representation confirmation remain required.
+Review facts and prices, choose a business photo and correct the menu link, confirm representation and
+content rights, and choose **Submit for review**. The profile stays private until
+the host approves business authority, name and address. **Check approval** refreshes
+the status; **Continue to offers** then publishes through the owner's authenticated
+request and opens offer management. See [Business approval](BUSINESS-APPROVAL.md)
+for the local review command and migration inventory. Email verification and the
+representation confirmation remain required. This public policy replaces the
+instant activation enabled for team testing on September 27.
 
 Previously pending applications retain their saved fields. Explicitly save the
 profile to activate it; simply opening it does not publish anything. If the
@@ -148,15 +155,23 @@ preserve its offers. Two businesses with identical names still have separate
 owners. Existing `MLOCAL_MERCHANT_OWNERS` provisioning takes precedence and
 continues to support demo merchants. Clients cannot submit an owner or restaurant
 ID to the activation endpoint. The saved image URL is public profile media:
-students see it on the deal and the offer detail, and the merchant sees it
-beside the restaurant name. An empty image is valid and draws nothing.
+students see it on the deal, offer detail and public business page, and the
+merchant sees it beside the restaurant name. Each offer can have its own photo.
+An empty photo is valid; views provide a fallback.
 
-Business owners use **Manage** to edit their restaurant profile and
-create offers. **New offer** opens a form with explicit **Publish offer** action;
+Business owners use **Manage** to create offers and **Edit business details** to
+open the account's business form. Name and address changes return to review;
+routine edits remain self-service. The existing public identity and offer
+management stay available while a proposed identity change waits. Host-configured
+legacy merchants cannot change name/address through the older profile RPC.
+**New offer** opens a form with explicit **Publish offer** action;
 a future Ann Arbor start time schedules the offer. **Save changes** edits that
 same offer. Paused offers remain paused, and existing claims retain their
 promised price, terms and deadline. There is no server-side draft for the offer
-form. Rejected writes preserve the entered values and never report success.
+form. New-offer drafts recover locally on refresh for the same business account
+on that browser. Cancel, successful publication and sign-out clear the draft.
+The owner-scoped publication key prevents equivalent retries from creating a
+second offer. Rejected writes preserve the entered values and never report success.
 Money supports at most two decimals, quantity is 1 to 10,000, and expiry must
 be in the future. Times use Ann Arbor's Eastern timezone, including validation
 of daylight-saving gaps and repeated hours.
@@ -177,7 +192,8 @@ runtime accounts cannot claim offers until verified or explicitly provisioned.
 
 Only expose the compiled app and exact application RPCs through public ingress.
 Add `request_email_code`, `verify_email_code`, `get_business_draft`,
-`import_business_website`, `save_business_draft`, `get_account_profile`, and
+`import_business_website`, `upload_business_photo`, `import_business_photo`,
+`save_business_draft`, `get_business_profile`, `get_account_profile`, and
 `save_account_profile` to the phone gateway allowlist.
 Keep `/user/register`, arbitrary RPCs, graph/admin endpoints and private files
 blocked. Apply `scripts/onboarding-ingress.mjs` using a trusted client IP from
@@ -201,6 +217,7 @@ and obey robots restrictions. The model sees source text as untrusted data.
 
 ```bash
 bash scripts/test.sh onboarding
+bash scripts/python.sh -m unittest discover -s tests/integration -p test_onboarding_shared.py
 bash scripts/check.sh
 bash scripts/test.sh core
 bash scripts/build.sh
@@ -208,6 +225,36 @@ node --test tests/ui/*.test.mjs tests/tooling/*.test.mjs
 # Requires the existing jsdom test runtime and a compiled .jac/client/dist:
 MLOCAL_UI_TEST_MODULES=/path/to/ui-test-runtime/node_modules node --test tests/ui/browser/*.test.mjs
 ```
+
+`test_onboarding_shared.py` uses separate Linux processes against a fresh shared
+local directory. It checks cold key/schema creation, single-use consumption,
+resend and hourly sending budgets, and account/draft visibility after replacing
+a process. A separate-directory negative control demonstrates why copying state
+does not share new writes. Sender callbacks are disposable sinks: the fixture
+does not prove SMTP, native HTTP/session behavior, or independent-host replication.
+All seven checks passed in [CI at 634eb70](https://github.com/CosmonautJones/m-local/actions/runs/37415914169)
+with no skips. The full run also passed the existing approval, recovery, build and
+compiled UI checks; independent-host and actual inbox delivery gates remain open.
+
+`bash scripts/test-shared-onboarding.sh` adds a disposable Linux proof with two
+native Jac APIs, one private graph database and a common onboarding directory.
+It delivers codes through a local TLS SMTP sink, then checks cross-API sign-in,
+single-use codes, shared sending budgets, business approval/activation and draft
+visibility after replacing an idle crashed API. The dedicated workflow runs this
+fixture. Its [first native run](https://github.com/CosmonautJones/m-local/actions/runs/37419329648)
+passed sign-in, approval and cross-API writes, then failed during replacement
+startup. A small Linux socket reproduction showed the port probe rejected a
+recently closed connection; it now uses address reuse, matching the existing
+recovery verifier.
+The [corrected run at 6f5e68a](https://github.com/CosmonautJones/m-local/actions/runs/37420030077)
+passed all 82 recorded assertions (23 distinct labels) in 79.392 seconds, with
+60 local TLS deliveries. Seven strict SMTP tests passed without skips. An
+independent reviewer accepted this native onboarding scope; the [receipt](review/shared-onboarding-v70/verification.json)
+and [220-file Git source binding](review/shared-onboarding-v70/source-binding.json)
+retain the actual tested candidate. The sink accepts only explicitly
+allowed fictional recipients and never forwards email. This does not establish
+real inbox delivery, public ingress, independent-host replication, cold seed
+deduplication, browser capacity or safety during an in-flight crash.
 
 `tests/integration/onboarding_http.py` exercises actual Jac identities/sessions
 using locally injected test challenges. Run it only in a disposable workspace

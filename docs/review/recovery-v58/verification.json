@@ -1,0 +1,35 @@
+{
+  "status": "lazy_observer_fix_pending_native_recovery_rerun",
+  "scope": "Matching-runtime disposable recovery fixture; no public deployment, fresh-host or RPO/RTO acceptance",
+  "prior_run": {
+    "url": "https://github.com/CosmonautJones/m-local/actions/runs/37409240977",
+    "revision": "9f6d9e321c1613422b9424e332becd80d6100e43",
+    "conclusion": "failure",
+    "recovery_exit_code": 1,
+    "recovery_elapsed_seconds": 93,
+    "last_safe_pass": "private embedded PostgreSQL is running for binary identity capture",
+    "next_check_not_reached": "resolved PostgreSQL distribution is independent of source and data paths",
+    "exact_exception_available": false
+  },
+  "finding": "Pinned PgRuntime initializes _bin_dir to None and is_running does not resolve it. A fresh observer cannot identify an installed PostgreSQL distribution by scanning its fields. Safe native logs included an installed-PostgreSQL fallback warning; the exact failing exception remains private. The lazy-observer gap was independently reproduced with the actual fixture function.",
+  "changes": [
+    "Resolve the selected binary directory through the pinned runtime before hashing its distribution",
+    "Bind the selected distribution root into both child and current process environments",
+    "Retain binary/version/hash, internal-link containment and recovery assertions",
+    "Report only the exception class alongside the private diagnostic path"
+  ],
+  "verification": {
+    "before_status": "reproduced_lazy_observer_gap",
+    "before_resolver_calls": 0,
+    "after_status": "passed_lazy_observer_resolution",
+    "after_resolver_calls": 1,
+    "cached_selection_and_configured_root_checked": true,
+    "protocol_scope": "Actual fixture function and pinned SDK lazy-observer protocol with a synthetic version executable; no Jac, PostgreSQL server or full recovery execution",
+    "fixture_sha256": "dfc316e600884d8ec44bbf49a61dc58d7206cb02721658842441ba54b614b56c",
+    "wrapper_sha256": "24ffd323fd21c424bad0f1ee377e4ab112264557b75b0ecd7b561a2343312f78",
+    "pinned_pg_source_sha256": "2ca7348232b4dc59ef7982d6993a407dbc0bfebd2a630bca3ab52512f79670ca",
+    "executed_protocol_probe_sha256": "8f54b14f719f7ad324f507aa2a4e6bac8ff99c79edfdb25643e14ff2ba7cf90d",
+    "independent_review": "Static ACCEPT for the scoped correction; reviewer independently fetched the failed native run. Native rerun remains required.",
+    "full_recovery_passed": false
+  }
+}

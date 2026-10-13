@@ -192,7 +192,7 @@ def live_deal(r: Restaurant, now: float, samples: bool) -> Offer | None {
     if r.is_demo and not samples {
         return None;
     }
-    live = [o for o in [r ->:Publishes:->] if _state(o, now) == "active" and _remaining(o, now) > 0 and (samples or not o.is_demo)];
+    live = [o for o in [r ->:Publishes:->] if _state(o, now) == "active" and (samples or not o.is_demo)];
     if not live {
         return None;
     }
@@ -255,7 +255,7 @@ def listed_cards(origin_slug: str, lat: float, lng: float, now: float, samples: 
         if not samples or not r.is_demo or r.slug == origin_slug {
             continue;
         }
-        live = [o for o in [r ->:Publishes:->] if _state(o, now) == "active" and _remaining(o, now) > 0 and o.is_demo];
+        live = [o for o in [r ->:Publishes:->] if _state(o, now) == "active" and o.is_demo];
         if not live {
             continue;
         }

@@ -67,14 +67,14 @@ test('account rejection preserves input and allows a successful retry',async()=>
  }finally{ui.close();}
 });
 
-test('previously pending business profile reopens with its saved details and a save-to-activate prompt',async()=>{
+test('pending business reopens its saved submission and clearly waits for approval',async()=>{
  const draft={ok:true,name:'Saved fixture cafe',address:'123 Fixture Street',status:'pending_review',message:''};
  const ui=await app({role:'business',verified:true,intercept(name){if(name==='get_business_draft')return rpc(draft);}});
  try{
   await until(()=>ui.document.querySelector('[placeholder="Business name"]')?.value==='Saved fixture cafe');
-  assert.ok(ui.text().includes('Save your business profile to start posting'));
-  assert.equal(ui.text().includes('Pending review'),false);
-  assert.equal(ui.find('New offer'),undefined);assert.equal(ui.find('Manage'),undefined);
+  assert.ok(ui.text().includes('Your business is awaiting approval'));
+  assert.ok(ui.find('Check approval'));
+  assert.equal(ui.find('New offer'),undefined);assert.equal(ui.find('Offers'),undefined);
   assert.equal(ui.find('Business profile'),undefined);
   assert.equal(ui.find('Close business profile'),undefined);
   assert.ok(ui.document.querySelector('[placeholder="Business name"]'));
@@ -82,13 +82,57 @@ test('previously pending business profile reopens with its saved details and a s
  }finally{ui.close();}
 });
 
-const businessSession=role=>({authenticated:true,actor_id:'fixture-business',role,restaurant_id:role==='merchant'?'owned-business':'',display_name:'Fixture owner',email_verified:true,is_demo:false});
+const businessSession=role=>({authenticated:true,actor_id:'fixture-business',role,restaurant_id:role==='merchant'?'owned-business':'',display_name:'Fixture owner',email_verified:true,is_demo:false,business_account:true});
 async function completeBusiness(ui){
  await until(()=>ui.document.querySelector('[placeholder="Business name"]')&&!ui.document.querySelector('[placeholder="Business name"]').disabled);
  ui.fill('Business name','Self-service cafe');ui.fill('Street address','123 Fixture Street');ui.document.querySelector('input[type="checkbox"]').click();
- const submit=[...ui.document.querySelectorAll('button')].find(button=>button.textContent.startsWith('Save business'));
+ const submit=ui.find('Submit for review');
  submit.click();
 }
+
+test('submission stays pending and check approval opens management only after server approval',async()=>{
+ let submitted=false,approved=false;
+ const fields={name:'Self-service cafe',address:'123 Fixture Street'};
+ const ui=await app({role:'business',verified:true,intercept(name,body){
+  if(name==='get_business_draft')return rpc({ok:true,...fields,status:approved?'approved':submitted?'pending_review':'draft'});
+  if(name==='save_business_draft'){submitted=true;return rpc({...body,ok:true,status:approved?'active':'pending_review',message:approved?'Business profile saved.':'Submitted for review.'});}
+  if(name==='current_session')return rpc(businessSession(approved?'merchant':'business'));
+ }});
+ try{
+  await completeBusiness(ui);await until(()=>ui.find('Check approval'));
+  assert.equal(ui.find('Offers'),undefined);assert.equal(ui.find('New offer'),undefined);
+  ui.click('Check approval');await until(()=>ui.calls.filter(c=>c.name==='get_business_draft').length===2);
+  await until(()=>ui.find('Check approval')&&!ui.find('Check approval').disabled);
+  assert.equal(ui.find('Offers'),undefined);
+  approved=true;ui.click('Check approval');await until(()=>ui.find('Continue to offers'));
+  assert.equal(ui.find('Offers'),undefined);
+  ui.click('Continue to offers');await until(()=>ui.find('New offer'));
+  assert.equal(ui.calls.filter(c=>c.name==='save_business_draft').length,2);
+  assert.deepEqual(ui.errors,[]);
+ }finally{ui.close();}
+});
+
+test('verified merchant edits use one business form and distinguish routine saves from identity review',async()=>{
+ const saved={ok:true,name:'Fixture Kitchen',address:'Test address',description:'Saved description',status:'active',approved_name:'Fixture Kitchen',approved_address:'Test address'};
+ const ui=await app({role:'merchant',verified:true,intercept(name,body){
+  if(name==='get_business_draft')return rpc(saved);
+  if(name==='save_business_draft')return rpc({...saved,...body,status:'pending_review',message:'Submitted for review.'});
+ }});
+ try{
+  ui.click('Offers');await until(()=>ui.find('Edit business details'));ui.click('Edit business details');
+  await until(()=>ui.document.querySelector('[placeholder="Business name"]')?.value==='Fixture Kitchen');
+  assert.equal(ui.document.querySelector('[placeholder="Restaurant name"]'),null);
+  ui.fill('About your business','Routine description edit');
+  assert.ok(ui.find('Save business profile'),'routine edits keep the normal save action');
+  ui.fill('Business name','Changed business identity');
+  assert.ok(ui.find('Submit for review'),'identity edit makes review explicit');
+  ui.document.querySelector('input[type="checkbox"]').click();ui.click('Submit for review');
+  await until(()=>ui.find('Check approval'));
+  assert.ok(ui.find('Offers'),'pending identity changes preserve offer management');
+  assert.ok(ui.text().includes('Later name or address changes need review'));
+  assert.deepEqual(ui.errors,[]);
+ }finally{ui.close();}
+});
 
 test('saving an active business profile refreshes server authority and opens offer management',async()=>{
  let activated=false;
@@ -98,9 +142,9 @@ test('saving an active business profile refreshes server authority and opens off
   if(name==='current_session')return rpc(businessSession(activated?'merchant':'business'));
  }});
  try{
-  await completeBusiness(ui);await until(()=>ui.find('Manage'),'activated business gets its navigation');
+  await completeBusiness(ui);await until(()=>ui.find('Offers'),'activated business gets its navigation');
   assert.ok(ui.find('New offer'),'business setup opens offer management immediately');
-  assert.ok(ui.find('Manage'));assert.ok(ui.find('Restaurant profile'));
+  assert.ok(ui.find('Offers'));assert.ok(ui.find('Restaurant profile'));
   assert.equal(ui.document.querySelector('[placeholder="Business name"]'),null);
   const request=ui.calls.find(c=>c.name==='save_business_draft');
   assert.equal(request.body.name,'Self-service cafe');assert.equal('role' in request.body,false);assert.equal('actor_id' in request.body,false);
@@ -124,7 +168,7 @@ test('saved active profile survives a session refresh failure and retries withou
   assert.equal(ui.find('New offer'),undefined);
   assert.equal(ui.document.querySelector('[placeholder="Business name"]').value,'Self-service cafe');
   ui.click('Open offer management');await until(()=>ui.find('Insights'));
-  ui.click('Manage');await until(()=>ui.find('New offer'));
+  ui.click('Offers');await until(()=>ui.find('New offer'));
   assert.equal(ui.calls.filter(c=>c.name==='save_business_draft').length,1);
   assert.equal(refreshes,2);assert.deepEqual(ui.errors,[]);
  }finally{ui.close();}
@@ -138,7 +182,7 @@ test('failed business save retains entries and does not enable offer management'
  try{
   await completeBusiness(ui);await until(()=>ui.text().includes('Fixture activation failed.'));
   assert.equal(ui.document.querySelector('[placeholder="Business name"]').value,'Self-service cafe');
-  assert.equal(ui.find('Manage'),undefined);assert.equal(ui.find('Open offer management'),undefined);
+  assert.equal(ui.find('Offers'),undefined);assert.equal(ui.find('Open offer management'),undefined);
   assert.equal(ui.calls.filter(c=>c.name==='current_session').length,1,'failure must not request or invent merchant access');
   assert.deepEqual(ui.errors,[]);
  }finally{ui.close();}
@@ -151,7 +195,7 @@ test('active save response alone cannot invent merchant authority before session
  }});
  try{
   await completeBusiness(ui);await until(()=>ui.find('Open offer management'));
-  assert.equal(ui.find('Manage'),undefined);assert.equal(ui.find('New offer'),undefined);
+  assert.equal(ui.find('Offers'),undefined);assert.equal(ui.find('New offer'),undefined);
   assert.equal(ui.calls.some(c=>c.name==='merchant_portal'),false);
   assert.ok(ui.text().includes('Your business profile was saved'));
   assert.deepEqual(ui.errors,[]);
@@ -165,24 +209,27 @@ test('offer validation blocks invalid prices and confirmed publication appears i
   if(name==='merchant_portal'&&posted)return rpc({ok:true,name:'Fixture Kitchen',cuisine:'Test cuisine',blurb:'Fixture profile',address:'Test address',neighborhood:'Test area',entrance_note:'',note_date:'',offers:[posted],claims:[],is_demo:true,message:''});
   if(name==='home_feed'&&posted)return rpc(home([posted]));
  }});
- try{ui.click("Manage");await until(()=>ui.text().includes("New offer"));
-  ui.click('Manage');await until(()=>ui.find('New offer'));ui.click('New offer');
+ try{ui.click("Offers");await until(()=>ui.text().includes("New offer"));
+  ui.click('Offers');await until(()=>ui.find('New offer'));ui.click('New offer');
   await until(()=>ui.document.querySelector('[placeholder="Lunch bowl for $7"]'));
+  assert.ok(ui.text().includes('Starts (Eastern) *'));
+  assert.ok(ui.text().includes('Ends (Eastern) *'));
+  assert.ok(ui.text().includes('Times are Ann Arbor local time (Eastern), even when you are traveling.'));
   ui.fill('Lunch bowl for $7','Posted fixture lunch');ui.fill('7.00','7.123');
   ui.click('Publish offer');await until(()=>ui.text().includes('at most two decimal places'));
   assert.equal(ui.calls.some(c=>c.name==='save_offer'),false);
   ui.fill('7.00','7.25');ui.fill('One per student. Dine-in only.','One per student.');ui.click('Publish offer');await until(()=>ui.find('Posted fixture lunch'));
   assert.equal(ui.document.querySelector('[placeholder="Lunch bowl for $7"]'),null);
   assert.equal(ui.calls.filter(c=>c.name==='save_offer').length,1);
-  ui.click('Manage');await until(()=>ui.find('Posted fixture lunch'));
+  ui.click('Offers');await until(()=>ui.find('Posted fixture lunch'));
   assert.deepEqual(ui.errors,[]);
  }finally{ui.close();}
 });
 
 test('rejected offer publication preserves every entered value and remains editable',async()=>{
  const ui=await app({role:'merchant',intercept(name){if(name==='save_offer')return rpc({ok:false,message:'Fixture publication rejected.',code:''});}});
- try{ui.click("Manage");await until(()=>ui.text().includes("New offer"));
-  ui.click('Manage');await until(()=>ui.find('New offer'));ui.click('New offer');await until(()=>ui.document.querySelector('[placeholder="Lunch bowl for $7"]'));
+ try{ui.click("Offers");await until(()=>ui.text().includes("New offer"));
+  ui.click('Offers');await until(()=>ui.find('New offer'));ui.click('New offer');await until(()=>ui.document.querySelector('[placeholder="Lunch bowl for $7"]'));
   ui.fill('Lunch bowl for $7','Keep this lunch');ui.fill('7.00','6.50');ui.fill('One per student. Dine-in only.','Keep these terms');ui.click('Publish offer');
   await until(()=>ui.text().includes('Fixture publication rejected.'));
   assert.equal(ui.document.querySelector('[placeholder="Lunch bowl for $7"]').value,'Keep this lunch');
@@ -208,8 +255,8 @@ test('business load failure blocks overwriting a saved application until retry s
 
 test('merchant profile cancellation restores saved details without sending a write',async()=>{
  const ui=await app({role:'merchant'});
- try{ui.click("Manage");await until(()=>ui.text().includes("New offer"));
-  ui.click('Manage');await until(()=>ui.find('Edit business details'));
+ try{ui.click("Offers");await until(()=>ui.text().includes("New offer"));
+  ui.click('Offers');await until(()=>ui.find('Edit business details'));
   assert.equal(ui.document.querySelector('[placeholder="Restaurant name"]'),null,'the default Manage screen focuses on offers');
   ui.click('Edit business details');await until(()=>ui.document.querySelector('[placeholder="Restaurant name"]')?.value==='Fixture Kitchen');
   ui.fill('Restaurant name','Unsaved name');ui.click('Cancel profile changes');
@@ -221,10 +268,28 @@ test('merchant profile cancellation restores saved details without sending a wri
  }finally{ui.close();}
 });
 
+test('a configured merchant with a student inbox keeps routine editing without business signup',async()=>{
+ const ui=await app({role:'merchant',verified:true,intercept(name){
+  if(name==='current_session')return rpc({authenticated:true,actor_id:'fixture-student-merchant',role:'merchant',restaurant_id:'fixture-restaurant',display_name:'Fixture operator',email_verified:true,is_demo:false,business_account:false});
+ }});
+ try{
+  ui.click('Offers');await until(()=>ui.find('New offer'));
+  ui.click('Edit business details');await until(()=>ui.document.querySelector('[placeholder="Restaurant name"]'));
+  assert.equal(ui.document.querySelector('[placeholder="Restaurant name"]').readOnly,true);
+  assert.equal(ui.document.querySelector('[placeholder="Street address"]').readOnly,true);
+  assert.equal(ui.document.querySelector('[placeholder="Noodles"]').readOnly,false);
+  assert.equal(ui.calls.some(c=>c.name==='get_business_draft'),false);
+  ui.fill('Noodles','Updated fixture cuisine');ui.click('Save profile');
+  await until(()=>ui.calls.some(c=>c.name==='update_profile'));
+  assert.equal(ui.calls.find(c=>c.name==='update_profile').body.cuisine,'Updated fixture cuisine');
+  assert.deepEqual(ui.errors,[]);
+ }finally{ui.close();}
+});
+
 test('editing an offer keeps absent regular price optional and uses save changes',async()=>{
  const ui=await app({role:'merchant',item:offer({regular_price:0,state:'paused'})});
- try{ui.click("Manage");await until(()=>ui.text().includes("New offer"));
-  ui.click('Manage');await until(()=>ui.find('Edit'));ui.click('Edit');await until(()=>ui.document.querySelector('[placeholder="Lunch bowl for $7"]'));
+ try{ui.click("Offers");await until(()=>ui.text().includes("New offer"));
+  ui.click('Offers');await until(()=>ui.find('Edit'));ui.click('Edit');await until(()=>ui.document.querySelector('[placeholder="Lunch bowl for $7"]'));
   assert.equal(ui.document.querySelector('[placeholder="11.50"]').value,'');
   assert.equal(ui.find('Publish offer'),undefined);
   ui.fill('Lunch bowl for $7','Updated paused lunch');ui.click('Save changes');await until(()=>ui.text().includes('Fixture offer saved'));
@@ -237,12 +302,12 @@ test('editing an offer keeps absent regular price optional and uses save changes
 
 test('unsaved offer details survive moving between Redeem and Manage',async()=>{
  const ui=await app({role:'merchant'});
- try{ui.click("Manage");await until(()=>ui.text().includes("New offer"));
-  ui.click('Manage');await until(()=>ui.find('New offer'));ui.click('New offer');await until(()=>ui.document.querySelector('[placeholder="Lunch bowl for $7"]'));
+ try{ui.click("Offers");await until(()=>ui.text().includes("New offer"));
+  ui.click('Offers');await until(()=>ui.find('New offer'));ui.click('New offer');await until(()=>ui.document.querySelector('[placeholder="Lunch bowl for $7"]'));
   ui.fill('Lunch bowl for $7','Retain this draft');ui.fill('7.00','6.75');ui.fill('One per student. Dine-in only.','Keep draft terms');
   assert.equal(ui.find('Nearby')===undefined,true,'restaurants do not get the student feed');
-  ui.click('Redeem');await until(()=>!ui.document.querySelector('[placeholder="Lunch bowl for $7"]'));
-  ui.click('Manage');await until(()=>ui.document.querySelector('[placeholder="Lunch bowl for $7"]'));
+  ui.click('Scan QR');await until(()=>!ui.document.querySelector('[placeholder="Lunch bowl for $7"]'));
+  ui.click('Offers');await until(()=>ui.document.querySelector('[placeholder="Lunch bowl for $7"]'));
   assert.equal(ui.document.querySelector('[placeholder="Lunch bowl for $7"]').value,'Retain this draft');
   assert.equal(ui.document.querySelector('[placeholder="7.00"]').value,'6.75');
   assert.equal(ui.document.querySelector('[placeholder="One per student. Dine-in only."]').value,'Keep draft terms');
@@ -253,11 +318,11 @@ test('unsaved offer details survive moving between Redeem and Manage',async()=>{
 test('pending publication blocks navigation and repeat submission until confirmed',async()=>{
  let release;const pending=new Promise(resolve=>{release=resolve;});
  const ui=await app({role:'merchant',intercept:async(name)=>{if(name==='save_offer'){await pending;return rpc({ok:true,message:'Deferred publication complete.',code:'new-post'});}}});
- try{ui.click("Manage");await until(()=>ui.text().includes("New offer"));
-  ui.click('Manage');await until(()=>ui.find('New offer'));ui.click('New offer');await until(()=>ui.document.querySelector('[placeholder="Lunch bowl for $7"]'));
+ try{ui.click("Offers");await until(()=>ui.text().includes("New offer"));
+  ui.click('Offers');await until(()=>ui.find('New offer'));ui.click('New offer');await until(()=>ui.document.querySelector('[placeholder="Lunch bowl for $7"]'));
   ui.fill('Lunch bowl for $7','Publish only once');ui.fill('7.00','6.75');ui.fill('One per student. Dine-in only.','One per student.');ui.click('Publish offer');
   await until(()=>ui.calls.some(c=>c.name==='save_offer'));
-  ui.click('Redeem');ui.click('Saving...');
+  ui.click('Scan QR');ui.click('Saving...');
   assert.ok(ui.document.querySelector('[placeholder="Lunch bowl for $7"]'),'keep the composer mounted while the write is pending');
   assert.equal(ui.calls.filter(c=>c.name==='save_offer').length,1);
   release();await until(()=>ui.text().includes('Deferred publication complete.'));
@@ -269,10 +334,12 @@ test('pending publication blocks navigation and repeat submission until confirme
 test('merchant profile fields prevent newer edits being overwritten by a pending save',async()=>{
  let release;const pending=new Promise(resolve=>{release=resolve;});
  const ui=await app({role:'merchant',intercept:async(name)=>{if(name==='update_profile')await pending;}});
- try{ui.click("Manage");await until(()=>ui.text().includes("New offer"));
-  ui.click('Manage');await until(()=>ui.find('Edit business details'));
+ try{ui.click("Offers");await until(()=>ui.text().includes("New offer"));
+  ui.click('Offers');await until(()=>ui.find('Edit business details'));
   ui.click('Edit business details');await until(()=>ui.document.querySelector('[placeholder="Restaurant name"]'));
-  ui.fill('Restaurant name','Submitted name');ui.click('Save profile');await until(()=>ui.calls.some(c=>c.name==='update_profile'));
+  assert.equal(ui.document.querySelector('[placeholder="Restaurant name"]').readOnly,true);
+  assert.equal(ui.document.querySelector('[placeholder="Street address"]').readOnly,true);
+  ui.fill('Noodles','Submitted cuisine');ui.click('Save profile');await until(()=>ui.calls.some(c=>c.name==='update_profile'));
   const inputs=[...ui.document.querySelectorAll('[placeholder="Restaurant name"],[placeholder="Noodles"],[placeholder="Short description"],[placeholder="Street address"],[placeholder="Kerrytown"],[placeholder="Use the side door while sidewalk work continues"],[placeholder="2026-09-26"]')];
   assert.equal(inputs.length,7);assert.ok(inputs.every(input=>input.readOnly),'the submitted profile must stay unchanged until its response arrives');
   release();await until(()=>ui.find('Edit business details'));

@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from services.email_codes import CodeStore
+from services.email_codes import CodeStore, business_revision
 from qr_http import Api, provision, require
 
 
@@ -97,13 +97,20 @@ def main():
     require(not business.call('save_business_draft', **{**draft, 'confirmed': False})['ok'],
             'business still confirms representation before activation')
     activated = business.call('save_business_draft', **draft)
-    require(activated['ok'] and activated['status'] == 'active', 'company profile activates immediately on save')
+    require(activated['ok'] and activated['status'] == 'pending_review', 'company submission waits for host approval')
+    require(not business.call('merchant_portal')['ok'], 'submission does not grant publishing authority')
+    state = CodeStore(ROOT / '.jac/onboarding')
+    state.approve_business(actor, 'HTTP fixture reviewer', 'Verified fictional business authority', business_revision(state.draft(actor)))
+    activated = business.call('save_business_draft', **draft)
+    require(activated['ok'] and activated['status'] == 'active', 'approved company activates on save')
     business_restaurant_id = business.call('current_session')['restaurant_id']
     require(business.call('current_session')['role'] == 'merchant' and business_restaurant_id,
-            'profile owner becomes a merchant without approval or restart')
+            'approved profile owner becomes a merchant without restart')
     require(business.call('merchant_portal')['name'] == draft['name'], 'activated business owns its new profile')
     draft['name'] = 'Edited Fixture Company ' + run
-    require(business.call('save_business_draft', **draft)['ok'], 'existing company profile can be edited')
+    require(business.call('save_business_draft', **draft)['status'] == 'pending_review', 'name change waits for review')
+    state.approve_business(actor, 'HTTP fixture reviewer', 'Verified changed fictional business name', business_revision(state.draft(actor)))
+    require(business.call('save_business_draft', **draft)['status'] == 'active', 'reviewed company name publishes')
     require(business.call('current_session')['restaurant_id'] == business_restaurant_id,
             'repeated company saves preserve restaurant identity')
     require(business.call('merchant_portal')['name'] == draft['name'], 'company edits update its live restaurant')
@@ -139,7 +146,7 @@ def main():
     require(merchant.call('merchant_portal')['blurb'] == fields['blurb'], 'approved company profile edit persists')
 
     now = datetime.now(ZoneInfo('America/Detroit'))
-    post = dict(offer_id='', title='Published fixture ' + run, description='Fictional local offer',
+    post = dict(offer_id='', create_key=secrets.token_hex(16), title='Published fixture ' + run, description='Fictional local offer',
                 price='3.50', regular_price='5.00', start_local=(now-timedelta(minutes=2)).strftime('%Y-%m-%d %H:%M'),
                 end_local=(now+timedelta(hours=1)).strftime('%Y-%m-%d %H:%M'), quantity='8',
                 eligibility='Valid U-M ID', terms='One per person', dietary='vegetarian', menu_item='Fixture soup')
@@ -153,6 +160,9 @@ def main():
     require(not merchant.call('save_offer', **{**post, 'offer_id': own_post['code']})['ok'],
             'provisioned merchant cannot edit the new company post')
     require(other_business.call('save_business_draft', **draft)['ok'], 'second company can also activate')
+    other_actor = other_business.call('current_session')['actor_id']
+    state.approve_business(other_actor, 'HTTP fixture reviewer', 'Verified second fictional business authority', business_revision(state.draft(other_actor)))
+    require(other_business.call('save_business_draft', **draft)['status'] == 'active', 'second approved business activates')
     require(other_business.call('current_session')['restaurant_id'] != business_restaurant_id,
             'identical business names never share ownership')
     require(not other_business.call('save_offer', **{**post, 'offer_id': own_post['code']})['ok'],

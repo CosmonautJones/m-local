@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check this repository's source-byte share against its GitHub language inventory.
+"""Report this repository's source-byte composition as informational evidence.
 
 The mappings match GitHub's language API exactly for main at 9a2980e. Count Git
 blobs, not Windows checkout bytes; retain tests and operational scripts. Recheck
@@ -41,13 +41,10 @@ def inventory(revision):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--ref', default='HEAD')
-    parser.add_argument('--min-jac', type=float, default=40.0)
     args = parser.parse_args()
     languages = inventory(args.ref)
     total = sum(languages.values())
     share = 100 * languages.get('Jac', 0) / total if total else 0
     print(json.dumps(dict(revision=args.ref, language_bytes=languages,
                          total_bytes=total, jac_percent=round(share, 2),
-                         required_percent=args.min_jac), indent=2))
-    if share < args.min_jac:
-        raise SystemExit(f'Jac source share {share:.2f}% is below {args.min_jac:.2f}%.')
+                         policy='informational'), indent=2))

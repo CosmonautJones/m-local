@@ -18,7 +18,7 @@ person's work or infer a person's ownership from commit counts.
 ## A useful three-minute walkthrough
 
 1. Open the welcome screen and browse the student offers. Explain that displayed
-   sample offers are fictional and cannot be redeemed at real restaurants.
+   sample offers are local simulations; confirm actual offers directly with the business.
 2. Show filtering and an offer's price, validity window, eligibility and terms.
 3. In prepared, separate student and merchant sessions, claim an offer and show
    its QR pass. Explain that the hold reserves inventory for up to 20 minutes.
@@ -83,6 +83,12 @@ Checked 2026-09-29:
   described in [HOSTING.md](HOSTING.md).
 
 ## JacHammer hosting checkpoint
+
+October 7, 2026 read-only link check: the canonical [mlocal.jachammer.app](https://mlocal.jachammer.app/)
+returned HTTP 200 HTML. The older long address returned HTTP 404 and the laptop
+fallback hostname did not resolve. These GET requests do not prove the deployed
+revision, authentication, inbox delivery, storage durability or release acceptance.
+The following September 29 observations are retained as historical evidence.
 
 **Update, September 29 at 21:33 Eastern:** the public production URL is
 [m-local-main-prjc0b.jachammer.app](https://m-local-main-prjc0b.jachammer.app/).

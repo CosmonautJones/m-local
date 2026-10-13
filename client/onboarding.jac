@@ -1,5 +1,7 @@
 """Welcome, email verification and business setup in the Jac client."""
 import from "react" { Fragment, useEffect }
+import from "./photo-picker.jsx" { PhotoPicker }
+import from ..services.photos { upload_business_photo, import_business_photo }
 import from .ui { BrandLogo, ThemeControl, uiFont, formStack, formInput, formButton, formSecondary, formHint }
 import type from ..services.session { SessionView }
 import type from ..services.onboarding { EmailCodeResult }
@@ -40,7 +42,7 @@ def:pub AudienceWelcome(onChoose: Callable[[str], None]) -> JsxElement {
             </header>
             <div style={{**stack, "gap": 12}}>
                 <button className="mlocal-choice ml-welcome-choice" type="button" style={{**choice, "background": "var(--ml-accent)", "borderColor": "var(--ml-accent)", "color": "var(--ml-accent-text)"}} onClick={lambda { onChoose("student"); }}>
-                    <span style={{**stack, "gap": 8, "color": "inherit"}}><span style={{"fontSize": 21, "fontWeight": 750}}>Find local deals</span><span style={{"fontSize": 14, "lineHeight": 1.5, "fontWeight": 400}}>Join with your U-M email.<br/>Discover offers from local favorites.</span></span><span aria-hidden="true" style={{"fontSize": 26}}>→</span>
+                    <span style={{**stack, "gap": 8, "color": "inherit"}}><span style={{"fontSize": 21, "fontWeight": 750}}>Find local deals</span><span style={{"fontSize": 14, "lineHeight": 1.5, "fontWeight": 400}}>Browse offers before signup.<br/>Sign in with your U-M email to claim.</span></span><span aria-hidden="true" style={{"fontSize": 26}}>→</span>
                 </button>
                 <button className="mlocal-choice ml-welcome-choice" type="button" style={choice} onClick={lambda { onChoose("business"); }}>
                     <span style={{**stack, "gap": 8, "color": "inherit"}}><span style={{"fontSize": 21, "fontWeight": 750}}>List my business</span><span style={{"fontSize": 14, "lineHeight": 1.5, "fontWeight": 400}}>Create your business profile.<br/>Connect with the U-M community.</span></span><span aria-hidden="true" style={{"fontSize": 26}}>→</span>
@@ -64,7 +66,7 @@ def:pub EmailOnboarding(
         mounted: Ref[bool] = Ref(True), inFlight: Ref[bool] = Ref(False),
         codeRef: Ref[HTMLInputElement] = Ref(), emailRef: Ref[HTMLInputElement] = Ref(),
         revision: Ref[int] = Ref(0), previousKind: Ref[str] = Ref(kind);
-    quiet = {"border": 0, "background": "transparent", "padding": "6px 0", "minHeight": 36, "color": "var(--ml-accent)", "font": "700 13px Figtree, system-ui", "cursor": "pointer", "textDecoration": "underline", "textUnderlineOffset": 3};
+    quiet = {"border": 0, "background": "transparent", "padding": "6px 0", "minHeight": 44, "color": "var(--ml-accent)", "font": "700 13px Figtree, system-ui", "cursor": "pointer", "textDecoration": "underline", "textUnderlineOffset": 3};
 
     useEffect(lambda {
         mounted.current = True;
@@ -155,7 +157,7 @@ def:pub EmailOnboarding(
         <style>{".ml-auth button:focus-visible,.ml-auth select:focus-visible,.ml-auth input:focus-visible{outline:3px solid var(--ml-focus);outline-offset:3px}.ml-auth button:disabled{opacity:.55;cursor:default}.ml-auth select{max-width:100%}"}</style>
         <header style={{"display": "flex", "alignItems": "flex-start", "justifyContent": "space-between", "gap": 16}}>
             <div style={{**stack, "gap": 8}}>
-                {(<select aria-label="Account type" value={kind} disabled={busy} onChange={lambda (e: ChangeEvent) { onSwitchAudience(e.target.value); }} style={{"font": "700 13px Figtree, system-ui", "color": "var(--ml-muted)", "border": "1px solid var(--ml-border)", "borderRadius": 6, "background": "var(--ml-bg)", "padding": "7px 9px"}}><option value="student">U-M student</option><option value="business">Business</option></select>) if not challenge else None}
+                {(<select aria-label="Account type" value={kind} disabled={busy} onChange={lambda (e: ChangeEvent) { onSwitchAudience(e.target.value); }} style={{"font": "700 13px Figtree, system-ui", "color": "var(--ml-muted)", "border": "1px solid var(--ml-border)", "borderRadius": 6, "background": "var(--ml-bg)", "padding": "7px 9px", "minHeight": 44}}><option value="student">U-M student</option><option value="business">Business</option></select>) if not challenge else None}
                 <h3 style={{"fontSize": 26, "lineHeight": 1.2, "margin": 0}}>{"Check your email" if challenge else "Create your account" if mode == "signup" else "Sign in"}</h3>
             </div>
             <button style={{**quiet, "whiteSpace": "nowrap", "color": "var(--ml-muted)"}} type="button" disabled={busy} onClick={onCancel}>{cancelLabel}</button>
@@ -166,7 +168,7 @@ def:pub EmailOnboarding(
             {(<label style={label}>U-M email
                 <div style={{"display": "flex", "border": "1px solid var(--ml-border)", "borderRadius": 10, "overflow": "hidden", "minWidth": 0}}>
                     <input ref={inputRef or emailRef} aria-label="U-M uniqname" aria-describedby="umich-email-help" style={{**inputStyle, "border": 0, "borderRadius": 0, "flex": 1}} placeholder="uniqname" autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={False} pattern="[A-Za-z][A-Za-z0-9]{1,31}" maxLength={32} value={value} onChange={lambda (e: ChangeEvent) { value = e.target.value; }} required={True} disabled={busy}/>
-                    <span style={{"padding": "13px 10px", "background": "var(--ml-sunken)", "color": "var(--ml-muted)", "fontWeight": 500, "whiteSpace": "nowrap"}}>@umich.edu</span>
+                    <span style={{"padding": "13px 10px", "background": "var(--ml-sunken)", "color": "var(--ml-text)", "fontWeight": 500, "whiteSpace": "nowrap"}}>@umich.edu</span>
                 </div><span id="umich-email-help" style={hint}>Use your uniqname. No university password needed.</span>
             </label>) if kind == "student" else <label style={label}>Work email<input ref={inputRef or emailRef} style={inputStyle} placeholder="you@business.com" type="email" autoComplete="email" maxLength={254} value={value} onChange={lambda (e: ChangeEvent) { value = e.target.value; }} required={True} disabled={busy}/></label>}
             <Notice>{message}</Notice>
@@ -188,7 +190,7 @@ def:pub EmailOnboarding(
 glob emptyDraft: dict[str, any] = {
     "name": "", "cuisine": "", "description": "", "address": "", "website": "",
     "menu_text": "", "menu_url": "", "image_url": "", "status": "draft",
-    "image_urls": [], "menu_urls": [], "sources": []
+    "image_urls": [], "menu_urls": [], "sources": [], "approved_name": "", "approved_address": ""
 };
 
 def ImageChoice(url: str, selected: bool, disabled: bool, choose: Callable[[str], None]) -> JsxElement {
@@ -209,6 +211,7 @@ def:pub BusinessOnboarding(
     has draft: BusinessDraftView = emptyDraft as BusinessDraftView,
         draftRef: Ref[BusinessDraftView] = Ref(emptyDraft as BusinessDraftView),
         message: str = "", busy: bool = False, confirmed: bool = False,
+        photoBusy: bool = False,
         ready: bool = False, loadFailed: bool = False,
         mounted: Ref[bool] = Ref(True), inFlight: Ref[bool] = Ref(False);
 
@@ -219,7 +222,7 @@ def:pub BusinessOnboarding(
     }
 
     async def load {
-        if inFlight.current { return; }
+        if inFlight.current or photoBusy { return; }
         inFlight.current = True;
         ready = False;
         loadFailed = False;
@@ -251,6 +254,9 @@ def:pub BusinessOnboarding(
     def field(key: str, value: str) {
         nextDraft = {**draftRef.current, "status": "draft"};
         nextDraft[key] = value;
+        if nextDraft.get("approved_name") and nextDraft.get("name") == nextDraft.get("approved_name") and nextDraft.get("address") == nextDraft.get("approved_address") {
+            nextDraft["status"] = "active";
+        }
         replaceDraft(nextDraft as BusinessDraftView);
         confirmed = False;
     }
@@ -269,7 +275,7 @@ def:pub BusinessOnboarding(
     }
 
     async def retryManagement {
-        if inFlight.current { return; }
+        if inFlight.current or photoBusy { return; }
         inFlight.current = True;
         busy = True;
         message = "";
@@ -278,7 +284,7 @@ def:pub BusinessOnboarding(
     }
 
     async def run(action: Callable[[], BusinessDraftView], activate: bool = False) {
-        if inFlight.current { return; }
+        if inFlight.current or photoBusy { return; }
         inFlight.current = True;
         busy = True;
         message = "";
@@ -301,6 +307,10 @@ def:pub BusinessOnboarding(
         return await saveDraft(draft.name, draft.cuisine, draft.description, draft.address,
             draft.website, draft.menu_text, draft.menu_url, draft.image_url, confirmed);
     }
+    async def continueApproved() -> BusinessDraftView {
+        return await saveDraft(draft.name, draft.cuisine, draft.description, draft.address,
+            draft.website, draft.menu_text, draft.menu_url, draft.image_url, True);
+    }
     def importSubmit(event: FormEvent) { event.preventDefault(); run(importCurrentWebsite); }
     def saveSubmit(event: FormEvent) { event.preventDefault(); run(saveCurrentDraft, True); }
     def revealInvalid(event: FormEvent) {
@@ -311,37 +321,36 @@ def:pub BusinessOnboarding(
 
     return <section aria-label="Create your business profile" style={{**stack, "paddingTop": 16, "borderTop": "1px solid var(--ml-border)"}}>
         <h3 style={{"margin": 0, "fontSize": 20}}>{"Your business profile" if draft.name else "Bring your business to M-Local"}</h3>
-        {(<p role="status" style={hint}>Your saved details are here. Save your business profile to start posting.</p>) if draft.status == "pending_review" else None}
+        {(<Fragment><p role="status" style={hint}>Your business is awaiting approval. Your submitted details are saved.</p><button style={secondary} type="button" disabled={busy or photoBusy or not ready} onClick={load}>{"Check approval" if ready else "Checking approval..."}</button></Fragment>) if draft.status == "pending_review" else None}
+        {(<Fragment><p role="status" style={hint}>Your business is approved. You’re ready to publish offers.</p><button style={button} type="button" disabled={busy or photoBusy or not ready} onClick={lambda { run(continueApproved, True); }}>Continue to offers</button></Fragment>) if draft.status == "approved" else None}
         {(<Fragment><p role="status" style={hint}>Your business profile is saved.</p><button style={secondary} type="button" disabled={busy} onClick={retryManagement}>{"Opening offer management..." if busy else "Open offer management"}</button></Fragment>) if draft.status == "active" else None}
         {(<p role="status" style={hint}>Loading your business profile...</p>) if not ready and not loadFailed else None}
         {(<button style={secondary} type="button" onClick={load}>Retry business profile</button>) if loadFailed else None}
         <p style={hint}>Have a website? Import your details, or enter your business name and address below.</p>
         <form style={stack} onSubmit={importSubmit}>
-            <InputField title="Business website" placeholder="https://your-business.com" inputType="url" value={draft.website} onChange={lambda (e: ChangeEvent) { field("website", e.target.value); }} disabled={busy or not ready} required={True}/>
-            <button style={secondary} disabled={busy or not ready}>{"Working..." if busy else "Import website details"}</button>
+            <InputField title="Business website" placeholder="https://your-business.com" inputType="url" value={draft.website} onChange={lambda (e: ChangeEvent) { field("website", e.target.value); }} disabled={busy or photoBusy or not ready} required={True}/>
+            <button style={secondary} disabled={busy or photoBusy or not ready}>{"Working..." if busy else "Import website details"}</button>
         </form>
         <Notice>{message}</Notice>
         {(<div style={hint}>{"Sources: "}{[<Fragment key={url}>{" · " if i > 0 else ""}<a href={url} target="_blank" rel="noopener noreferrer">{"Website" if i == 0 else "Menu page"}</a></Fragment> for (i, url) in enumerate(draft.sources)]}</div>) if len(draft.sources) > 0 else None}
         <form style={stack} onSubmit={saveSubmit} onInvalidCapture={revealInvalid}>
-            {(<img src={draft.image_url} alt={draft.name or "Business logo"} referrerPolicy="no-referrer" style={{"width": "100%", "height": 160, "objectFit": "cover", "display": "block", "background": "var(--ml-sunken)"}} />) if draft.image_url else None}
-            <InputField title="Business name" placeholder="Business name" maxLength={120} value={draft.name} onChange={lambda (e: ChangeEvent) { field("name", e.target.value); }} required={True} disabled={busy or not ready}/>
-            <InputField title="Cuisine" placeholder="Cuisine" maxLength={80} value={draft.cuisine} onChange={lambda (e: ChangeEvent) { field("cuisine", e.target.value); }} disabled={busy or not ready}/>
-            <InputField title="Street address" placeholder="Street address" maxLength={240} value={draft.address} onChange={lambda (e: ChangeEvent) { field("address", e.target.value); }} required={True} disabled={busy or not ready}/>
-            <label style={label}>About your business<textarea style={{**inputStyle, "minHeight": 90, "resize": "vertical"}} placeholder="About your business" maxLength={1000} value={draft.description} onChange={lambda (e: ChangeEvent) { field("description", e.target.value); }} disabled={busy or not ready}/></label>
+            <PhotoPicker label="Business photo" value={draft.image_url} candidates={draft.image_urls} uploadPhoto={upload_business_photo} importPhoto={import_business_photo} onChange={lambda (picked: str) { field("image_url", picked); }} onBusyChange={lambda (value: bool) { photoBusy = value; }} disabled={busy or photoBusy or not ready}/>
+            <InputField title="Business name" placeholder="Business name" maxLength={120} value={draft.name} onChange={lambda (e: ChangeEvent) { field("name", e.target.value); }} required={True} disabled={busy or photoBusy or not ready}/>
+            <InputField title="Cuisine" placeholder="Cuisine" maxLength={80} value={draft.cuisine} onChange={lambda (e: ChangeEvent) { field("cuisine", e.target.value); }} disabled={busy or photoBusy or not ready}/>
+            <InputField title="Street address" placeholder="Street address" maxLength={240} value={draft.address} onChange={lambda (e: ChangeEvent) { field("address", e.target.value); }} required={True} disabled={busy or photoBusy or not ready}/>
+            <label style={label}>About your business<textarea style={{**inputStyle, "minHeight": 90, "resize": "vertical"}} placeholder="About your business" maxLength={1000} value={draft.description} onChange={lambda (e: ChangeEvent) { field("description", e.target.value); }} disabled={busy or photoBusy or not ready}/></label>
             <details>
-                <summary>Photo and menu (optional)</summary>
+                <summary>Menu details (optional)</summary>
                 <div style={stack}>
-                    {(<div style={{"display": "flex", "flexWrap": "wrap", "gap": 8}}>{[<ImageChoice key={url} url={url} selected={url == draft.image_url} disabled={busy} choose={lambda (picked: str) { field("image_url", picked); }} /> for url in draft.image_urls]}</div>) if len(draft.image_urls) > 0 else None}
-                    <InputField title="Image link" placeholder="https://your-business.com/photo.jpg" inputType="url" maxLength={2048} value={draft.image_url} onChange={lambda (e: ChangeEvent) { field("image_url", e.target.value); }} disabled={busy or not ready}/>
-                    <label style={label}>Menu notes to review<textarea style={{**inputStyle, "minHeight": 120, "resize": "vertical"}} placeholder="Menu items and prices" maxLength={4000} value={draft.menu_text} onChange={lambda (e: ChangeEvent) { field("menu_text", e.target.value); }} disabled={busy or not ready}/></label>
+                    <label style={label}>Menu notes to review<textarea style={{**inputStyle, "minHeight": 120, "resize": "vertical"}} placeholder="Menu items and prices" maxLength={4000} value={draft.menu_text} onChange={lambda (e: ChangeEvent) { field("menu_text", e.target.value); }} disabled={busy or photoBusy or not ready}/></label>
                     <p style={hint}>Check item names and prices against your current menu. These notes do not create offers.</p>
                     {(<label style={label}>Found menu links<select style={inputStyle} value={draft.menu_url} onChange={lambda (e: ChangeEvent) { field("menu_url", e.target.value); }} disabled={busy}><option value="">Choose a menu link</option>{[<option key={url} value={url}>{url}</option> for url in draft.menu_urls]}</select></label>) if len(draft.menu_urls) > 0 else None}
-                    <InputField title="Menu link" placeholder="https://your-business.com/menu" inputType="url" maxLength={2048} value={draft.menu_url} onChange={lambda (e: ChangeEvent) { field("menu_url", e.target.value); }} disabled={busy or not ready}/>
+                    <InputField title="Menu link" placeholder="https://your-business.com/menu" inputType="url" maxLength={2048} value={draft.menu_url} onChange={lambda (e: ChangeEvent) { field("menu_url", e.target.value); }} disabled={busy or photoBusy or not ready}/>
                 </div>
             </details>
-            <label style={{**hint, "display": "flex", "gap": 10, "alignItems": "flex-start", "minHeight": 44}}><input type="checkbox" checked={confirmed} onChange={lambda (e: ChangeEvent) { confirmed = e.target.checked; }} disabled={busy or not ready} style={{"width": 20, "height": 20, "flexShrink": 0}}/>I can represent this business and have permission to use the details and selected image.</label>
-            <button style={button} disabled={busy or not ready or not confirmed}>{"Saving..." if busy else "Save business profile"}</button>
-            <p style={hint}>Save your business profile to start posting. You can then create offers and edit your business details from Manage.</p>
+            <label style={{**hint, "display": "flex", "gap": 10, "alignItems": "flex-start", "minHeight": 44}}><input type="checkbox" checked={confirmed} onChange={lambda (e: ChangeEvent) { confirmed = e.target.checked; }} disabled={busy or photoBusy or not ready} style={{"width": 20, "height": 20, "flexShrink": 0}}/>I can represent this business and have permission to use the details and selected image.</label>
+            <button style={button} disabled={busy or photoBusy or not ready or not confirmed}>{"Saving..." if busy else "Save business profile" if draft.status == "active" else "Update submission" if draft.status == "pending_review" else "Submit for review"}</button>
+            <p style={hint}>We review your business name and address before publication. Later name or address changes need review; offers, photos and other details are yours to manage.</p>
         </form>
     </section>;
 }

@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {app, until, setMaximumPrice} from './harness.mjs';
 
-test('signed-out onboarding has no browsing escape or app data for either audience', async()=>{
+test('signed-out authentication hides app data and never requests merchant authority', async()=>{
  for(const audience of ['student','business']){
   const ui=await app({role:'guest',audience});
   try{
@@ -11,9 +11,10 @@ test('signed-out onboarding has no browsing escape or app data for either audien
    assert.equal(ui.find('Keep browsing'),undefined);
    assert.equal(ui.find('Current bowl'),undefined);
    assert.equal(ui.document.querySelector('[data-testid=app-tabbar]'),null);
-   assert.equal(ui.calls.some(c=>['home_feed','merchant_portal','merchant_insights'].includes(c.name)),false);
-   ui.click('Back');await until(()=>ui.find('Find local deals'));
-   assert.equal(ui.find('Current bowl'),undefined);
+   assert.equal(ui.calls.some(c=>['merchant_portal','merchant_insights'].includes(c.name)),false);
+   assert.equal(ui.calls.some(c=>c.name==='home_feed'),audience==='student');
+   ui.click('Back');await until(()=>ui.find(audience==='student'?'Current bowl':'Find local deals'));
+   assert.equal(!!ui.find('Current bowl'),audience==='student');
    assert.deepEqual(ui.errors,[]);
   }finally{ui.close();}
  }

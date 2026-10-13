@@ -1,0 +1,28 @@
+.F
+======================================================================
+FAIL: test_unverified_native_identity_without_onboarding_is_never_deleted (test_identity_preservation.IdentityPreservationTests.test_unverified_native_identity_without_onboarding_is_never_deleted)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/var/tmp/m-local-hardening-control.ZqS8qpzQ/tests/onboarding/test_identity_preservation.py", line 49, in test_unverified_native_identity_without_onboarding_is_never_deleted
+    self.assertEqual(users.deleted, [], 'Missing onboarding must never authorize native deletion')
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['legitimate-native', 'legitimate-native',[121 chars]ive'] != []
+
+First list contains 8 additional elements.
+First extra element 0:
+'legitimate-native'
+
++ []
+- ['legitimate-native',
+-  'legitimate-native',
+-  'legitimate-native',
+-  'legitimate-native',
+-  'legitimate-native',
+-  'legitimate-native',
+-  'legitimate-native',
+-  'legitimate-native'] : Missing onboarding must never authorize native deletion
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.075s
+
+FAILED (failures=1)

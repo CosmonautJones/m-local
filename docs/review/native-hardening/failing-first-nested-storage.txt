@@ -1,0 +1,86 @@
+............FFFFFF..FFF....
+======================================================================
+FAIL: test_nested_ephemeral_mounts_are_rejected_at_every_actual_state_leaf (test_production_guard.GuardTests.test_nested_ephemeral_mounts_are_rejected_at_every_actual_state_leaf) (filesystem='tmpfs', leaf='onboarding')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/c/Users/Travesty/Desktop/JacHacks/m-local/.release/hardening/tests/onboarding/test_production_guard.py", line 192, in test_nested_ephemeral_mounts_are_rejected_at_every_actual_state_leaf
+    self.assertTrue(self.problems(), 'Ephemeral ' + leaf.name + ' must refuse startup')
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: [] is not true : Ephemeral onboarding must refuse startup
+
+======================================================================
+FAIL: test_nested_ephemeral_mounts_are_rejected_at_every_actual_state_leaf (test_production_guard.GuardTests.test_nested_ephemeral_mounts_are_rejected_at_every_actual_state_leaf) (filesystem='tmpfs', leaf='native')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/c/Users/Travesty/Desktop/JacHacks/m-local/.release/hardening/tests/onboarding/test_production_guard.py", line 192, in test_nested_ephemeral_mounts_are_rejected_at_every_actual_state_leaf
+    self.assertTrue(self.problems(), 'Ephemeral ' + leaf.name + ' must refuse startup')
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: [] is not true : Ephemeral native must refuse startup
+
+======================================================================
+FAIL: test_nested_ephemeral_mounts_are_rejected_at_every_actual_state_leaf (test_production_guard.GuardTests.test_nested_ephemeral_mounts_are_rejected_at_every_actual_state_leaf) (filesystem='tmpfs', leaf='photos')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/c/Users/Travesty/Desktop/JacHacks/m-local/.release/hardening/tests/onboarding/test_production_guard.py", line 192, in test_nested_ephemeral_mounts_are_rejected_at_every_actual_state_leaf
+    self.assertTrue(self.problems(), 'Ephemeral ' + leaf.name + ' must refuse startup')
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: [] is not true : Ephemeral photos must refuse startup
+
+======================================================================
+FAIL: test_nested_ephemeral_mounts_are_rejected_at_every_actual_state_leaf (test_production_guard.GuardTests.test_nested_ephemeral_mounts_are_rejected_at_every_actual_state_leaf) (filesystem='overlay', leaf='onboarding')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/c/Users/Travesty/Desktop/JacHacks/m-local/.release/hardening/tests/onboarding/test_production_guard.py", line 192, in test_nested_ephemeral_mounts_are_rejected_at_every_actual_state_leaf
+    self.assertTrue(self.problems(), 'Ephemeral ' + leaf.name + ' must refuse startup')
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: [] is not true : Ephemeral onboarding must refuse startup
+
+======================================================================
+FAIL: test_nested_ephemeral_mounts_are_rejected_at_every_actual_state_leaf (test_production_guard.GuardTests.test_nested_ephemeral_mounts_are_rejected_at_every_actual_state_leaf) (filesystem='overlay', leaf='native')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/c/Users/Travesty/Desktop/JacHacks/m-local/.release/hardening/tests/onboarding/test_production_guard.py", line 192, in test_nested_ephemeral_mounts_are_rejected_at_every_actual_state_leaf
+    self.assertTrue(self.problems(), 'Ephemeral ' + leaf.name + ' must refuse startup')
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: [] is not true : Ephemeral native must refuse startup
+
+======================================================================
+FAIL: test_nested_ephemeral_mounts_are_rejected_at_every_actual_state_leaf (test_production_guard.GuardTests.test_nested_ephemeral_mounts_are_rejected_at_every_actual_state_leaf) (filesystem='overlay', leaf='photos')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/c/Users/Travesty/Desktop/JacHacks/m-local/.release/hardening/tests/onboarding/test_production_guard.py", line 192, in test_nested_ephemeral_mounts_are_rejected_at_every_actual_state_leaf
+    self.assertTrue(self.problems(), 'Ephemeral ' + leaf.name + ' must refuse startup')
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: [] is not true : Ephemeral photos must refuse startup
+
+======================================================================
+FAIL: test_required_state_file_symlinks_cannot_escape_the_durable_volume (test_production_guard.GuardTests.test_required_state_file_symlinks_cannot_escape_the_durable_volume) (file='code.key')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/c/Users/Travesty/Desktop/JacHacks/m-local/.release/hardening/tests/onboarding/test_production_guard.py", line 204, in test_required_state_file_symlinks_cannot_escape_the_durable_volume
+    self.assertTrue(self.problems(), 'Escaped required file must refuse startup')
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: [] is not true : Escaped required file must refuse startup
+
+======================================================================
+FAIL: test_required_state_file_symlinks_cannot_escape_the_durable_volume (test_production_guard.GuardTests.test_required_state_file_symlinks_cannot_escape_the_durable_volume) (file='jwt_secret')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/c/Users/Travesty/Desktop/JacHacks/m-local/.release/hardening/tests/onboarding/test_production_guard.py", line 204, in test_required_state_file_symlinks_cannot_escape_the_durable_volume
+    self.assertTrue(self.problems(), 'Escaped required file must refuse startup')
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: [] is not true : Escaped required file must refuse startup
+
+======================================================================
+FAIL: test_required_state_file_symlinks_cannot_escape_the_durable_volume (test_production_guard.GuardTests.test_required_state_file_symlinks_cannot_escape_the_durable_volume) (file='onboarding.sqlite3')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/c/Users/Travesty/Desktop/JacHacks/m-local/.release/hardening/tests/onboarding/test_production_guard.py", line 204, in test_required_state_file_symlinks_cannot_escape_the_durable_volume
+    self.assertTrue(self.problems(), 'Escaped required file must refuse startup')
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: [] is not true : Escaped required file must refuse startup
+
+----------------------------------------------------------------------
+Ran 20 tests in 1.272s
+
+FAILED (failures=9)

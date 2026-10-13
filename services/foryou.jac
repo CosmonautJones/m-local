@@ -16,10 +16,13 @@ import time;
 import random;
 import from datetime { datetime }
 import from zoneinfo { ZoneInfo }
-import from services.models { Restaurant, Location, MenuItem, Offer, Redemption, HasLocation, Serves, Publishes, ClaimedAs }
+import from services.models { Restaurant, Location, MenuItem, Offer, Redemption, HasLocation, Serves, Publishes, ClaimedAs, samples_visible }
 import from services.qr_catalog { _ensure_seed }
+import from services.qr_auth { listing_visible }
 import from services.session { _actor_id }
-import from services.promo { OfferView, _view, _state, _find_offer, _restaurant_of, _lock, _unlock }
+import from services.promo { OfferView, _view, _state, _my_claim, _claim_status, _find_offer, _restaurant_of, _location_of, _lock, _unlock }
+import from services.context_models { AccessContextView }
+import from services.context { get_access_context }
 import from services.importer { import_restaurant }
 import from services.taste_sandbox { Company, make_companies }
 import from services.taste {
@@ -150,6 +153,11 @@ def _choices() -> list[list[Choice]] {
 
 def _taste_view(p: TasteProfile | None, signed_in: bool, message: str = "", ok: bool = True) -> TasteView {
     lists = _choices();
+    favorites = _favorite_slugs(p);
+    if not samples_visible() {
+        hidden = [r.slug for r in [root.shared -->[?:Restaurant]] if r.is_demo];
+        favorites = [slug for slug in favorites if slug not in hidden];
+    }
     return TasteView(
         ok=ok,
         message=message,
@@ -158,7 +166,7 @@ def _taste_view(p: TasteProfile | None, signed_in: bool, message: str = "", ok: 
         categories=p.categories if p is not None else [],
         diets=p.diets if p is not None else [],
         price_range=p.price_range if p is not None else "",
-        favorites=_favorite_slugs(p),
+        favorites=favorites,
         all_categories=lists[0],
         all_diets=lists[1],
         all_price_ranges=lists[2]
@@ -187,7 +195,7 @@ def _save_taste(categories: str, diets: str, price_range: str, now: float) -> Ta
 
 
 def _toggle_favorite(slug: str, now: float) -> TasteView {
-    known = [r for r in [root.shared -->[?:Restaurant]] if r.slug == slug];
+    known = [r for r in [root.shared -->[?:Restaurant]] if r.slug == slug and (samples_visible() or not r.is_demo) and listing_visible(r.slug, r.source)];
     if not slug or not known {
         return _taste_view(_profile(), True, "That place is no longer listed.", False);
     }
@@ -236,7 +244,7 @@ def _history(actor: str, now: float) -> list[Signal] {
     }
     for r in [root.shared -->[?:Restaurant]] {
         for o in [r ->:Publishes:->] {
-            for c in [o ->:ClaimedAs:->] {
+            for c in [o ->:ClaimedAs:->[?:Redemption, actor_id == actor]] {
                 if c.actor_id != actor or c.status not in ["claimed", "redeemed"] {
                     continue;
                 }
@@ -270,11 +278,11 @@ def _favorite_places(slugs: list[str], now: float) -> list[FavoritePlace] {
     out: list[FavoritePlace] = [];
     for slug in slugs {
         for r in [root.shared -->[?:Restaurant]] {
-            if r.slug != slug {
+            if r.slug != slug or (r.is_demo and not samples_visible()) or not listing_visible(r.slug, r.source) {
                 continue;
             }
             locs = [r ->:HasLocation:->];
-            live = [o for o in [r ->:Publishes:->] if _state(o, now) == "active"];
+            live = [o for o in [r ->:Publishes:->] if _state(o, now) == "active" and (samples_visible() or not o.is_demo)];
             live.sort(key=lambda (o: Offer) -> int { return o.price_cents; });
             out.append(FavoritePlace(
                 slug=r.slug,
@@ -320,14 +328,29 @@ def _home(actor: str, price_range: str, window: str, diets: str, now: float) -> 
     eod = _end_of_today(now);
     candidates: list[Candidate] = [];
     views: dict[str, OfferView] = {};
-    places: dict[str, Restaurant] = {};
+    labels: dict[str, list[str]] = {};
     total = 0;
     for r in [root.shared -->[?:Restaurant]] {
+        visible = listing_visible(r.slug, r.source);
+        place_context: tuple[Restaurant, Location | None, AccessContextView] | None = None;
+        restaurant_labels: list[str] | None = None;
+        restaurant_categories: list[str] | None = None;
         for o in [r ->:Publishes:->] {
-            if o.is_demo and not demo_mode(os.environ.get(DEMO_MODE_ENV, "")) { continue; }
-            v = _view(o, now, actor);
+            if (r.is_demo or o.is_demo) and not samples_visible() { continue; }
             starter_fixture = os.environ.get("MLOCAL_HOSTED_DATASET", "") == "1" and r.source == "demo-seed";
-            discoverable = o.status != "paused" and now < o.end_ts and not starter_fixture;
+            discoverable = visible and o.status != "paused" and now < o.end_ts and not starter_fixture;
+            saved: Redemption | None = None;
+            if not discoverable {
+                saved = _my_claim(o, actor, now);
+                if saved is None or _claim_status(saved, now) != "claimed" { continue; }
+            }
+            if place_context is None {
+                loc = _location_of(r);
+                context = get_access_context(jid(loc), now) if loc else AccessContextView();
+                place_context = (r, loc, context);
+            }
+            v = _view(o, now, actor, saved_claim=saved, place_context=place_context);
+            if not visible and v.my_status != "claimed" { continue; }
             if discoverable { total += 1; }
             # A live saved QR must remain reachable after offer edits or filter
             # changes. Only its owner bypasses discovery rules, until expiry.
@@ -350,12 +373,18 @@ def _home(actor: str, price_range: str, window: str, diets: str, now: float) -> 
             }
             oid = jid(o);
             views[oid] = v;
-            places[oid] = r;
+            if restaurant_labels is None { restaurant_labels = _place_labels(r); }
+            labels[oid] = restaurant_labels;
+            categories = categories_for(o.title, o.menu_item);
+            if not categories {
+                if restaurant_categories is None { restaurant_categories = _categories(r); }
+                categories = restaurant_categories;
+            }
             candidates.append(Candidate(
                 offer_id=oid,
                 place=r.slug,
                 title=o.title,
-                categories=_categories(r, o),
+                categories=categories,
                 dietary=o.dietary,
                 price_cents=o.price_cents,
                 regular_cents=o.regular_price_cents,
@@ -373,7 +402,7 @@ def _home(actor: str, price_range: str, window: str, diets: str, now: float) -> 
         items.append(FeedItem(
             offer=views[oid],
             place=r.candidate.place,
-            place_labels=_place_labels(places[oid]),
+            place_labels=labels[oid],
             categories=r.candidate.categories,
             price_cents=r.candidate.price_cents,
             regular_cents=r.candidate.regular_cents,
@@ -385,7 +414,7 @@ def _home(actor: str, price_range: str, window: str, diets: str, now: float) -> 
     }
     personalized = bool(taste.categories or taste.diets or taste.price_range or taste.favorites or taste.history);
     return HomeView(
-        show_samples=demo_mode(os.environ.get(DEMO_MODE_ENV, "")) or os.environ.get("MLOCAL_HOSTED_DATASET", "") == "1",
+        show_samples=samples_visible(),
         signed_in=bool(actor),
         personalized=personalized,
         completed=p.completed if p is not None else False,
@@ -535,6 +564,9 @@ def:protect toggle_favorite(slug: str = "", offer_id: str = "") -> TasteView {
     if not target and offer_id {
         o = _find_offer(offer_id);
         r = _restaurant_of(o) if o is not None else None;
+        if not samples_visible() and ((o is not None and o.is_demo) or (r is not None and r.is_demo)) {
+            return _taste_view(_profile(), True, "That place is no longer listed.", False);
+        }
         target = r.slug if r is not None else "";
     }
     return _toggle_favorite(target, time.time());

@@ -8,6 +8,7 @@ import argparse
 import json
 from pathlib import Path
 import secrets
+import subprocess
 
 from playwright.sync_api import sync_playwright, expect
 
@@ -91,7 +92,23 @@ def main():
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'Business profile overflows phone width'
         page.get_by_placeholder('Business name').scroll_into_view_if_needed()
         page.screenshot(path=str(args.screenshots / 'business-profile-390.png'))
-        page.get_by_role('button', name='Save business profile', exact=True).click()
+        page.get_by_role('button', name='Submit for review', exact=True).click()
+        expect(page.get_by_role('button', name='Check approval', exact=True)).to_be_visible()
+        expect(page.get_by_text('Manage', exact=True)).to_have_count(0)
+        session = page.request.post(origin + '/function/current_session', data={},
+            headers={'Authorization': 'Bearer ' + receipt['new_business_token']}).json()['data']['result']
+        pending = subprocess.run(['bash', 'scripts/review-business.sh', 'list'], cwd=args.workspace,
+                                 capture_output=True, text=True, timeout=180)
+        assert pending.returncode == 0, 'Fixture review list failed'
+        submission = next(item['submission'] for item in json.loads(pending.stdout) if item['actor'] == session['actor_id'])
+        reviewed = subprocess.run(['bash', 'scripts/review-business.sh', 'approve', '--actor', session['actor_id'],
+                                  '--by', 'Browser fixture reviewer', '--note', 'Verified fictional browser business',
+                                  '--submission', submission],
+                                 cwd=args.workspace, capture_output=True, text=True, timeout=180)
+        assert reviewed.returncode == 0, 'Fixture operator review failed'
+        page.get_by_role('button', name='Check approval', exact=True).click()
+        expect(page.get_by_role('button', name='Continue to offers', exact=True)).to_be_visible()
+        page.get_by_role('button', name='Continue to offers', exact=True).click()
         expect(page.get_by_text('Manage', exact=True)).to_be_visible()
         expect(page.get_by_text('New offer', exact=True)).to_be_visible()
         expect(page.get_by_placeholder('Business name')).to_have_count(0)

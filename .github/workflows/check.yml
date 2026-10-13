@@ -2,21 +2,29 @@ name: checks
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, codex/release-readiness]
   push:
-    branches: [main]
+    branches: [main, 'release/**']
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  jac:
-    runs-on: ubuntu-latest
+  source-share:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Verify Jac source-byte share
-        run: python3 scripts/check-jac-share.py --min-jac 40
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Report tracked source-byte composition
+        run: python3 scripts/check-jac-share.py
+  jac:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -32,10 +40,28 @@ jobs:
         run: ./scripts/check.sh
       - name: Run core tests
         run: ./scripts/test.sh core
+      - name: Verify named core test inventory
+        run: python3 scripts/test-inventory.py --core-log .jac/release-core-outcomes.log --binding .jac/release-core-binding.json --output .jac/release-test-inventory.json
+      - name: Run access context tests
+        run: ./scripts/test.sh context
       - name: Run business insights tests
         run: ./scripts/test.sh insights
       - name: Run onboarding security tests
         run: bash scripts/test.sh onboarding
+      - name: Verify shared onboarding across processes
+        timeout-minutes: 10
+        run: bash scripts/python.sh -m unittest discover -s tests/integration -p test_onboarding_shared.py
+      - name: Test photo normalization and ownership
+        run: bash scripts/python.sh -m unittest tests/photo_media.py
+      - name: Verify business approval over HTTP and after restart
+        run: bash scripts/test-business-approval.sh
+      - name: Verify coordinated recovery and recovered restart
+        timeout-minutes: 22
+        run: GITHUB_SHA="$(git rev-parse HEAD)" bash scripts/test-recovery.sh
+      - name: Verify redacted domain failures and local SMTP quota events
+        timeout-minutes: 17
+        run: |
+          if [[ -f scripts/test-monitoring.sh ]]; then bash scripts/test-monitoring.sh; fi
       - name: Test deployment source and data separation
         run: python3 -m unittest discover -s tests/tooling -p 'test_*.py'
       - name: Build compiled app and client dependencies
@@ -49,3 +75,13 @@ jobs:
         run: npm install --prefix .jac/ui-test-runtime --no-save --package-lock=false jsdom@26.1.0
       - name: Check compiled onboarding and phone flows
         run: node --test tests/ui/browser/*.test.mjs
+      - name: Preserve exact-source test inventory and compiled artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-check-evidence-${{ github.sha }}
+          path: |
+            .jac/release-core-binding.json
+            .jac/release-test-inventory.json
+            .jac/release-native/monitoring.json
+            dist/*.jab

@@ -1,6 +1,7 @@
 """Server-rule checks. Run bash scripts/test.sh core in an isolated store."""
 
 import time;
+import tempfile;
 import from services.seed { seed_demo }
 import from unittest.mock { patch }
 import from jaclang { JacRuntime as Jac }
@@ -23,6 +24,19 @@ def _restaurant_by_slug(slug: str) -> Restaurant {
         if r.slug == slug { return r; }
     }
     raise Exception("missing " + slug);
+}
+
+
+test "offer state and remaining stock use the same observation" {
+    now = time.time();
+    o = Offer(title="Stock observation", start_ts=now - 60, end_ts=now + 60, quantity=2, qr_ready=True);
+    observations = iter([2, 0]);
+    with patch.dict(_view.__globals__, {
+        "_remaining": lambda (offer: Offer, at: float) -> int { return next(observations); }
+    }) {
+        v = _view(o, now);
+        assert v.state == "active" and v.remaining == 2;
+    }
 }
 
 
@@ -422,6 +436,49 @@ test "offer editing keeps the same listing paused state and original claim" {
 }
 
 
+test "offer publish retries keep one offer and do not overwrite later edits" {
+    _ensure_seed();
+    r = _restaurant_by_slug("arbor-leaf-kitchen");
+    now = 1790434800.0;
+    key = "publish-retry-fixture-001";
+    before = len([r ->:Publishes:->]);
+    first = _save_offer(r, "", "Retry lunch", "Lunch", "5", "7",
+        "2026-09-26 10:00", "2026-09-26 16:00", "2", "Students", "One each", "", "", now, key);
+    assert first.ok, first.message;
+    again = _save_offer(r, "", "Retry lunch", "Lunch", "5", "7",
+        "2026-09-26 10:00", "2026-09-26 16:00", "2", "Students", "One each", "", "", now + 60, key);
+    assert again.ok and again.code == first.code;
+    equivalent = _save_offer(r, "", " Retry lunch ", "Lunch ", "5.00", "7.00",
+        "2026-09-26T10:00", "2026-09-26T16:00", "02", "Students ", " One each", "", "", now, key);
+    assert equivalent.ok and equivalent.code == first.code;
+    assert len([r ->:Publishes:->]) == before + 1;
+    changed = _save_offer(r, "", "Changed retry", "Lunch", "6", "7",
+        "2026-09-26 10:00", "2026-09-26 16:00", "2", "Students", "One each", "", "", now, key);
+    assert not changed.ok and "already published" in changed.message;
+    o = _owned_offer(r, first.code) as Offer;
+    assert o.title == "Retry lunch" and o.price_cents == 500;
+    o.title = "Later edit";
+    expired_retry = _save_offer(r, "", "Retry lunch", "Lunch", "5", "7",
+        "2026-09-26 10:00", "2026-09-26 16:00", "2", "Students", "One each", "", "", now + 86400, key);
+    assert expired_retry.ok and expired_retry.code == first.code and o.title == "Later edit";
+    other = _restaurant_by_slug("maize-noodle-lab");
+    separate = _save_offer(other, "", "Retry lunch", "Lunch", "5", "7",
+        "2026-09-26 10:00", "2026-09-26 16:00", "2", "Students", "One each", "", "", now, key);
+    assert separate.ok and separate.code != first.code;
+}
+
+test "malformed publish keys cannot create an offer" {
+    _ensure_seed();
+    r = _restaurant_by_slug("arbor-leaf-kitchen");
+    before = len([r ->:Publishes:->]);
+    for key in ["short", "x" * 81, "invalid/publish/key/value", " " * 32] {
+        saved = _save_offer(r, "", "Malformed key lunch", "Lunch", "5", "7",
+            "2026-09-26 10:00", "2026-09-26 16:00", "2", "Students", "One each", "", "", 1790434800.0, key);
+        assert not saved.ok;
+    }
+    assert len([r ->:Publishes:->]) == before;
+}
+
 test "invalid offer edits leave listing and menu relationships unchanged" {
     _ensure_seed();
     r = _restaurant_by_slug("arbor-leaf-kitchen");
@@ -479,21 +536,63 @@ test "expired offers must receive a future deadline before they can resume" {
 }
 
 
-test "merchant profile saves normalized fields and is readable after commit" {
+test "configured merchant cannot bypass review by changing identity in legacy profile RPC" {
+    r = Restaurant(slug="configured-profile-review", name="Configured Cafe", source="manual");
+    root.shared ++> r;
+    r +>:HasLocation():+> Location(address="123 Main St");
+    with patch.dict(update_profile.__globals__, {"_merchant": lambda () -> Restaurant { return r; }}) {
+        renamed = update_profile("Renamed Cafe", "Cafe", "Lunch", "123 Main St", "", "", "");
+        assert not renamed.ok and "review" in renamed.message;
+        moved = update_profile("Configured Cafe", "Cafe", "Lunch", "456 Main St", "", "", "");
+        assert not moved.ok and "review" in moved.message;
+    }
+    persisted = _restaurant_by_slug("configured-profile-review");
+    assert persisted.name == "Configured Cafe" and (_location_of(persisted) as Location).address == "123 Main St";
+}
+
+
+test "merchant profile saves normalized routine fields and is readable after commit" {
     r = Restaurant(slug="profile-test", name="Profile Test (Demo)", is_demo=True);
     root.shared ++> r;
+    r +>:HasLocation():+> Location(address="123 Main St");
     with patch.dict(update_profile.__globals__, {"_merchant": lambda () -> Restaurant { return r; }}) {
-        result = update_profile("  Updated Profile (Demo)  ", "  Cafe  ", "  Lunch and coffee  ",
+        result = update_profile("  Profile Test (Demo)  ", "  Cafe  ", "  Lunch and coffee  ",
             "  123 Main St  ", "  Downtown  ", "  Use Main St door  ", "  2026-09-26  ");
         assert result.ok, result.message;
-        assert result.name == "Updated Profile" and result.address == "123 Main St";
+        assert result.name == "Profile Test" and result.address == "123 Main St";
         assert result.cuisine == "Cafe" and result.blurb == "Lunch and coffee";
     }
     persisted = _restaurant_by_slug("profile-test");
     loc = _location_of(persisted) as Location;
-    assert persisted.name == "Updated Profile (Demo)" and loc.address == "123 Main St";
+    assert persisted.name == "Profile Test (Demo)" and loc.address == "123 Main St";
     assert loc.neighborhood == "Downtown" and loc.entrance_note == "Use Main St door";
     assert loc.note_date == "2026-09-26";
+}
+
+obj _UnavailableDetailsStore {
+    def update_business_details(actor: str, cuisine: str, description: str, image_url: str | None = None) -> None {
+        raise RuntimeError("Private profile store unavailable");
+    }
+}
+
+def _unavailable_details_store() -> any { return _UnavailableDetailsStore(); }
+
+test "private routine draft failure prevents public profile mutation" {
+    r = Restaurant(slug="private-profile-failure", name="Failure Cafe", cuisine="Cafe", blurb="Original description");
+    root.shared ++> r;
+    r +>:HasLocation():+> Location(address="123 Main St");
+    commit();
+    failed = False;
+    with patch.dict(update_profile.__globals__, {"_merchant": lambda () -> Restaurant { return r; }, "store": _unavailable_details_store}) {
+        try { update_profile("Failure Cafe", "Bakery", "Edited description", "123 Main St", "", "", ""); }
+        except RuntimeError {
+            failed = True;
+            Jac.get_context().mem.abort();
+        }
+    }
+    assert failed;
+    persisted = _restaurant_by_slug("private-profile-failure");
+    assert persisted.cuisine == "Cafe" and persisted.blurb == "Original description";
 }
 
 
@@ -549,8 +648,134 @@ def _raise_lock_test_error() {
 }
 
 
+def _hold_limit_fixture(slug: str, now: float) -> list[Offer] {
+    restaurant = Restaurant(slug=slug, name="Hold limit fixture", source="manual");
+    root.shared ++> restaurant;
+    offers: list[Offer] = [];
+    for number in range(3) {
+        offer = Offer(title=f"Limit offer {number}", start_ts=now - 60,
+            end_ts=now + 3600, quantity=5, qr_ready=True, terms="Original promise");
+        restaurant +>:Publishes():+> offer;
+        offers.append(offer);
+    }
+    return offers;
+}
+
+
+test "sample restaurant cannot expose an unmarked offer through list detail or claim" {
+    now = time.time();
+    offers = _hold_limit_fixture("sample-parent-projection", now);
+    restaurant = _restaurant_of(offers[0]) as Restaurant;
+    restaurant.is_demo = True;
+    assert not offers[0].is_demo;
+    with patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "0", "MLOCAL_DEMO_MODE": ""}) {
+        assert jid(offers[0]) not in [view.id for view in list_offers()];
+        assert get_offer(jid(offers[0])) is None;
+        blocked = _claim(jid(offers[0]), "sample-parent-student", now);
+        assert not blocked.ok and "not available" in blocked.message;
+        assert _remaining(offers[0], now) == 5;
+    }
+}
+
+
+test "sample restaurant labels an unmarked offer without rewriting stored flags" {
+    now = time.time();
+    offers = _hold_limit_fixture("sample-parent-label", now);
+    restaurant = _restaurant_of(offers[0]) as Restaurant;
+    restaurant.is_demo = True;
+    assert _view(offers[0], now).is_demo;
+    assert not offers[0].is_demo;
+}
+
+
+test "samples off preserves a legitimate owner's paused claim and original snapshot" {
+    now = time.time();
+    offers = _hold_limit_fixture("legitimate-saved-no-samples", now);
+    held = _claim(jid(offers[0]), "legitimate-saved-student", now);
+    assert held.ok;
+    offers[0].status = "paused";
+    offers[0].terms = "Changed terms";
+    with patch.dict(os.environ, {"MLOCAL_SHOW_SAMPLES": "0", "MLOCAL_DEMO_MODE": ""}) {
+        with patch.dict(get_offer.__globals__, {"_actor_id": lambda () -> str { return "legitimate-saved-student"; }}) {
+            view = get_offer(jid(offers[0])) as OfferView;
+            assert view.my_status == "claimed" and view.my_qr_payload == held.qr_payload;
+            assert view.my_terms == "Original promise";
+            assert jid(offers[0]) in [item.id for item in list_offers()];
+        }
+    }
+}
+
+
+test "student active holds are capped across offers while retry retains the same claim" {
+    now = time.time();
+    offers = _hold_limit_fixture("hold-limit-cap", now);
+    first = _claim(jid(offers[0]), "hold-limit-cap-student", now);
+    second = _claim(jid(offers[1]), "hold-limit-cap-student", now);
+    assert first.ok and second.ok;
+    rejected = _claim(jid(offers[2]), "hold-limit-cap-student", now);
+    assert not rejected.ok and "2 active holds" in rejected.message;
+    assert _remaining(offers[2], now) == 5;
+    retry = _claim(jid(offers[0]), "hold-limit-cap-student", now);
+    assert retry.ok and retry.claim_id == first.claim_id and retry.qr_payload == first.qr_payload;
+    assert _claim(jid(offers[2]), "hold-limit-other-student", now).ok;
+}
+
+
+test "cancellation expiry and redemption immediately free the student hold slot" {
+    now = time.time();
+    offers = _hold_limit_fixture("hold-limit-release", now);
+    offers[1].end_ts = now + 10;
+    first = _claim(jid(offers[0]), "hold-limit-release-student", now);
+    second = _claim(jid(offers[1]), "hold-limit-release-student", now);
+    assert first.ok and second.ok;
+    assert not _claim(jid(offers[2]), "hold-limit-release-student", now).ok;
+    assert _cancel(jid(offers[0]), "hold-limit-release-student", now).ok;
+    third = _claim(jid(offers[2]), "hold-limit-release-student", now);
+    assert third.ok;
+    # At the exact deadline the second hold no longer occupies a slot.
+    replaced = _claim(jid(offers[0]), "hold-limit-release-student", now + 10);
+    assert replaced.ok and replaced.claim_id != first.claim_id;
+    restaurant = _restaurant_of(offers[0]) as Restaurant;
+    assert _redeem(restaurant, replaced.qr_payload, now + 10).ok;
+    assert _cancel(jid(offers[2]), "hold-limit-release-student", now + 10).ok;
+    offers[1].end_ts = now + 3600;
+    assert _claim(jid(offers[1]), "hold-limit-release-student", now + 10).ok;
+    preserved = _find_claim(restaurant, replaced.qr_payload) as Redemption;
+    assert preserved.status == "redeemed" and preserved.terms_snapshot == "Original promise";
+}
+
+
+test "hold limit rollout preserves every pre-existing claim above the cap" {
+    now = time.time();
+    offers = _hold_limit_fixture("hold-limit-existing", now);
+    preserved: list[ActionResult] = [];
+    with patch.dict(_claim.__globals__, {"MAX_ACTIVE_HOLDS": 10}) {
+        for offer in offers {
+            held = _claim(jid(offer), "hold-limit-existing-student", now);
+            assert held.ok;
+            preserved.append(held);
+        }
+    }
+    for number in range(3) {
+        retry = _claim(jid(offers[number]), "hold-limit-existing-student", now);
+        assert retry.ok and retry.claim_id == preserved[number].claim_id;
+        assert retry.qr_payload == preserved[number].qr_payload;
+        restaurant = _restaurant_of(offers[number]) as Restaurant;
+        claim = _find_claim(restaurant, retry.qr_payload) as Redemption;
+        assert claim.status == "claimed" and claim.terms_snapshot == "Original promise";
+    }
+    restaurant = _restaurant_of(offers[0]) as Restaurant;
+    additional = Offer(title="New admission after rollout", start_ts=now - 60,
+        end_ts=now + 3600, quantity=5, qr_ready=True);
+    restaurant +>:Publishes():+> additional;
+    rejected = _claim(jid(additional), "hold-limit-existing-student", now);
+    assert not rejected.ok and "limit is 2 active holds" in rejected.message;
+    assert _remaining(additional, now) == 5;
+}
+
+
 test "lock refresh failure closes the file descriptor" {
-    fd = os.open(LOCK_PATH, os.O_CREAT | os.O_RDWR, 384);
+    fd = os.open(mutation_lock_path(), os.O_CREAT | os.O_RDWR, 384);
     closed = False;
     try {
         with patch("os.open", return_value=fd) {
@@ -562,5 +787,66 @@ test "lock refresh failure closes the file descriptor" {
         assert closed, "Failed lock acquisition must not leak its descriptor";
     } finally {
         if not closed { os.close(fd); }
+    }
+}
+
+
+test "suspension retains saved claims and stock while denying new claims publication and redemption" {
+    now = time.time();
+    offers = _hold_limit_fixture("suspension-policy", now);
+    restaurant = _restaurant_of(offers[0]) as Restaurant;
+    actor = "d" * 32;
+    with tempfile.TemporaryDirectory() as directory {
+        with patch.dict(os.environ, {"MLOCAL_ONBOARDING_DIR": directory,
+            "MLOCAL_MERCHANT_OWNERS": json.dumps({restaurant.slug: actor})}) {
+            state = store();
+            held = _claim(jid(offers[0]), "suspension-student", now);
+            assert held.ok, held.message;
+            cancelled = _claim(jid(offers[1]), "suspension-cancelled-student", now);
+            assert cancelled.ok and _cancel(jid(offers[1]), "suspension-cancelled-student", now).ok;
+            expiring = _claim(jid(offers[2]), "suspension-expiring-student", now);
+            assert expiring.ok;
+            deadline = _view(offers[2], now, "suspension-expiring-student").my_expires_ts;
+            original = _view(offers[0], now, "suspension-student");
+            remaining = _remaining(offers[0], now);
+            state.change_business_status(actor, "suspended", "Fixture operator", "Fixture complaint", 0, "1" * 32);
+            paused = _view(offers[0], now, "suspension-student");
+            assert paused.state == "suspended" and paused.claim_support_message;
+            assert paused.my_qr_payload == held.qr_payload and paused.my_claim_id == held.claim_id;
+            assert paused.my_terms == original.my_terms and paused.my_price_cents == original.my_price_cents;
+            assert paused.my_expires_ts == original.my_expires_ts and paused.my_status == "claimed";
+            assert _claim(jid(offers[0]), "suspension-student", now).qr_payload == held.qr_payload;
+            assert not _claim(jid(offers[1]), "suspension-new-student", now).ok;
+            assert not _preview(restaurant, held.qr_payload, now).ok;
+            assert not _redeem(restaurant, held.qr_payload, now).ok;
+            with patch.dict(get_offer.__globals__, {"_actor_id": lambda () -> str { return "suspension-cancelled-student"; }}) {
+                history = get_offer(jid(offers[1])) as OfferView;
+                assert history.my_status == "cancelled" and history.my_qr_payload == "" and history.claim_support_message;
+            }
+            with patch.dict(get_offer.__globals__, {"_actor_id": lambda () -> str { return "suspension-unrelated-student"; }}) {
+                assert get_offer(jid(offers[1])) is None;
+            }
+            assert _remaining(offers[0], now) == remaining;
+            rejected = _save_offer(restaurant, "", "Suspended publish", "Lunch", "5", "7",
+                _input_fmt(now), _input_fmt(now + 3600), "2", "Valid ID", "Original terms", "", "", now, "blocked-publish-key-123456");
+            assert not rejected.ok and "paused" in rejected.message;
+            assert _portal(restaurant, now).offers;
+            state.change_business_status(actor, "active", "Fixture operator", "Complaint resolved", 1, "2" * 32);
+            assert _preview(restaurant, held.qr_payload, now).ok;
+            assert _redeem(restaurant, held.qr_payload, now).ok;
+            assert not _redeem(restaurant, held.qr_payload, now).ok;
+            assert _view(offers[0], now, "suspension-student").claim_support_message == "";
+            state.change_business_status(actor, "suspended", "Fixture operator", "New fixture complaint", 2, "3" * 32);
+            with patch.dict(get_offer.__globals__, {"_actor_id": lambda () -> str { return "suspension-student"; }}) {
+                history = get_offer(jid(offers[0])) as OfferView;
+                assert history.my_status == "redeemed" and history.my_qr_payload == "" and history.claim_support_message;
+            }
+            expired = _view(offers[2], deadline, "suspension-expiring-student");
+            assert expired.my_status == "expired" and expired.my_qr_payload == "" and expired.claim_support_message;
+            state.change_business_status(actor, "active", "Fixture operator", "Second complaint resolved", 3, "4" * 32);
+            expired = _view(offers[2], deadline, "suspension-expiring-student");
+            assert expired.my_status == "expired" and expired.my_qr_payload == "" and expired.my_expires_ts == deadline;
+            assert not _redeem(restaurant, expiring.qr_payload, deadline).ok;
+        }
     }
 }

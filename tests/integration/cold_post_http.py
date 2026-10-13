@@ -31,7 +31,7 @@ def main():
     marker = 'Cold publication fixture ' + secrets.token_hex(6)
     now = datetime.now(ZoneInfo('America/Detroit'))
     post = dict(
-        offer_id='', title=marker, description='Fictional cold-start acceptance offer',
+        offer_id='', create_key=secrets.token_hex(16), title=marker, description='Fictional cold-start acceptance offer',
         price='3.50', regular_price='5.00',
         start_local=(now - timedelta(minutes=2)).strftime('%Y-%m-%d %H:%M'),
         end_local=(now + timedelta(hours=1)).strftime('%Y-%m-%d %H:%M'),

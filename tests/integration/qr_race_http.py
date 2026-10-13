@@ -76,7 +76,7 @@ def hyphen(h):
 
 def new_offer(token, qty, price="5", title=None):
     d = call("offer_defaults")
-    r = call("save_offer", {"offer_id": "", "title": title or f"HTTP test {RUN} q{qty} (Demo)", "description": "", "price": price,
+    r = call("save_offer", {"offer_id": "", "create_key": os.urandom(16).hex(), "title": title or f"HTTP test {RUN} q{qty} (Demo)", "description": "", "price": price,
                             "regular_price": "9", "start_local": d[0], "end_local": d[1], "quantity": str(qty),
                             "eligibility": "Students with a valid university ID", "terms": "One per student.", "dietary": "vegan", "menu_item": ""}, token)
     return r

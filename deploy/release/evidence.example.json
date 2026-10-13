@@ -1,0 +1,19 @@
+{
+  "runtime_safety": {
+    "verdict": "BLOCKED",
+    "jac_version": "0.37.23",
+    "jac_sha256": "RECORD_OFFICIAL_BINARY_DIGEST",
+    "source_sha": "RECORD_FINAL_CANDIDATE_SHA",
+    "topology": "single-instance-serialized",
+    "cases": {}
+  },
+  "host_acceptance": {
+    "canonical_entry": "/srv/m-local/app/main.jac",
+    "durable_storage": false,
+    "private_backend": false,
+    "exclusive_ingress": false,
+    "nonoverlapping_rollout": false
+  },
+  "operator_rollout_approved": false,
+  "note": "Template records evidence only. Never change booleans to waive a failed gate. Link independent receipts and Travis approval."
+}

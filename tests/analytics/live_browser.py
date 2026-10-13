@@ -82,7 +82,7 @@ def main():
         # A separate API client commits a transaction while the real dashboard is open.
         merchant, student = clients["merchant_leaf"], clients["student_a"]
         start, end = merchant.call("offer_defaults")
-        offer = merchant.call("save_offer", offer_id="", title="Browser acceptance " + secrets.token_hex(4),
+        offer = merchant.call("save_offer", offer_id="", create_key=secrets.token_hex(16), title="Browser acceptance " + secrets.token_hex(4),
                               description="Isolated browser test", price="4", regular_price="6", start_local=start,
                               end_local=end, quantity="1", eligibility="Demo", terms="Local test", dietary="", menu_item="")
         assert offer["ok"]

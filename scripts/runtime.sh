@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Source this file; all commands operate on this checkout, regardless of cwd.
 set -euo pipefail
-PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd -- "$PROJECT_ROOT"
 JAC_VERSION="$(tr -d '\r\n' < .jac-version)"
 JAC_BIN="${JAC_BIN:-$HOME/.local/share/m-local/runtimes/$JAC_VERSION/jac}"
@@ -16,6 +16,20 @@ if [[ "$version_label" != jac || "$version_number" != "$JAC_VERSION" ]]; then
     exit 2
 fi
 export JAC_CACHE_HOME="${JAC_CACHE_HOME:-$HOME/.cache/m-local}"
+# Imported runtime files under the app root can enter the compiler's dependency closure.
+runtime_cache_path="$(python3 - "$PROJECT_ROOT" "$JAC_CACHE_HOME" <<'PY'
+from pathlib import Path
+import sys
+
+project = Path(sys.argv[1]).resolve()
+cache = Path(sys.argv[2]).resolve()
+if any(path.exists() and path.samefile(project) for path in (cache, *cache.parents)):
+    print(f"Set JAC_CACHE_HOME outside the application directory: {project}", file=sys.stderr)
+    sys.exit(2)
+print(cache)
+PY
+)"
+export JAC_CACHE_HOME="$runtime_cache_path"
 # Reuse downloaded binaries, never the other application's database directory.
 if [[ -z "${JAC_PG_DIST:-}" && -x "$HOME/.cache/jac/pg/dist/linux-amd64-18.6.0/bin/postgres" ]]; then
     export JAC_PG_DIST="$HOME/.cache/jac/pg/dist/linux-amd64-18.6.0"

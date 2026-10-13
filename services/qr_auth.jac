@@ -9,42 +9,30 @@ Explicit provisioning takes precedence over self-service business ownership.
 """
 
 import os;
-import json;
-import from uuid { UUID }
-import from services.email_codes { registered_business_owner }
+import from services.email_codes { registered_business_owner, configured_owners, merchant_operations_allowed }
 
-def configured_owners(text: str) -> dict[str, str] {
-    result: dict[str, str] = {};
-    try {
-        raw = json.loads(text);
-        if not isinstance(raw, dict) {
-            return result;
-        }
-        for (slug, actor) in raw.items() {
-            if not isinstance(slug, str) or not isinstance(actor, str) or not slug {
-                return {};
-            }
-            # Accept the hyphenated form from /user/login and the 32-hex form
-            # jid(root) reports; store the canonical 32-hex form, which is what
-            # every ownership comparison in the app sees.
-            result[slug] = UUID(actor).hex;
-        }
-        # This slice permits one restaurant per merchant account.
-        if len(set(result.values())) != len(result) {
-            return {};
-        }
-        return result;
-    } except Exception {
-        return {};
-    }
-}
+glob MERCHANT_PAUSED_MESSAGE: str = "This business is temporarily unavailable. Publication and redemption are paused. Contact M-Local support.";
+glob CLAIM_SUPPORT_MESSAGE: str = "This business is temporarily unavailable. Your saved claim keeps its original terms and expiry, but redemption is paused. Contact M-Local support.";
 
 def merchant_owner(slug: str) -> str {
     configured = configured_owners(os.environ.get("MLOCAL_MERCHANT_OWNERS", "{}"));
-    if slug in configured { return configured[slug]; }
     registered = registered_business_owner(slug);
+    if slug in configured {
+        if slug.startswith("business-") and registered != configured[slug] { return ""; }
+        return configured[slug];
+    }
     # An explicitly provisioned account still owns one restaurant even if it
     # previously activated a self-service listing under another slug.
     if registered in configured.values() { return ""; }
     return registered;
+}
+
+def listing_visible(slug: str, source: str) -> bool {
+    return (source != "business_signup" or bool(merchant_owner(slug))) and merchant_operations_enabled(slug);
+}
+
+def merchant_operations_enabled(slug: str) -> bool {
+    actor = merchant_owner(slug);
+    if actor { return merchant_operations_allowed(actor); }
+    return not slug.startswith("business-");
 }

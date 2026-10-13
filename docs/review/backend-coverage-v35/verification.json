@@ -1,0 +1,40 @@
+{
+  "status": "passed_local_strict_backend_coverage",
+  "application_source_sha256": "71f73c9482f65ae41ca9521650f22bf5d226bc535c39379ef16ddce465341f42",
+  "official_jac_version": "0.37.23",
+  "official_binary_sha256": "2c3c697616b08516caf01704571e7e7020f4b294cd2bef7f04e8ef1ceec9d6ad",
+  "test_script_sha256": "ef9ca36358ca219df9562612e19ec08939e468ef563c95b86938d34f2df02068",
+  "executed_runner_sha256": "27f4ed2a54681a859b63a74584fd3b16c770d75e9f865162d2c480556d622db2",
+  "strict_receipt_sha256": "6a792d9c486a1ddd3bc00b76dcb6fa50e1e9df10d469588d15eb872f4ac31dcf",
+  "isolation_guard_receipt_sha256": "96cd6758cc074a604a9b1b0ee124faa2cabb6baf08e024dde2c7815f85750761",
+  "checks": {
+    "core": {
+      "passed": 451,
+      "skipped": 0
+    },
+    "insights": {
+      "python_passed": 12,
+      "javascript_passed": 11,
+      "jac_backend_passed": 62,
+      "skipped": 0
+    },
+    "shared_database_guard_passed": 4
+  },
+  "phase_log_sha256": {
+    "core": "f026bcf35eba3b31cb15017dd40e8f124fc7b67cedfc7312b5a8cfbbd3f9d211",
+    "insights": "3aac975db36fa586f21c959421922216e2c041dacc2d0614fbcd04370cd71db5"
+  },
+  "isolated_database": "Fresh private embedded PostgreSQL cluster with runtime scratch database reset for each test case; JAC_DB_URL absent",
+  "cleanup": "Both test supervisors completed successfully with empty kernel process groups; the controller asserts its PostgreSQL runtime stopped",
+  "change": "Install the declared Python dependencies inside each isolated test workspace and require JAC_TEST_STRICT=1; reject external database URLs for graph suites",
+  "retained_failures": [
+    "Strict reproduction of the earlier harness failed on missing Pillow imports that the default runner silently skipped.",
+    "An initial expanded run supplied one external test database, bypassing Jac scratch database resets and causing fixture collisions. No product assertion was weakened.",
+    "The first guard probe incorrectly rejected pinned CLI runtime cache extraction; the corrected probe checks graph-test and PostgreSQL state creation."
+  ],
+  "limitations": [
+    "This proves local backend coverage and test isolation, not overall production or scaling acceptance.",
+    "Historical visual, HTTP, build and platform-specific evidence remains separately scoped; no new device, SMTP or public deployment proof is claimed.",
+    "Declared Python dependencies are installed during test runs; fresh installs require network access and use the versions allowed by jac.toml."
+  ]
+}

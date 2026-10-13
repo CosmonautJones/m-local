@@ -59,3 +59,31 @@ test('controls arriving after detection or cancellation are stopped', async () =
   const pending=deferred(); const f=setup({decode:async(_s,_v,cb)=>{await cb({getText:()=>payload});return pending.promise;}});
   const start=f.controller.start({}); await Promise.resolve(); await Promise.resolve(); f.controller.cancel(); let stopped=0; pending.resolve({stop:()=>stopped++}); await start; assert.equal(stopped,1);
 });
+
+test('a local QR image resolves to preview and needs explicit confirmation without a camera', async () => {
+  const file={type:'image/png',size:200};let decodes=0;
+  const f=setup({secure:false,requestStream:null,decodeImage:async value=>{assert.equal(value,file);decodes++;return {getText:()=>payload};}});
+  assert.equal(typeof f.controller.startImage,'function','image fallback is available');
+  await f.controller.startImage(file);
+  assert.equal(decodes,1);assert.equal(f.controller.state.phase,'preview');
+  assert.equal(f.counts.reads,1);assert.equal(f.counts.writes,0);
+  await f.controller.confirm();assert.equal(f.counts.writes,1);
+});
+
+test('unsafe oversized and nonclaim QR images never reach admission or redemption endpoints', async () => {
+  let decodes=0;const f=setup({decodeImage:async()=>{decodes++;return {getText:()=> 'https://example.test'};}});
+  assert.equal(typeof f.controller.startImage,'function','image fallback is available');
+  for(const file of [{type:'image/svg+xml',size:100},{type:'image/png',size:10*1024*1024+1}])await f.controller.startImage(file);
+  assert.equal(decodes,0);assert.equal(f.counts.reads,0);
+  await f.controller.startImage({type:'image/png',size:200});
+  assert.equal(f.controller.state.phase,'error');assert.equal(f.counts.reads,0);assert.equal(f.counts.writes,0);
+});
+
+test('cancelled image decoding and overlapping image requests cannot replace the next preview', async () => {
+  const pending=deferred();let decodes=0;const f=setup({decodeImage:()=>{decodes++;return pending.promise;}});
+  assert.equal(typeof f.controller.startImage,'function','image fallback is available');
+  const first=f.controller.startImage({type:'image/png',size:200});
+  await f.controller.startImage({type:'image/jpeg',size:200});assert.equal(decodes,1);
+  f.controller.cancel();pending.resolve({getText:()=>payload});await first;
+  assert.equal(f.controller.state.phase,'idle');assert.equal(f.counts.reads,0);assert.equal(f.counts.writes,0);
+});

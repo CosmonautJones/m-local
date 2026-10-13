@@ -2,6 +2,7 @@
 import from "react" { Fragment, useLayoutEffect, useSyncExternalStore }
 import from "./theme.mjs" { createThemeStore }
 import from "./app-opener.jsx" { AppOpener }
+import from "./document-head.jsx" { DocumentHead }
 
 obj UiColors {
     has ink: str = "var(--ml-ink)", navy: str = "var(--ml-accent)",
@@ -85,6 +86,7 @@ html,body,#root,#root *,#root *:before,#root *:after{transition:background-color
 .ml-brand-square{background:var(--ml-maize);clip-path:inset(0 58% 68% 30%)}
 #root input,#root textarea,#root select,#root button{font-family:Figtree,system-ui,sans-serif}
 #root button,#root [role=button],#root input,#root select,#root textarea{transition:background-color var(--ml-theme-time) var(--ml-theme-ease),color var(--ml-theme-time) var(--ml-theme-ease),border-color var(--ml-theme-time) var(--ml-theme-ease),box-shadow 150ms ease,transform 150ms ease}
+#root button,#root [role=button]{min-height:44px}
 #root button:not(:disabled):hover,#root [role=button]:not([aria-disabled=true]):hover{box-shadow:inset 0 0 0 1px var(--ml-hover)}
 #root button:focus-visible,#root [role=button]:focus-visible,#root input:focus-visible,#root select:focus-visible,#root textarea:focus-visible,#root summary:focus-visible{outline:3px solid var(--ml-focus);outline-offset:3px}
 #root summary{padding:12px 0;min-height:44px;box-sizing:border-box;cursor:pointer;font-weight:700;color:var(--ml-accent)}
@@ -111,7 +113,7 @@ def:pub UiFoundation() -> JsxElement {
         document.documentElement.dataset["theme"] = current.resolved;
         document.documentElement.style.setProperty("color-scheme", current.resolved);
     }, [current.resolved]);
-    return <Fragment><style>{foundationStyles}</style><AppOpener /></Fragment>;
+    return <Fragment><DocumentHead /><style>{foundationStyles}</style><AppOpener /></Fragment>;
 }
 
 def:pub NavIcon(name: str, active: bool = False) -> JsxElement {

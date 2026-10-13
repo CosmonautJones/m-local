@@ -25,8 +25,35 @@ export function createScanController(deps, onChange = () => {}) {
     generation++; latched = false; payload = ''; stopCamera();
     emit({phase: 'idle', message: '', preview: null});
   };
+  async function startImage(file) {
+    if(disposed||['requesting','scanning','decoding','resolving','redeeming'].includes(state.phase))return;
+    cancel();const id=generation;
+    if(!file||!['image/png','image/jpeg','image/webp','image/gif'].includes(file.type)||file.size<=0||file.size>10*1024*1024){
+      emit({phase:'error',message:'Choose a PNG, JPEG, WebP or GIF QR image smaller than 10 MB.'});return;
+    }
+    emit({phase:'decoding',message:'Reading the QR image on this device.',preview:null});
+    let scanned;
+    try {
+      const result=await deps.decodeImage(file);
+      if(!current(id))return;
+      scanned=result?.getText?.()||'';
+    }catch{
+      if(current(id))emit({phase:'error',preview:null,message:'No readable claim QR was found. Choose a clear screenshot showing the complete QR square, or retry the camera.'});
+      return;
+    }
+    if(!isClaimPayload(scanned)){emit({phase:'error',preview:null,message:'This is not an M-Local claim QR. Ask the student to open their claimed offer and scan again.'});return;}
+    payload=scanned;emit({phase:'resolving',message:'Checking the claim with the restaurant.',preview:null});
+    try {
+      const resolved=await deps.resolveClaim(scanned);
+      if(!current(id))return;
+      if(!resolved?.ok){payload='';emit({phase:'error',message:resolved?.message||'This claim cannot be redeemed. Ask the student to refresh their offer.',preview:null});return;}
+      emit({phase:'preview',preview:resolved,message:'Check the saved terms and student ID before confirming.'});
+    }catch{
+      if(current(id)){payload='';emit({phase:'error',preview:null,message:'Could not check the claim. Check the connection, then scan again.'});}
+    }
+  }
   async function start(video) {
-    if (disposed || ['requesting','scanning','resolving','redeeming'].includes(state.phase)) return;
+    if (disposed || ['requesting','scanning','decoding','resolving','redeeming'].includes(state.phase)) return;
     cancel(); const id = generation;
     if (!deps.secure) {emit({phase: 'error', message: 'Camera scanning needs HTTPS on a remote phone. Use the merchant laptop at localhost for the first test.'}); return;}
     if (!deps.requestStream) {emit({phase: 'error', message: 'This browser does not expose a camera. Try a current Safari, Chrome or Firefox browser with camera access.'}); return;}
@@ -75,7 +102,7 @@ export function createScanController(deps, onChange = () => {}) {
       if (current(id)) emit({phase: 'preview', message: 'The connection failed. Check the connection and retry confirmation; the server prevents a second redemption.'});
     }
   }
-  return {get state(){return state;}, start, confirm, cancel,
+  return {get state(){return state;}, start, startImage, confirm, cancel,
     dispose() {disposed = true; generation++; payload = ""; latched = true; stopCamera();}
   };
 }

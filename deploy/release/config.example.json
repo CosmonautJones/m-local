@@ -1,0 +1,11 @@
+{
+  "canonical_entry": "/srv/m-local/app/main.jac",
+  "durable_root": "/srv/m-local",
+  "onboarding_dir": "/srv/m-local/private/onboarding",
+  "native_signing_file": "/srv/m-local/app/.jac/data/jwt_secret",
+  "photos_dir": "/srv/m-local/app/assets/photos",
+  "backend_port": 8200,
+  "gateway_port": 10000,
+  "topology": "single-instance-serialized",
+  "replicas": 1
+}

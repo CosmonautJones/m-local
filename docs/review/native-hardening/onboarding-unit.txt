@@ -1,0 +1,11 @@
+...................................................................................................
+----------------------------------------------------------------------
+Ran 99 tests in 16.939s
+
+OK
+This saves the sender on this computer, outside Git. No email will be sent.
+Use your dedicated Gmail account and its 16-character app password.
+Do not enter your normal Google or university password.
+This saves the sender on this computer, outside Git. No email will be sent.
+Use your dedicated Gmail account and its 16-character app password.
+Do not enter your normal Google or university password.
