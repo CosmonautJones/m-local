@@ -558,8 +558,10 @@ def coordinated_restore(backup, config, package):
     receipt = verify_recovery_set(backup)
     manifest = verify_package(package)
     if receipt.get("canonical_entry") != config["canonical_entry"] or receipt.get("source_sha") != manifest["source_sha"] or \
+            receipt.get("source_tree") != manifest["source_tree"] or \
+            receipt.get("package_manifest_sha256") != digest(Path(package) / "manifest.json") or \
             receipt.get("runtime") != manifest["runtime"]:
-        raise ReleaseError("Recovery requires the original canonical entry, matching source and official runtime")
+        raise ReleaseError("Recovery requires the original canonical entry, matching source tree, exact package and official runtime")
     # Validate file destinations before any PostgreSQL write. Recovery does not
     # repair collisions or overwrite an existing native account store.
     for name in ("onboarding_dir", "native_signing_file", "photos_dir"):

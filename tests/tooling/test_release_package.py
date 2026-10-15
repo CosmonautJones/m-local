@@ -372,12 +372,98 @@ class ReleasePackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exact source"):
             PACKAGE.create_source_package(self.source, self.root / "bad-artifact", artifact=artifact, build_receipt=receipt)
 
+    def recovery_binding(self, bundle, config):
+        manifest = PACKAGE.verify_package(bundle)
+        return {"schema": 1, "source_sha": manifest["source_sha"], "source_tree": manifest["source_tree"],
+                "runtime": manifest["runtime"], "canonical_entry": config["canonical_entry"],
+                "package_manifest_sha256": PACKAGE.digest(bundle / "manifest.json")}
+
+    def test_restore_refuses_changed_artifact_or_dependencies_before_database_access(self):
+        original = self.bundle()
+        config = self.config(self.root / "canonical")
+        receipt = self.recovery_binding(original, config)
+        artifact = self.root / "different.jab"
+        artifact.write_bytes(b"different build of the same source")
+        build = self.root / "build.json"
+        build.write_text(json.dumps({**receipt, "artifact_sha256": PACKAGE.digest(artifact)}))
+        changed_artifact = self.root / "changed-artifact"
+        PACKAGE.create_source_package(self.source, changed_artifact, artifact=artifact, build_receipt=build)
+        for name in PACKAGE.DEPENDENCY_ROOTS:
+            path = self.source / name
+            if name.endswith(".json"):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('{"dependencies":{}}')
+            else:
+                path.mkdir(parents=True)
+                (path / "library.js").write_text("different installed library")
+        (self.source / ".git/info/exclude").write_text(".jac/\n")
+        dependency = self.root / "libraries.tar"
+        PACKAGE.create_dependencies(self.source, dependency)
+        build.write_text(json.dumps({**receipt, "dependency_archive_sha256": PACKAGE.digest(dependency)}))
+        changed_dependencies = self.root / "changed-dependencies"
+        PACKAGE.create_source_package(self.source, changed_dependencies, dependency_archive=dependency, build_receipt=build)
+        for bundle in (changed_artifact, changed_dependencies):
+            with self.subTest(package=bundle.name):
+                manifest = PACKAGE.verify_package(bundle)
+                self.assertEqual(manifest["source_sha"], receipt["source_sha"])
+                self.assertEqual(manifest["runtime"], receipt["runtime"])
+                self.assertNotEqual(PACKAGE.digest(bundle / "manifest.json"), receipt["package_manifest_sha256"])
+                with patch.object(PACKAGE, "verify_recovery_set", return_value=receipt), \
+                     patch.object(PACKAGE, "pg_environment", wraps=PACKAGE.pg_environment) as environment, \
+                     patch.object(PACKAGE, "pg_command", return_value="0") as command, \
+                     patch.object(PACKAGE, "restore_private_state") as private, \
+                     patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/serving",
+                                             "MLOCAL_RECOVERY_DB_URL": "postgresql://jac@localhost/recovery"}):
+                    with self.assertRaisesRegex(ValueError, "package"):
+                        PACKAGE.coordinated_restore(self.root / "backup", config, bundle)
+                environment.assert_not_called()
+                command.assert_not_called()
+                private.assert_not_called()
+                self.assertFalse(Path(config["onboarding_dir"]).exists())
+
+    def test_restore_refuses_missing_or_mismatched_exact_package_binding(self):
+        bundle = self.bundle()
+        config = self.config(self.root / "canonical")
+        original = self.recovery_binding(bundle, config)
+        for field in ("source_tree", "package_manifest_sha256"):
+            for value in (None, "different"):
+                with self.subTest(field=field, value=value):
+                    receipt = dict(original)
+                    if value is None:
+                        del receipt[field]
+                    else:
+                        receipt[field] = value
+                    with patch.object(PACKAGE, "verify_recovery_set", return_value=receipt), \
+                         patch.object(PACKAGE, "pg_environment", wraps=PACKAGE.pg_environment) as environment, \
+                         patch.object(PACKAGE, "pg_command", return_value="0") as command, \
+                         patch.object(PACKAGE, "restore_private_state") as private, \
+                         patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/serving",
+                                                 "MLOCAL_RECOVERY_DB_URL": "postgresql://jac@localhost/recovery"}):
+                        with self.assertRaisesRegex(ValueError, "package"):
+                            PACKAGE.coordinated_restore(self.root / "backup", config, bundle)
+                    environment.assert_not_called()
+                    command.assert_not_called()
+                    private.assert_not_called()
+                    self.assertFalse(Path(config["onboarding_dir"]).exists())
+
+    def test_restore_accepts_original_package_after_empty_database_check(self):
+        bundle = self.bundle()
+        config = self.config(self.root / "canonical")
+        receipt = self.recovery_binding(bundle, config)
+        with patch.object(PACKAGE, "verify_recovery_set", return_value=receipt), \
+             patch.object(PACKAGE, "pg_command", side_effect=["0", ""]) as command, \
+             patch.object(PACKAGE, "restore_private_state") as private, \
+             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/serving",
+                                     "MLOCAL_RECOVERY_DB_URL": "postgresql://jac@localhost/recovery"}):
+            self.assertEqual(PACKAGE.coordinated_restore(self.root / "backup", config, bundle), receipt)
+        self.assertEqual([call.args[0][0] for call in command.call_args_list], ["psql", "pg_restore"])
+        private.assert_called_once_with(self.root / "backup/private", config)
+
     def test_existing_recovery_database_blocks_before_restore_or_private_mutation(self):
         config = self.config(self.root / "canonical")
-        manifest = {"source_sha": "fixture", "runtime": {}}
-        receipt = {"source_sha": "fixture", "runtime": {}, "canonical_entry": config["canonical_entry"]}
+        bundle = self.bundle()
+        receipt = self.recovery_binding(bundle, config)
         with patch.object(PACKAGE, "verify_recovery_set", return_value=receipt), \
-             patch.object(PACKAGE, "verify_package", return_value=manifest), \
              patch.object(PACKAGE, "pg_command", return_value="17") as command, \
              patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/serving", "MLOCAL_RECOVERY_DB_URL": "postgresql://jac@localhost/recovery"}):
             with self.assertRaisesRegex(ValueError, "application tables"):
