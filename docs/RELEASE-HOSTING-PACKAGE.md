@@ -243,10 +243,33 @@ python3 scripts/release-preflight.py \
 The evidence file begins from `deploy/release/evidence.example.json` and must
 reference the independently reviewed exact-candidate official-runtime cases,
 canonical host/storage/network constraints and Travis's explicit rollout
-approval. The default template blocks launch. Preflight reads state and never
-contacts a deployment API. Passing local preflight does not prove remote
-PostgreSQL durability, off-host backup retrieval, provider policy or actual
-TLS/SMTP/device acceptance.
+approval. The default template blocks both preflight and launch. Preflight now
+uses the launcher's same static admission: complete runtime/build/dependency
+package, exact installed-source marker and inventory, preserved native-data base,
+canonical `main` project entry, and restricted ingress with
+`MLOCAL_TRUSTED_HTTPS_EDGE=1`. Install the intended candidate at the recorded
+canonical path first; a verified proposed package alone is not installed-source
+proof. `JAC_DATA_PATH`, when set, is the original absolute base to which the
+runtime appends `.jac/data`, not the signing directory itself.
+
+Preflight also runs the existing packaged production guard with the same
+effective production environment as launch, even if the calling shell says
+development. It rejects missing SMTP settings, demo/sample flags, incompatible
+signing settings and unsafe local storage configuration. Refusals expose setting
+names rather than secret values, paths or raw subprocess output. It imports no
+Jac onboarding or private-store constructors and never creates replacement keys.
+The guard uses temporary create/remove probes in existing state directories;
+the runtime may initialize its local interpreter cache. Guard bytecode writes
+are disabled. These local operations do not certify durable hosting.
+
+Preflight does not acquire the deployment lock, bind ports, connect to PostgreSQL
+or SMTP, contact a deployment API, or start serving processes. Launch still
+checks its exclusive lock, free ports and the final production guard before
+spawning, then requires native and gateway readiness. A passing preflight cannot
+promise these later dynamic checks or qualify an untested host. It does not
+prove remote PostgreSQL durability, off-host backup retrieval, provider policy,
+actual TLS/SMTP/device acceptance or rollout approval beyond the supplied
+operator evidence.
 
 ## Backup, isolated restore and acceptance
 

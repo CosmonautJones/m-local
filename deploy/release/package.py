@@ -693,14 +693,15 @@ def require_canonical_project_entry(app):
         raise ReleaseError("The canonical project entry must be explicitly declared as main in valid jac.toml")
 
 
-def launch(package, config, evidence):
+def validate_launch_inputs(package, config, evidence):
+    """Shared local startup admission; no locks, port binds or network calls."""
     package = Path(package)
     app = validate_config(config)
     manifest = verify_package(package)
     require_launch_evidence(config, manifest, evidence)
     if not manifest.get("dependencies") or not manifest.get("build") or set(manifest.get("runtime", {})) != {"jac", "jacpython"}:
         raise ReleaseError("Launch requires the complete tested source, official runtime, build and dependency package")
-    state_inventory(config)
+    state = state_inventory(config)
     verify_installed_source(package, config, require_marker=True)
     environment = os.environ.copy()
     pg_environment(environment.get("JAC_DB_URL", ""))
@@ -718,21 +719,34 @@ def launch(package, config, evidence):
         raise ReleaseError("JAC_DATA_PATH differs from the recorded original native signing state; preserve the existing path and key")
     # Node/gateway provenance and explicit trusted edge are host capabilities.
     if environment.get("MLOCAL_INGRESS") not in {"render", "funnel", "restricted-edge"}:
-        raise ReleaseError("Select the verified restricted HTTPS edge; production direct ingress is prohibited")
+        raise ReleaseError("MLOCAL_INGRESS must select the verified restricted HTTPS edge; production direct ingress is prohibited")
+    if environment.get("MLOCAL_TRUSTED_HTTPS_EDGE") != "1":
+        raise ReleaseError("MLOCAL_TRUSTED_HTTPS_EDGE must explicitly confirm the verified HTTPS edge before startup")
     require_canonical_project_entry(app)
+    return app, manifest, state, environment
+
+
+def require_production_config(package, app, environment):
+    """Run the existing packaged guard and expose only setting names on refusal."""
+    guard = subprocess.run([str(package / "runtime/jacpython"), "-c",
+                            "import json,os; from pathlib import Path; from services.production_guard import validate_production_config; "
+                            "errors=validate_production_config(os.environ,Path.cwd()); print(json.dumps(errors)); raise SystemExit(78 if errors else 0)"],
+                           cwd=app, env=dict(environment, PYTHONDONTWRITEBYTECODE="1"), timeout=30, capture_output=True)
+    if guard.returncode:
+        names = sorted(set(re.findall(r"\b(?:MLOCAL_|JAC_)[A-Z_]+\b", guard.stdout.decode(errors="replace"))))
+        raise ReleaseError("Production configuration guard refused startup: " + (", ".join(names) or "required setting names unavailable; inspect protected guard check"))
+
+
+def launch(package, config, evidence):
+    package = Path(package)
+    app, _, _, environment = validate_launch_inputs(package, config, evidence)
     lock = acquire_lock(config)
     processes = []
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     signal.signal(signal.SIGINT, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     try:
         require_free_ports(config)
-        guard = subprocess.run([str(package / "runtime/jacpython"), "-c",
-                                "import json,os; from pathlib import Path; from services.production_guard import validate_production_config; "
-                                "errors=validate_production_config(os.environ,Path.cwd()); print(json.dumps(errors)); raise SystemExit(78 if errors else 0)"],
-                               cwd=app, env=environment, timeout=30, capture_output=True)
-        if guard.returncode:
-            names = sorted(set(re.findall(r"\b(?:MLOCAL_|JAC_)[A-Z_]+\b", guard.stdout.decode(errors="replace"))))
-            raise ReleaseError("Production configuration guard refused startup: " + (", ".join(names) or "required setting names unavailable; inspect protected guard check"))
+        require_production_config(package, app, environment)
         # Guard is also run by Jac onboarding import. Failure of either process
         # terminates both process groups; no restart while queue outcome is unknown.
         # In official 0.37.23, options following a positional target become
@@ -839,13 +853,11 @@ def main():
         elif args.action == "verify-recovery":
             result = verify_recovery_set(args.backup)
         elif args.action == "preflight":
-            validate_config(config)
-            pg_environment(os.environ.get("JAC_DB_URL", ""))
-            manifest = verify_package(args.package)
-            state = state_inventory(config)
-            require_launch_evidence(config, manifest, read_json(args.evidence) if args.evidence else {})
+            app, manifest, state, environment = validate_launch_inputs(
+                args.package, config, read_json(args.evidence) if args.evidence else {})
+            require_production_config(args.package, app, environment)
             result = {"preflight": "PASS", "source_sha": manifest["source_sha"], "state_inventory": state,
-                      "scope": "local checks; does not certify provider state, inbox, devices, or off-host recovery"}
+                      "scope": "local static startup checks; does not certify provider durability, serving readiness, inbox, devices, or off-host recovery"}
         else:
             launch(args.package, config, read_json(args.evidence))
             result = {"stopped": True}
