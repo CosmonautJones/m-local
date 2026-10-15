@@ -249,6 +249,26 @@ def main():
                 backend_port, gateway_port = next_port(), next_port()
                 config.update(backend_port=backend_port, gateway_port=gateway_port)
                 config_file.write_text(json.dumps(config))
+                if label == 'packaged-startup':
+                    preflight_args = [str(args.package / 'runtime/jacpython'), '-c',
+                        'import runpy,sys;sys.argv.pop(0);runpy.run_path(sys.argv[0],run_name="__main__")',
+                        str(app / 'deploy/release/package.py'), 'preflight',
+                        '--package', str(args.package), '--config', str(config_file), '--evidence', str(evidence_file)]
+                    refused = subprocess.run(preflight_args,
+                        env=dict(environment, JAC_SERVE_AUTH_SECRET='DISPOSABLE_PREFLIGHT_KEY_MISMATCH'),
+                        capture_output=True, timeout=120)
+                    diagnostic = (refused.stdout + refused.stderr).decode(errors='replace')
+                    check(refused.returncode != 0 and 'JAC_SERVE_AUTH_SECRET' in diagnostic
+                        and 'DISPOSABLE_PREFLIGHT_KEY_MISMATCH' not in diagnostic
+                        and pkg.state_inventory(config) == original_inventory
+                        and closed(backend_port) and closed(gateway_port),
+                        'packaged offline preflight refuses mismatched signing configuration without leaking values')
+                    inspected = json.loads(command(*preflight_args))
+                    check(inspected.get('result') == 'PASS' and inspected.get('source_sha') == manifest['source_sha']
+                        and 'local static startup checks' in inspected.get('scope', '')
+                        and pkg.state_inventory(config) == original_inventory
+                        and closed(backend_port) and closed(gateway_port),
+                        'packaged offline preflight applies startup checks without serving listeners')
                 phase = label + ' meaningful readiness'
                 proc = start([str(args.package / 'runtime/jacpython'), '-c',
                     'import runpy,sys;sys.argv.pop(0);runpy.run_path(sys.argv[0],run_name="__main__")',

@@ -13,6 +13,7 @@ import time
 import sys
 import getpass
 import shutil
+import shlex
 import unittest
 from unittest.mock import patch
 
@@ -54,6 +55,142 @@ class ReleasePackageTests(unittest.TestCase):
                 "native_signing_file": str(app / ".jac/data/jwt_secret"),
                 "photos_dir": str(app / "assets/photos"), "backend_port": 18200,
                 "gateway_port": 18201, "topology": "single-instance-serialized", "replicas": 1}
+
+    def preflight_fixture(self, entry="main"):
+        # Small synthetic package, never official-runtime/host qualification.
+        (self.source / "jac.toml").write_text('[project]\njac-version="0.37.23"\nentry-point="' + entry + '"\n')
+        shutil.copyfile(ROOT / "services/production_guard.py", self.source / "services/production_guard.py")
+        self.git("add", ".")
+        self.git("commit", "-qm", "disposable preflight source")
+        (self.source / ".git/info/exclude").write_text(".jac/\n")
+        for name in PACKAGE.DEPENDENCY_ROOTS:
+            path = self.source / name
+            if name.endswith(".json"):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('{"dependencies":{}}')
+            else:
+                path.mkdir(parents=True)
+        dependencies = self.root / "libraries.tar"
+        PACKAGE.create_dependencies(self.source, dependencies)
+        runtime = self.root / "fixture-runtime"
+        runtime.mkdir()
+        (runtime / "jac").write_text("#!/bin/sh\nprintf 'jac 0.37.23\\n'\n")
+        (runtime / "jacpython").write_text("#!/bin/sh\nexec " + shlex.quote(sys.executable) + ' "$@"\n')
+        for path in runtime.iterdir():
+            path.chmod(0o755)
+        artifact = self.root / "fixture.jab"
+        artifact.write_bytes(b"disposable artifact, no serving runtime")
+        receipt = self.root / "build.json"
+        receipt.write_text(json.dumps({"source_sha": self.git("rev-parse", "HEAD"),
+            "source_tree": self.git("rev-parse", "HEAD^{tree}"), "artifact_sha256": PACKAGE.digest(artifact),
+            "dependency_archive_sha256": PACKAGE.digest(dependencies)}))
+        bundle = self.root / "bundle"
+        manifest = PACKAGE.create_source_package(self.source, bundle, runtime=runtime, artifact=artifact,
+            build_receipt=receipt, dependency_archive=dependencies,
+            official_checksums={name: PACKAGE.digest(runtime / name) for name in ("jac", "jacpython")})
+        app = self.root / "canonical"
+        PACKAGE.install_source(bundle, app)
+        config = self.config(app)
+        config["durable_root"] = str(self.root)
+        onboarding = Path(config["onboarding_dir"])
+        onboarding.mkdir(parents=True)
+        with sqlite3.connect(onboarding / "onboarding.sqlite3") as db:
+            db.executescript("CREATE TABLE accounts(actor,email,kind,name); CREATE TABLE business_owners(actor,slug,active); CREATE TABLE drafts(actor,body,updated);")
+        with sqlite3.connect(onboarding / "photo-ownership.sqlite3") as db:
+            db.execute("CREATE TABLE photos(filename,actor,digest,bytes,created)")
+        (onboarding / "code.key").write_bytes(b"C" * 32)
+        (app / ".jac/data").mkdir()
+        (app / ".jac/data/jwt_secret").write_bytes(b"J" * 40)
+        (app / "assets/photos").mkdir(parents=True)
+        evidence = {"runtime_safety": {"verdict": "PASS", "jac_version": PACKAGE.PIN,
+            "topology": config["topology"], "source_sha": manifest["source_sha"],
+            "jac_sha256": manifest["runtime"]["jac"], "cases": {name: True for name in PACKAGE.REQUIRED_CASES}},
+            "host_acceptance": {"canonical_entry": config["canonical_entry"], "durable_storage": True,
+                "private_backend": True, "exclusive_ingress": True, "nonoverlapping_rollout": True},
+            "operator_rollout_approved": True}
+        env = {"PATH": os.environ["PATH"], "TMPDIR": str(self.root), "PYTHONDONTWRITEBYTECODE": "1",
+            "JAC_DB_URL": "postgresql://fixture:SECRET_VALUE@localhost/disposable",
+            "MLOCAL_INGRESS": "restricted-edge", "MLOCAL_TRUSTED_HTTPS_EDGE": "1",
+            "MLOCAL_SHOW_SAMPLES": "false", "MLOCAL_DEMO_MODE": "false",
+            "MLOCAL_SMTP_HOST": "fixture.invalid", "MLOCAL_SMTP_FROM": "fixture@example.invalid",
+            "MLOCAL_SMTP_USERNAME": "fixture", "MLOCAL_SMTP_PASSWORD": "SECRET_VALUE"}
+        return bundle, app, config, evidence, env
+
+    def preflight_result(self, bundle, config, evidence, env):
+        config_file, evidence_file = self.root / "config.json", self.root / "evidence.json"
+        config_file.write_text(json.dumps(config))
+        evidence_file.write_text(json.dumps(evidence))
+        return subprocess.run([sys.executable, str(ROOT / "scripts/release-preflight.py"),
+            "--package", str(bundle), "--config", str(config_file), "--evidence", str(evidence_file)],
+            env=env, capture_output=True, text=True, timeout=30)
+
+    def assert_preflight_refused(self, result, message):
+        self.assertNotEqual(result.returncode, 0, "preflight incorrectly reported PASS")
+        self.assertIn(message, result.stderr)
+        self.assertNotIn("SECRET_VALUE", result.stdout + result.stderr)
+        self.assertNotIn(str(self.root), result.stdout + result.stderr)
+
+    def test_preflight_refuses_each_incomplete_launch_component(self):
+        bundle, app, config, evidence, env = self.preflight_fixture()
+        original = (bundle / "manifest.json").read_text()
+        for index, field in enumerate(("dependencies", "build", "jac", "jacpython")):
+            with self.subTest(component_index=index):
+                manifest = json.loads(original)
+                if field in ("jac", "jacpython"):
+                    manifest["runtime"].pop(field)
+                else:
+                    manifest.pop(field)
+                (bundle / "manifest.json").write_text(json.dumps(manifest))
+                candidate_evidence = json.loads(json.dumps(evidence))
+                candidate_evidence["runtime_safety"]["jac_sha256"] = manifest["runtime"].get("jac")
+                self.assert_preflight_refused(self.preflight_result(bundle, config, candidate_evidence, env), "complete tested source")
+        (bundle / "manifest.json").write_text(original)
+
+    def test_preflight_refuses_missing_installed_source_marker(self):
+        bundle, app, config, evidence, env = self.preflight_fixture()
+        marker = app / ".jac/release-installed.json"
+        marker.unlink()
+        self.assert_preflight_refused(self.preflight_result(bundle, config, evidence, env), "marker is missing")
+
+    def test_preflight_refuses_installed_source_drift(self):
+        bundle, app, config, evidence, env = self.preflight_fixture()
+        (app / "services/example.py").write_text("SECRET_VALUE source drift")
+        self.assert_preflight_refused(self.preflight_result(bundle, config, evidence, env), "Installed source inventory")
+
+    def test_preflight_refuses_incompatible_native_base_and_edge_settings(self):
+        bundle, app, config, evidence, env = self.preflight_fixture()
+        cases = (("JAC_DATA_PATH", str(app / ".jac/data"), "JAC_DATA_PATH"),
+                 ("JAC_DATA_PATH", "relative-SECRET_VALUE", "JAC_DATA_PATH"),
+                 ("JAC_DATA_PATH", " " + str(app), "JAC_DATA_PATH"),
+                 ("MLOCAL_INGRESS", "direct", "restricted HTTPS edge"),
+                 ("MLOCAL_TRUSTED_HTTPS_EDGE", "", "MLOCAL_TRUSTED_HTTPS_EDGE"),
+                 ("MLOCAL_TRUSTED_HTTPS_EDGE", "true", "MLOCAL_TRUSTED_HTTPS_EDGE"))
+        for index, (name, value, message) in enumerate(cases):
+            with self.subTest(setting_index=index):
+                self.assert_preflight_refused(self.preflight_result(bundle, config, evidence, dict(env, **{name: value})), message)
+
+    def test_preflight_refuses_noncanonical_packaged_project_entry(self):
+        bundle, app, config, evidence, env = self.preflight_fixture(entry="other")
+        self.assert_preflight_refused(self.preflight_result(bundle, config, evidence, env), "canonical project entry")
+
+    def test_preflight_runs_actual_guard_with_effective_production_settings(self):
+        bundle, app, config, evidence, env = self.preflight_fixture()
+        before = PACKAGE.state_inventory(config)
+        # Even ambient development must be checked as launch's production env.
+        env["MLOCAL_ENV"] = "development"
+        cases = (("MLOCAL_SMTP_PASSWORD", ""), ("MLOCAL_SHOW_SAMPLES", "true"),
+                 ("MLOCAL_DEMO_MODE", "true"), ("JAC_DEV_SOURCE", "SECRET_VALUE"),
+                 ("JAC_SERVE_AUTH_ALGORITHM", "HS512"))
+        for index, (name, value) in enumerate(cases):
+            with self.subTest(guard_setting_index=index):
+                self.assert_preflight_refused(self.preflight_result(bundle, config, evidence, dict(env, **{name: value})), name)
+        self.assertEqual(PACKAGE.state_inventory(config), before)
+        self.assertFalse((self.root / "deployment.lock").exists())
+        self.assertFalse(list(app.rglob("__pycache__")))
+
+    def test_preflight_default_evidence_remains_blocked(self):
+        bundle, app, config, evidence, env = self.preflight_fixture()
+        self.assert_preflight_refused(self.preflight_result(bundle, config, {}, env), "runtime safety evidence")
 
     def test_git_bound_source_and_tamper_detection(self):
         bundle = self.bundle()
@@ -205,7 +342,7 @@ class ReleasePackageTests(unittest.TestCase):
              patch.object(PACKAGE, "verify_installed_source"), \
              patch.object(PACKAGE, "acquire_lock", side_effect=RuntimeError("PASSED_SIGNING_POLICY")), \
              patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/disposable", "JAC_DATA_PATH": str(base),
-                                    "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
+                                    "MLOCAL_INGRESS": "restricted-edge", "MLOCAL_TRUSTED_HTTPS_EDGE": "1"}, clear=True):
             with self.assertRaisesRegex(RuntimeError, "PASSED_SIGNING_POLICY"):
                 PACKAGE.launch(self.root / "package", config, {})
 
@@ -222,7 +359,7 @@ class ReleasePackageTests(unittest.TestCase):
              patch.object(PACKAGE, "acquire_lock", side_effect=RuntimeError("UNEXPECTED_LOCK")) as lock, \
              patch.object(PACKAGE.subprocess, "Popen") as spawn, \
              patch.dict(os.environ, {"JAC_DB_URL": "postgresql://role:SECRET_VALUE@localhost/db%20other",
-                                    "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
+                                    "MLOCAL_INGRESS": "restricted-edge", "MLOCAL_TRUSTED_HTTPS_EDGE": "1"}, clear=True):
             with self.assertRaisesRegex(ValueError, "ambiguous target refused") as caught:
                 PACKAGE.launch(self.root / "package", self.config(app), {})
             self.assertNotIn("SECRET_VALUE", str(caught.exception))
@@ -247,7 +384,7 @@ class ReleasePackageTests(unittest.TestCase):
              patch.object(PACKAGE.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), \
              patch.object(PACKAGE.subprocess, "Popen", side_effect=RuntimeError("CAPTURE_NATIVE_COMMAND")) as spawn, \
              patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/disposable",
-                                    "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
+                                    "MLOCAL_INGRESS": "restricted-edge", "MLOCAL_TRUSTED_HTTPS_EDGE": "1"}, clear=True):
             with self.assertRaisesRegex(RuntimeError, "CAPTURE_NATIVE_COMMAND"):
                 PACKAGE.launch(self.root / "package", config, {})
             self.assertEqual(spawn.call_args.args[0],
@@ -271,7 +408,7 @@ class ReleasePackageTests(unittest.TestCase):
                      patch.object(PACKAGE, "acquire_lock", side_effect=RuntimeError("UNEXPECTED_LOCK")) as lock, \
                      patch.object(PACKAGE.subprocess, "Popen") as spawn, \
                      patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/disposable",
-                                            "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
+                                            "MLOCAL_INGRESS": "restricted-edge", "MLOCAL_TRUSTED_HTTPS_EDGE": "1"}, clear=True):
                     with self.assertRaisesRegex(ValueError, "canonical project entry") as caught:
                         PACKAGE.launch(self.root / "package", self.config(app), {})
                     self.assertNotIn("SECRET", str(caught.exception))
@@ -291,7 +428,7 @@ class ReleasePackageTests(unittest.TestCase):
              patch.object(PACKAGE, "state_inventory"), \
              patch.object(PACKAGE, "verify_installed_source"), \
              patch.object(PACKAGE, "acquire_lock", side_effect=RuntimeError("UNEXPECTED_LOCK_ATTEMPT")) as lock, \
-             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/disposable", "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
+             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/disposable", "MLOCAL_INGRESS": "restricted-edge", "MLOCAL_TRUSTED_HTTPS_EDGE": "1"}, clear=True):
             for index, supplied in enumerate((str(base / ".jac/data"), " " + str(base), str(base) + " ", "   ")):
                 with self.subTest(supplied_index=index):
                     os.environ["JAC_DATA_PATH"] = supplied
