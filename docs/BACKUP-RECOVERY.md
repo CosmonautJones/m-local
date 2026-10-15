@@ -8,6 +8,16 @@ artifact. Final integration requires a retained private manifest-bound archive
 and a fresh authenticated restore/restart certificate for that exact package.
 Provider backups of an older deployed revision are a separate recovery input.
 
+Coordinated restore requires the original package's exact `manifest.json`
+SHA-256 and source tree, in addition to the canonical entry, source revision
+and official runtime. A rebuild from the same commit can contain different
+compiled artifacts or installed libraries and cannot replace that package.
+Missing or mismatched bindings fail before database probing or restore writes.
+Retain the matching private package with the recovery set. Preserve an older
+unbound set for operator-reviewed recovery; do not invent a receipt or weaken
+the gate to admit it. Manifest binding checks integrity, not independent
+approval or protection against an attacker who can replace both receipts.
+
 Historical foundation evidence: the disposable CI
 rehearsal passed 71 checks at `b0f2321`, including coordinated database, signing
 state, onboarding, photo ownership and JPEG recovery followed by another
