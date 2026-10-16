@@ -1,7 +1,7 @@
 """Private email-code, account and business-owner state for onboarding.
 
-SQLite transactions serialize OTP consumption across threads/processes. All
-replicas must share this directory on one host; do not deploy independent copies.
+Default SQLite transactions serialize OTP consumption across threads/processes.
+All replicas must share one authority on one host; do not deploy independent copies.
 """
 
 import from contextlib { contextmanager }
@@ -21,6 +21,7 @@ import tempfile;
 import time;
 import from uuid { UUID }
 import from services.release_events { record_mail_failure, record_mail_quota }
+import from services.onboarding_backend { selected_store }
 
 def mutation_lock_path() -> str {
     directory = Path(os.environ.get("MLOCAL_ONBOARDING_DIR", ".jac/onboarding")).resolve();
@@ -583,13 +584,25 @@ obj CodeStore {
 }
 
 
+def _selected_store() -> CodeStore | None {
+    selected = selected_store(CodeStore, time.time);
+    if selected is None { return None; }
+    if isinstance(selected, CodeStore) { return selected; }
+    raise ValueError("Selected authority backend did not provide a CodeStore.");
+}
+
+
 def store() -> CodeStore {
+    selected = _selected_store();
+    if selected is not None { return selected; }
     if os.environ.get("MLOCAL_ENV", "").strip().lower() == "production" { return existing_store(); }
     return CodeStore(Path(os.environ.get("MLOCAL_ONBOARDING_DIR", ".jac/onboarding")).resolve());
 }
 
 
 def existing_store() -> CodeStore {
+    selected = _selected_store();
+    if selected is not None { return selected; }
     directory = Path(os.environ.get("MLOCAL_ONBOARDING_DIR", ".jac/onboarding"));
     try {
         directory = directory.resolve();
@@ -617,9 +630,11 @@ def existing_store() -> CodeStore {
 
 
 def registered_business_owner(slug: str) -> str {
+    selected = _selected_store();
     if not re.fullmatch(r"business-[0-9a-f]{32}", slug) {
         return "";
     }
+    if selected is not None { return selected.business_owner(slug); }
     try {
         directory = Path(os.environ.get("MLOCAL_ONBOARDING_DIR", ".jac/onboarding")).resolve();
         if len((directory / "code.key").read_bytes()) != 32 { return ""; }
@@ -635,6 +650,14 @@ def registered_business_owner(slug: str) -> str {
 
 
 def merchant_operations_allowed(actor: str) -> bool {
+    selected = _selected_store();
+    if selected is not None {
+        try { actor = status_actor(actor); }
+        except ValueError { return False; }
+        with selected.transaction() as db {
+            return _stored_business_status(db, actor)["status"] == "active";
+        }
+    }
     try {
         actor = status_actor(actor);
         directory = Path(os.environ.get("MLOCAL_ONBOARDING_DIR", ".jac/onboarding")).resolve();

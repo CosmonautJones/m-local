@@ -91,8 +91,8 @@ jobs:
                                   if isinstance(node, ast.FunctionDef) and node.name.startswith('test_'))
           expected_pairs = {(name, '__main__.PostgresAuxiliaryTests.' + name) for name in expected_names}
           observed_pairs = [(row['name'], row['identity']) for row in named]
-          inventory_matches = (len(expected_names) == len(expected_pairs) == 27
-                               and len(observed_pairs) == len(set(observed_pairs)) == 27
+          inventory_matches = (len(expected_names) == len(expected_pairs) == 39
+                               and len(observed_pairs) == len(set(observed_pairs)) == 39
                                and set(observed_pairs) == expected_pairs)
           counts = {name: summary.get(name, 0) for name in
                     ('run', 'failures', 'errors', 'skipped', 'expected_failures', 'unexpected_successes')}
@@ -115,11 +115,14 @@ jobs:
                         and cleanup['stop_exit'] == 0 and cleanup['socket_removed']
                         and (initialized != '1' or listener_closed is True))
           sources = ('services/postgres_auxiliary.py', 'services/email_codes.jac',
+                      'services/onboarding_backend.py', 'services/qr_auth.jac', 'services/onboarding_support.jac',
+                      'services/production_guard.py', 'services/media_upload.py',
+                      'tests/tooling/test_onboarding_backend.py', 'docs/AUTHORITY-BACKEND-PROOF.md',
                      'tests/integration/test_postgres_auxiliary.py', 'tests/integration/postgres-auxiliary-requirements.txt',
                      '.github/workflows/check.yml', '.jac-version', 'scripts/python.sh', 'scripts/runtime.sh')
           versions = json.loads((evidence / 'versions.json').read_text()) if (evidence / 'versions.json').exists() else None
           complete = (suite_exit == '0' and summary.get('successful') is True
-                      and counts['run'] == 27 and counts['passed'] == 27 and inventory_matches
+                      and counts['run'] == 39 and counts['passed'] == 39 and inventory_matches
                       and not any(counts[name] for name in ('failures', 'errors', 'skipped', 'expected_failures', 'unexpected_successes'))
                       and versions is not None)
           receipt = {
@@ -135,6 +138,7 @@ jobs:
               'exception_classes': [row['exception_class'] for row in named if row.get('exception_class')],
               'verbose_log_sha256': hashlib.sha256((evidence / 'unittest.log').read_bytes()).hexdigest(),
               'structured_outcomes_sha256': hashlib.sha256((evidence / 'named-outcomes.jsonl').read_bytes()).hexdigest(),
+              'default_selector_log_sha256': hashlib.sha256((evidence / 'default-selector.log').read_bytes()).hexdigest() if (evidence / 'default-selector.log').exists() else None,
               'cleanup': cleanup, 'complete_sql_proof': complete, 'cleanup_ok': cleanup_ok,
               'github_run_id': os.environ.get('GITHUB_RUN_ID'), 'github_run_attempt': os.environ.get('GITHUB_RUN_ATTEMPT'),
           }
@@ -185,6 +189,9 @@ jobs:
               print(type(error).__name__ + ": version probe failed; connection details withheld")
               raise SystemExit(1)
           ' "$evidence/versions.json"
+          # Fresh standard-library interpreter forbids optional SQL imports on defaults.
+          python3 -m unittest discover -s tests/tooling -p test_onboarding_backend.py -v \
+            > "$evidence/default-selector.log" 2>&1
           # Preserve -v names/statuses, withholding assertion/exception details that can contain rows or keys.
           program='import json,os,runpy,sys,unittest
           sys.path.insert(0,os.environ["MLOCAL_AUXILIARY_DRIVER_SITE"])

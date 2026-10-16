@@ -12,6 +12,8 @@ import warnings
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
+from services.onboarding_backend import require_sqlite_backend
+
 MAX_BYTES = 1024 * 1024
 
 
@@ -22,6 +24,7 @@ def require_actor(actor: str) -> str:
 
 
 def photo_directory() -> Path:
+    require_sqlite_backend()
     # Mount assets/photos on persistent storage when deploying the single-host app.
     directory = Path(__file__).resolve().parents[1] / 'assets' / 'photos'
     directory.mkdir(parents=True, exist_ok=True)
@@ -29,6 +32,7 @@ def photo_directory() -> Path:
 
 
 def photo_registry() -> sqlite3.Connection:
+    require_sqlite_backend()
     private = Path(os.environ.get('MLOCAL_ONBOARDING_DIR', str(Path(__file__).resolve().parents[1] / '.jac/onboarding')))
     private.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = private / 'photo-ownership.sqlite3'
@@ -69,6 +73,7 @@ def save_photo(payload: str, actor: str) -> str:
 
 
 def save_image_bytes(data: bytes, actor: str, formats: tuple[str, ...] = ('JPEG', 'PNG', 'WEBP')) -> str:
+    require_sqlite_backend()
     require_actor(actor)
     if not data or len(data) > MAX_BYTES:
         raise ValueError('This photo is too large. Upload a smaller photo.')
