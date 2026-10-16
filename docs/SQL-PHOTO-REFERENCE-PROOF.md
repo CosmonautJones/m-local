@@ -4,7 +4,10 @@ This bounded increment connects existing uploaded-photo references to the
 preserved auxiliary SQL fixture through the actual application helpers. It uses
 `PostgresAuxiliary.photo_owned` and the established original signing material.
 Official Jac **0.37.23**, public RPC shapes and the SQLite default remain pinned.
-The [authority proof](AUTHORITY-BACKEND-PROOF.md) is its prerequisite.
+The [authority proof](AUTHORITY-BACKEND-PROOF.md) is its prerequisite. The subsequent
+[native-key compatibility proof](NATIVE-KEY-COMPATIBILITY-PROOF.md) qualifies only
+the supported signing seam with synthetic identities; application startup and
+production cutover remain gated.
 
 ## Acceptance recorded before implementation
 

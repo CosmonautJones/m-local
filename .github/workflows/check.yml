@@ -97,8 +97,8 @@ jobs:
                                   if isinstance(node, ast.FunctionDef) and node.name.startswith('test_'))
           expected_pairs = {(name, '__main__.PostgresAuxiliaryTests.' + name) for name in expected_names}
           observed_pairs = [(row['name'], row['identity']) for row in named]
-          inventory_matches = (len(expected_names) == len(expected_pairs) == 45
-                               and len(observed_pairs) == len(set(observed_pairs)) == 45
+          inventory_matches = (len(expected_names) == len(expected_pairs) == 49
+                               and len(observed_pairs) == len(set(observed_pairs)) == 49
                                and set(observed_pairs) == expected_pairs)
           counts = {name: summary.get(name, 0) for name in
                     ('run', 'failures', 'errors', 'skipped', 'expected_failures', 'unexpected_successes')}
@@ -124,8 +124,9 @@ jobs:
                       'services/onboarding_backend.py', 'services/qr_auth.jac', 'services/onboarding_support.jac',
                       'services/production_guard.py', 'services/media_upload.py',
                       'tests/tooling/test_onboarding_backend.py', 'docs/AUTHORITY-BACKEND-PROOF.md',
-                      'docs/SQL-PHOTO-REFERENCE-PROOF.md',
-                     'tests/integration/test_postgres_auxiliary.py', 'tests/integration/postgres-auxiliary-requirements.txt',
+                      'docs/SQL-PHOTO-REFERENCE-PROOF.md', 'docs/NATIVE-KEY-COMPATIBILITY-PROOF.md',
+                     'tests/integration/test_postgres_auxiliary.py', 'tests/integration/native_key_probe.py',
+                     'tests/integration/postgres-auxiliary-requirements.txt',
                      '.github/workflows/check.yml', '.jac-version', 'scripts/python.sh', 'scripts/runtime.sh')
           versions = json.loads((evidence / 'versions.json').read_text()) if (evidence / 'versions.json').exists() else None
           distribution = json.loads((evidence / 'pg-distribution.json').read_text()) if (evidence / 'pg-distribution.json').exists() else None
@@ -136,7 +137,7 @@ jobs:
                   and all(tool.get('major') == 18 and len(tool.get('sha256', '')) == 64
                           for tool in distribution['tools'].values()))
           complete = (suite_exit == '0' and summary.get('successful') is True
-                      and counts['run'] == 45 and counts['passed'] == 45 and inventory_matches
+                      and counts['run'] == 49 and counts['passed'] == 49 and inventory_matches
                       and not any(counts[name] for name in ('failures', 'errors', 'skipped', 'expected_failures', 'unexpected_successes'))
                       and pg18)
           receipt = {
