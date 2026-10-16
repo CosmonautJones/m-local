@@ -126,6 +126,7 @@ jobs:
                       'tests/tooling/test_onboarding_backend.py', 'docs/AUTHORITY-BACKEND-PROOF.md',
                       'docs/SQL-PHOTO-REFERENCE-PROOF.md', 'docs/NATIVE-KEY-COMPATIBILITY-PROOF.md',
                       'docs/INTEGRATION-MAP.md', 'docs/WORK-HANDOFF.md',
+                      'docs/AUXILIARY-DDL-ADMISSION.md',
                      'tests/integration/test_postgres_auxiliary.py', 'tests/integration/native_key_probe.py',
                      'tests/integration/postgres-auxiliary-requirements.txt',
                      '.github/workflows/check.yml', '.jac-version', 'scripts/python.sh', 'scripts/runtime.sh')

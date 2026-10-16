@@ -18,7 +18,7 @@ current branch truth.
 | [PR64 authority parity](https://github.com/CosmonautJones/m-local/pull/64) | PR63 | `454db70d01e84a4cfad73ac177067d1187cb3dd6` |
 | [PR65 SQL photo references](https://github.com/CosmonautJones/m-local/pull/65) | PR64 | `d5bf6548e3d6142179607ff546b7df01db512108` |
 | [PR66 native-key compatibility](https://github.com/CosmonautJones/m-local/pull/66) | PR65 | `746f5444b46d7cb0554b2da29cf8f8a52ff71fef` |
-| strict auxiliary DDL admission, this branch | frozen PR66 | final exact head is recorded in its PR and fresh CI receipts |
+| strict auxiliary DDL admission ([scope/evidence](AUXILIARY-DDL-ADMISSION.md)), this branch | frozen PR66 | final exact head is recorded in its PR and fresh CI receipts |
 
 Actual cumulative ancestry is b92 →
 `84e300f1d88e1ce603df79eb1f5788e54a5308f3` → 7a0 → 936 → be8 → 454 → d5 → 746.

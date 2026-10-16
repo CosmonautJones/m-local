@@ -1632,6 +1632,10 @@ class PostgresAuxiliaryTests(unittest.TestCase):
             ('rls', ('ALTER TABLE {s}.auxiliary_state ENABLE ROW LEVEL SECURITY', 'CREATE POLICY hidden_state ON {s}.auxiliary_state USING (false)')),
             ('rule', ('CREATE RULE ignore_status_update AS ON UPDATE TO {s}.business_status DO INSTEAD NOTHING',)),
             ('function', ('CREATE FUNCTION {s}.unexpected_function() RETURNS integer LANGUAGE sql AS $$ SELECT 1 $$',)),
+            # Review regression: catalog admission must not resolve operators
+            # through an unadmitted schema or advance its identity counter.
+            ('operator_shadow', ("CREATE FUNCTION {s}.ddl_equal(name,name) RETURNS boolean LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_catalog.nextval(pg_catalog.pg_get_serial_sequence('{s}.business_reviews','id')); RETURN pg_catalog.texteq($1::text,$2::text); END $$",
+                                 'CREATE OPERATOR {s}.= (LEFTARG=name,RIGHTARG=name,FUNCTION={s}.ddl_equal)')),
             ('trigger', ("CREATE FUNCTION {s}.unexpected_trigger() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'must not execute'; END $$", 'CREATE TRIGGER unexpected_write BEFORE UPDATE ON {s}.auxiliary_state FOR EACH ROW EXECUTE FUNCTION {s}.unexpected_trigger()')),
         )
         for label, statements in cases:

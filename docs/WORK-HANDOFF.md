@@ -1,3 +1,6 @@
+Current bounded increment: [strict auxiliary DDL admission](AUXILIARY-DDL-ADMISSION.md);
+final qualification and remaining actual-startup/photo-HTTP gate are explicit.
+
 # M-Local: ChatGPT Work coordinator handoff
 
 Travis requested this transfer on 2026-09-26 and explicitly chose **ChatGPT Work**.
