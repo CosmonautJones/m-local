@@ -97,8 +97,8 @@ jobs:
                                   if isinstance(node, ast.FunctionDef) and node.name.startswith('test_'))
           expected_pairs = {(name, '__main__.PostgresAuxiliaryTests.' + name) for name in expected_names}
           observed_pairs = [(row['name'], row['identity']) for row in named]
-          inventory_matches = (len(expected_names) == len(expected_pairs) == 49
-                               and len(observed_pairs) == len(set(observed_pairs)) == 49
+          inventory_matches = (len(expected_names) == len(expected_pairs) == 55
+                               and len(observed_pairs) == len(set(observed_pairs)) == 55
                                and set(observed_pairs) == expected_pairs)
           counts = {name: summary.get(name, 0) for name in
                     ('run', 'failures', 'errors', 'skipped', 'expected_failures', 'unexpected_successes')}
@@ -125,6 +125,8 @@ jobs:
                       'services/production_guard.py', 'services/media_upload.py',
                       'tests/tooling/test_onboarding_backend.py', 'docs/AUTHORITY-BACKEND-PROOF.md',
                       'docs/SQL-PHOTO-REFERENCE-PROOF.md', 'docs/NATIVE-KEY-COMPATIBILITY-PROOF.md',
+                      'docs/INTEGRATION-MAP.md', 'docs/WORK-HANDOFF.md',
+                      'docs/AUXILIARY-DDL-ADMISSION.md',
                      'tests/integration/test_postgres_auxiliary.py', 'tests/integration/native_key_probe.py',
                      'tests/integration/postgres-auxiliary-requirements.txt',
                      '.github/workflows/check.yml', '.jac-version', 'scripts/python.sh', 'scripts/runtime.sh')
@@ -137,7 +139,7 @@ jobs:
                   and all(tool.get('major') == 18 and len(tool.get('sha256', '')) == 64
                           for tool in distribution['tools'].values()))
           complete = (suite_exit == '0' and summary.get('successful') is True
-                      and counts['run'] == 49 and counts['passed'] == 49 and inventory_matches
+                      and counts['run'] == 55 and counts['passed'] == 55 and inventory_matches
                       and not any(counts[name] for name in ('failures', 'errors', 'skipped', 'expected_failures', 'unexpected_successes'))
                       and pg18)
           receipt = {

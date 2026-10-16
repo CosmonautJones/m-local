@@ -1,7 +1,13 @@
+Current bounded increment: [strict auxiliary DDL admission](AUXILIARY-DDL-ADMISSION.md);
+final qualification and remaining actual-startup/photo-HTTP gate are explicit.
+
 # M-Local: ChatGPT Work coordinator handoff
 
 Travis requested this transfer on 2026-09-26 and explicitly chose **ChatGPT Work**.
 He wants an efficient agentic workflow supporting a four-human JacHacks team.
+
+The dated [cumulative integration map](INTEGRATION-MAP.md) records PR60–66
+dependency ordering, the next candidate and its remaining functional gates.
 
 ## Current integration instruction (October 13, 2026)
 

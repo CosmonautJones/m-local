@@ -572,14 +572,18 @@ class PostgresAuxiliaryTests(unittest.TestCase):
     def test_photo_insert_failure_rolls_back_and_cache_reconstructs(self):
         self.import_from()
         before = self.snapshot(self.schema)
-        with self.connect() as connection:
-            connection.execute(self.sql.SQL("CREATE FUNCTION {}.reject_photo() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic photo write failure'; END $$").format(self.sql.Identifier(self.schema)))
-            connection.execute(self.sql.SQL('CREATE TRIGGER reject_photo BEFORE INSERT ON {}.photos FOR EACH ROW EXECUTE FUNCTION {}.reject_photo()').format(self.sql.Identifier(self.schema), self.sql.Identifier(self.schema)))
-        with self.assertRaises((ValueError, RuntimeError, self.psycopg.Error)):
-            self.backend.photo_save(ACTOR, '3' * 32 + '.jpg', self.jpeg('green'), self.now)
+        catalog_before = self._ddl_metadata(self.schema)
+        failure = self.sql.SQL("CREATE FUNCTION {schema}.reject_photo() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic photo write failure' USING ERRCODE='PZ001'; END $$").format(schema=self.sql.Identifier(self.schema))
+        trigger = self.sql.SQL('CREATE TRIGGER reject_photo BEFORE INSERT ON {schema}.photos FOR EACH ROW EXECUTE FUNCTION {schema}.reject_photo()').format(schema=self.sql.Identifier(self.schema))
+        # A test-only connection observer installs the fault immediately before
+        # the real write, after admission. Both fault DDL and rows must roll back.
+        with self._ddl_late_sql_fault('INSERT INTO photos VALUES', (failure, trigger)) as installed:
+            with self.assertRaises(self.psycopg.Error) as refused:
+                self.backend.photo_save(ACTOR, '3' * 32 + '.jpg', self.jpeg('green'), self.now)
+        self.assertEqual(installed, [True], 'The real late-write fault was not installed')
+        self.assertEqual(refused.exception.sqlstate, 'PZ001', 'Premature schema refusal cannot establish write rollback')
         self.assertEqual(self.snapshot(self.schema), before)
-        with self.connect() as connection:
-            connection.execute(self.sql.SQL('DROP TRIGGER reject_photo ON {}.photos').format(self.sql.Identifier(self.schema)))
+        self.assertEqual(self._ddl_metadata(self.schema), catalog_before)
         self.backend.photo_save(ACTOR, '3' * 32 + '.jpg', self.jpeg('green'), self.now)
         cache = self.work / 'cache'
         self.backend.materialize_photos(cache)
@@ -600,25 +604,27 @@ class PostgresAuxiliaryTests(unittest.TestCase):
                 return {name: connection.execute(self.sql.SQL('SELECT last_value,is_called FROM {}.{}').format(
                     self.sql.Identifier(self.schema), self.sql.Identifier(name))).fetchone() for (name,) in names}
         sequences_before = sequences()
-        with self.connect() as connection:
-            connection.execute(self.sql.SQL("""
-                CREATE FUNCTION {schema}.reject_late_import() RETURNS trigger LANGUAGE plpgsql AS $$
-                BEGIN
-                    IF (SELECT COUNT(*) FROM {schema}.accounts) != 3
-                       OR (SELECT COUNT(*) FROM {schema}.signing_material) != 2
-                       OR (SELECT COUNT(*) FROM {schema}.photos) != 2 THEN
-                        RAISE EXCEPTION 'late trigger did not observe staged fixture rows';
-                    END IF;
-                    RAISE EXCEPTION 'synthetic late import rollback' USING ERRCODE='PZ001';
-                END $$
-            """).format(schema=self.sql.Identifier(self.schema)))
-            connection.execute(self.sql.SQL('CREATE TRIGGER reject_late_import BEFORE UPDATE OF import_digest ON {}.auxiliary_state FOR EACH ROW EXECUTE FUNCTION {}.reject_late_import()').format(
-                self.sql.Identifier(self.schema), self.sql.Identifier(self.schema)))
-        with self.assertRaises(self.psycopg.Error) as refused:
-            self.import_from()
+        catalog_before = self._ddl_metadata(self.schema)
+        failure = self.sql.SQL("""
+            CREATE FUNCTION {schema}.reject_late_import() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                IF (SELECT COUNT(*) FROM {schema}.accounts) != 3
+                   OR (SELECT COUNT(*) FROM {schema}.signing_material) != 2
+                   OR (SELECT COUNT(*) FROM {schema}.photos) != 2 THEN
+                    RAISE EXCEPTION 'late trigger did not observe staged fixture rows';
+                END IF;
+                RAISE EXCEPTION 'synthetic late import rollback' USING ERRCODE='PZ001';
+            END $$
+        """).format(schema=self.sql.Identifier(self.schema))
+        trigger = self.sql.SQL('CREATE TRIGGER reject_late_import BEFORE UPDATE OF import_digest ON {schema}.auxiliary_state FOR EACH ROW EXECUTE FUNCTION {schema}.reject_late_import()').format(schema=self.sql.Identifier(self.schema))
+        with self._ddl_late_sql_fault('UPDATE auxiliary_state SET import_digest=', (failure, trigger)) as installed:
+            with self.assertRaises(self.psycopg.Error) as refused:
+                self.import_from()
+        self.assertEqual(installed, [True], 'The late import fault was not installed')
         self.assertEqual(refused.exception.sqlstate, 'PZ001', 'Failure must follow all staged onboarding/key/photo writes')
         self.assertEqual(self.snapshot(self.schema), before)
         self.assertEqual(sequences(), sequences_before, 'Failed import changed a preserved sequence')
+        self.assertEqual(self._ddl_metadata(self.schema), catalog_before)
         self.assertEqual(hashes(self.legacy), self.original_hashes)
 
     def test_independent_sql_row_lock_blocks_another_backend_transaction(self):
@@ -1378,6 +1384,265 @@ class PostgresAuxiliaryTests(unittest.TestCase):
                 self.assertEqual(self.snapshot('public'), native)
                 self.assertEqual(self.snapshot(self.schema), auxiliary)
 
+
+
+    def _ddl_late_sql_fault(self, prefix, statements):
+        from contextlib import contextmanager
+        original = self.backend._connection
+        installed = []
+        @contextmanager
+        def observed():
+            with original() as connection:
+                class LateConnection:
+                    def __getattr__(self, name):
+                        return getattr(connection, name)
+                    def execute(self, statement, parameters=None):
+                        if isinstance(statement, str) and statement.startswith(prefix) and not installed:
+                            for definition in statements:
+                                connection.execute(definition)
+                            installed.append(True)
+                        return connection.execute(statement, parameters)
+                yield LateConnection()
+        @contextmanager
+        def injected():
+            with patch.object(self.backend, '_connection', observed):
+                yield installed
+        return injected()
+
+    def _ddl_metadata(self, schema):
+        # Independent catalog + generator-state snapshot; never evaluate a
+        # default/check or invoke a stored function. No application row values.
+        with self.connect() as connection:
+            definitions = {
+                'relations': "SELECT c.oid,c.relname,c.relkind,c.relpersistence,c.relispartition,c.relrowsecurity,c.relforcerowsecurity,c.relchecks FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=%s ORDER BY c.oid",
+                'columns': "SELECT c.relname,a.attnum,a.attname,a.atttypid,a.atttypmod,a.attcollation,a.attnotnull,a.attidentity,a.attgenerated,a.attisdropped,a.attislocal,a.attinhcount,pg_catalog.pg_get_expr(d.adbin,d.adrelid,false) FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid=a.attrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE n.nspname=%s AND a.attnum>0 ORDER BY c.oid,a.attnum",
+                'constraints': "SELECT c.conrelid,c.conname,c.contype,c.conkey,c.condeferrable,c.condeferred,c.convalidated,c.conenforced,c.conislocal,c.coninhcount,c.connoinherit,c.conparentid,pg_catalog.pg_get_constraintdef(c.oid,false) FROM pg_catalog.pg_constraint c JOIN pg_catalog.pg_namespace n ON n.oid=c.connamespace WHERE n.nspname=%s ORDER BY c.oid",
+                'indexes': "SELECT i.indexrelid,i.indrelid,i.indnatts,i.indnkeyatts,i.indisunique,i.indnullsnotdistinct,i.indisprimary,i.indisexclusion,i.indimmediate,i.indisvalid,i.indisready,i.indislive,i.indkey::text,i.indcollation::text,i.indclass::text,i.indoption::text,pg_catalog.pg_get_expr(i.indexprs,i.indrelid,false),pg_catalog.pg_get_expr(i.indpred,i.indrelid,false) FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid=i.indexrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=%s ORDER BY i.indexrelid",
+                'sequences': "SELECT c.oid,c.relname,s.seqtypid,s.seqstart,s.seqincrement,s.seqmax,s.seqmin,s.seqcache,s.seqcycle FROM pg_catalog.pg_sequence s JOIN pg_catalog.pg_class c ON c.oid=s.seqrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=%s ORDER BY c.oid",
+                'dependencies': "SELECT d.classid,d.objid,d.objsubid,d.refclassid,d.refobjid,d.refobjsubid,d.deptype FROM pg_catalog.pg_depend d JOIN pg_catalog.pg_class c ON c.oid=d.objid AND d.classid='pg_catalog.pg_class'::regclass JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=%s ORDER BY d.classid,d.objid,d.refclassid,d.refobjid,d.refobjsubid,d.deptype",
+                'functions': "SELECT p.oid,p.proname,pg_catalog.pg_get_functiondef(p.oid) FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=%s ORDER BY p.oid",
+                'triggers': "SELECT t.oid,t.tgrelid,t.tgname,t.tgenabled,t.tgisinternal,pg_catalog.pg_get_triggerdef(t.oid,false) FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=%s ORDER BY t.oid",
+                'rules': "SELECT r.oid,r.ev_class,r.rulename,pg_catalog.pg_get_ruledef(r.oid,false) FROM pg_catalog.pg_rewrite r JOIN pg_catalog.pg_class c ON c.oid=r.ev_class JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=%s ORDER BY r.oid",
+                'policies': "SELECT p.oid,p.polrelid,p.polname,p.polcmd,p.polpermissive,pg_catalog.pg_get_expr(p.polqual,p.polrelid,false),pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid,false) FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_class c ON c.oid=p.polrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=%s ORDER BY p.oid",
+                'inheritance': "SELECT i.inhrelid,i.inhparent,i.inhseqno FROM pg_catalog.pg_inherits i JOIN pg_catalog.pg_class c ON c.oid=i.inhrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=%s ORDER BY i.inhrelid,i.inhseqno",
+            }
+            result = {name: connection.execute(query, (schema,)).fetchall() for name, query in definitions.items()}
+            result['sequence_state'] = [(name, connection.execute(self.sql.SQL('SELECT last_value,is_called FROM {}.{}').format(
+                self.sql.Identifier(schema), self.sql.Identifier(name))).fetchone()) for _, name, *_ in result['sequences']]
+            return result
+
+    def _ddl_variant(self):
+        schema = self.schema + '_ddl_' + uuid4().hex[:6]
+        with self.connect() as connection:
+            connection.execute(self.sql.SQL('CREATE SCHEMA {}').format(self.sql.Identifier(schema)))
+        self.schemas.append(schema)
+        backend = self.module.PostgresAuxiliary(self.dsn, schema)
+        backend.initialize()
+        backend.import_legacy(self.legacy / 'onboarding.sqlite3', self.legacy / 'photo-ownership.sqlite3',
+                              self.photos_dir, self.legacy / 'code.key', self.legacy / 'jwt_secret')
+        cached = backend.code_store(self.CodeStore, self.runtime, lambda: self.now)
+        return schema, backend, cached
+
+    def _ddl_change(self, schema, statements, case='canonical'):
+        import json
+        with self.connect() as connection:
+            for index, statement in enumerate(statements):
+                fields = {'s': self.sql.Identifier(schema), 'p': self.sql.Identifier(self.schema)}
+                if '{photo_content_check}' in statement:
+                    row = connection.execute("SELECT c.conname FROM pg_catalog.pg_constraint c JOIN pg_catalog.pg_class r ON r.oid=c.conrelid JOIN pg_catalog.pg_namespace n ON n.oid=r.relnamespace WHERE n.nspname=%s AND r.relname='photos' AND c.contype='c' AND pg_catalog.pg_get_constraintdef(c.oid,false)=%s",
+                                             (schema, 'CHECK ((octet_length(content) = bytes))')).fetchone()
+                    self.assertIsNotNone(row, 'Canonical photo-content CHECK is absent from owned fixture')
+                    fields['photo_content_check'] = self.sql.Identifier(row[0])
+                try:
+                    connection.execute(self.sql.SQL(statement).format(**fields))
+                except self.psycopg.Error as error:
+                    print('ddl fixture setup diagnostic: ' + json.dumps({'case': case, 'statement_index': index,
+                          'sqlstate': error.sqlstate, 'error_class': type(error).__name__}, sort_keys=True))
+                    raise
+
+    def _ddl_refuses(self, schema, backend, cached, *, established=True):
+        from contextlib import contextmanager
+        from services import email_codes, qr_auth, media_upload, photo_reference
+        rows, metadata = self.snapshot(schema), self._ddl_metadata(schema)
+        native = self.snapshot('public')
+        directory = self.work / ('absent-ddl-fallback-' + uuid4().hex[:6])
+        seen = []
+        original = self.module.PostgresAuxiliary._connection
+        table_pattern = r'\b(?:FROM|INTO|UPDATE)\s+(?:"?' + re.escape(schema) + r'"?\.)?"?(?:' + '|'.join(self.module.ALL_TABLES) + r')\b'
+        @contextmanager
+        def observed(instance):
+            with original(instance) as connection:
+                class ObservedConnection:
+                    def __getattr__(self, name):
+                        return getattr(connection, name)
+                    def execute(self, statement, parameters=None):
+                        text = statement if isinstance(statement, str) else statement.as_string(connection)
+                        if re.search(table_pattern, text, re.I):
+                            seen.append(True)
+                        return connection.execute(statement, parameters)
+                yield ObservedConnection()
+        def transaction():
+            with backend.transaction():
+                self.fail('Incompatible DDL yielded an authority transaction')
+        operations = [('transaction', transaction), ('keys', backend.signing_material),
+                      ('photo', lambda: backend.photo_owned(PHOTO_A, ACTOR))]
+        if established:
+            operations.append(('adopt', backend.initialize))
+        if cached is not None:
+            operations.append(('cached_account', lambda: cached.account(ACTOR)))
+        environment = self._authority_environment(directory, MLOCAL_AUXILIARY_TEST_SCHEMA=schema)
+        operations.extend([('selected_store', email_codes.store), ('selected_existing', email_codes.existing_store),
+                           ('direct_owner', lambda: email_codes.registered_business_owner('business-' + ACTOR)),
+                           ('qr_owner', lambda: qr_auth.merchant_owner('business-' + ACTOR)),
+                           ('owned_photo', lambda: media_upload.owned_photo('/static/photos/' + PHOTO_A, ACTOR)),
+                           ('image_reference', lambda: photo_reference.image_reference('/static/photos/' + PHOTO_A, ACTOR))])
+        for label, operation in operations:
+            seen.clear()
+            with self.subTest(authority_path=label), patch.dict(os.environ, environment), \
+                    patch.object(self.module.PostgresAuxiliary, '_connection', observed), \
+                    patch.object(sqlite3, 'connect', side_effect=AssertionError('Unexpected local fallback')):
+                with self.assertRaises(ValueError) as caught:
+                    operation()
+                self.assertTrue(any(word in str(caught.exception).lower() for word in ('schema','column','ddl','authority','initialized')), 'Refusal needs an actionable schema/authority message')
+                self.assertFalse(self.dsn in str(caught.exception), 'Driver details escaped refusal')
+                self.assertFalse(seen, 'Admission queried application state before refusing incompatible DDL')
+            self.assertEqual(self.snapshot(schema), rows)
+            self.assertEqual(self._ddl_metadata(schema), metadata)
+            self.assertEqual(self.snapshot('public'), native)
+            self.assertFalse(directory.exists(), 'Admission created local fallback state')
+
+    def test_ddl_canonical_schema_accepts_semantic_renames_and_sequence_progress(self):
+        import json
+        from services import email_codes, qr_auth, media_upload
+        self.import_from()
+        # Capture only declaration metadata to ground expected PG18 deparsing;
+        # no keys, application rows, connection settings or private paths.
+        metadata = self._ddl_metadata(self.schema)
+        print('ddl canonical declarations: ' + json.dumps({'constraints': [row[-1] for row in metadata['constraints']],
+              'defaults': [(row[0], row[2], row[-1]) for row in metadata['columns'] if row[-1] is not None]}, sort_keys=True))
+        self._ddl_change(self.schema, ('ALTER TABLE {s}.accounts RENAME CONSTRAINT accounts_email_key TO renamed_email_unique',
+                                      'ALTER INDEX {s}.sends_email_at RENAME TO renamed_sends_index',
+                                      'ALTER SEQUENCE {s}.business_reviews_id_seq RENAME TO renamed_review_sequence',
+                                      'ALTER SEQUENCE {s}.renamed_review_sequence RESTART WITH 9000'))
+        before, declarations = self.snapshot(self.schema), self._ddl_metadata(self.schema)
+        directory = self.work / 'canonical-absent-fallback'
+        with patch.dict(os.environ, self._authority_environment(directory)):
+            self.assertEqual(email_codes.store().account(ACTOR)['kind'], 'business')
+            self.assertEqual(qr_auth.merchant_owner('business-' + ACTOR), ACTOR)
+            self.assertTrue(media_upload.owned_photo('/static/photos/' + PHOTO_A, ACTOR))
+        self.backend.initialize()
+        self.assertEqual(self.snapshot(self.schema), before)
+        self.assertEqual(self._ddl_metadata(self.schema), declarations)
+        self.assertFalse(directory.exists())
+
+    def test_ddl_missing_empty_partial_schema_never_creates_or_repairs_authority(self):
+        missing = self.schema + '_missing'
+        backend = self.module.PostgresAuxiliary(self.dsn, missing)
+        with self.assertRaises(ValueError):
+            backend.signing_material()
+        with self.connect() as connection:
+            self.assertIsNone(connection.execute('SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname=%s', (missing,)).fetchone())
+        empty = self.schema + '_empty'
+        with self.connect() as connection:
+            connection.execute(self.sql.SQL('CREATE SCHEMA {}').format(self.sql.Identifier(empty)))
+        self.schemas.append(empty)
+        self._ddl_refuses(empty, self.module.PostgresAuxiliary(self.dsn, empty), None, established=False)
+        schema, backend, cached = self._ddl_variant()
+        self._ddl_change(schema, ('DROP TABLE {s}.business_status_events',))
+        self._ddl_refuses(schema, backend, cached)
+        for statement in ('CREATE VIEW {s}.unknown_view AS SELECT 1 AS id',
+                          'CREATE SEQUENCE {s}.unknown_sequence',
+                          'CREATE FUNCTION {s}.unknown_function() RETURNS integer LANGUAGE sql AS $$ SELECT 1 $$'):
+            schema = self.schema + '_cold_' + uuid4().hex[:6]
+            with self.connect() as connection:
+                connection.execute(self.sql.SQL('CREATE SCHEMA {}').format(self.sql.Identifier(schema)))
+            self.schemas.append(schema)
+            self._ddl_change(schema, (statement,))
+            before = self._ddl_metadata(schema)
+            with self.subTest(pristine_obstruction=statement.split()[1]):
+                with self.assertRaises(ValueError):
+                    self.module.PostgresAuxiliary(self.dsn, schema).initialize()
+                self.assertEqual(self._ddl_metadata(schema), before, 'Unknown cold schema was silently adopted')
+
+    def test_ddl_primary_unique_and_index_semantics_gate_actual_authority(self):
+        cases = (
+            ('signing_pk', ('ALTER TABLE {s}.signing_material DROP CONSTRAINT signing_material_pkey',)),
+            ('email_unique', ('ALTER TABLE {s}.accounts DROP CONSTRAINT accounts_email_key',)),
+            ('owner_unique', ('ALTER TABLE {s}.business_owners DROP CONSTRAINT business_owners_slug_key',)),
+            ('audit_unique', ('ALTER TABLE {s}.business_status_events DROP CONSTRAINT business_status_events_actor_revision_key',)),
+            ('photo_unique', ('ALTER TABLE {s}.photos DROP CONSTRAINT photos_actor_digest_key',)),
+            ('deferrable', ('ALTER TABLE {s}.accounts DROP CONSTRAINT accounts_email_key', 'ALTER TABLE {s}.accounts ADD UNIQUE(email) DEFERRABLE INITIALLY IMMEDIATE')),
+            ('nulls_not_distinct', ('ALTER TABLE {s}.accounts DROP CONSTRAINT accounts_email_key', 'ALTER TABLE {s}.accounts ADD UNIQUE NULLS NOT DISTINCT(email)')),
+            ('missing_index', ('DROP INDEX {s}.sends_email_at',)),
+            ('partial_index', ('DROP INDEX {s}.sends_email_at', 'CREATE INDEX sends_email_at ON {s}.sends(email,at) WHERE email IS NOT NULL')),
+            ('extra_unique', ('CREATE UNIQUE INDEX extra_challenge_unique ON {s}.codes(challenge)',)),
+        )
+        for label, statements in cases:
+            with self.subTest(ddl_damage=label):
+                schema, backend, cached = self._ddl_variant()
+                self._ddl_change(schema, statements, case=label)
+                self._ddl_refuses(schema, backend, cached)
+
+    def test_ddl_checks_nullability_types_and_defaults_are_not_evaluated_or_repaired(self):
+        cases = (
+            ('photo_check', ('ALTER TABLE {s}.photos DROP CONSTRAINT {photo_content_check}',)),
+            ('status_check', ('ALTER TABLE {s}.business_status DROP CONSTRAINT business_status_revision_check', 'ALTER TABLE {s}.business_status ADD CHECK(revision>=0)')),
+            ('unvalidated_check', ('ALTER TABLE {s}.photos DROP CONSTRAINT photos_bytes_check', 'ALTER TABLE {s}.photos ADD CHECK(bytes>0 AND bytes<=8388608) NOT VALID')),
+            ('nullable', ('ALTER TABLE {s}.photos ALTER COLUMN actor DROP NOT NULL',)),
+            ('domain', ('CREATE DOMAIN {s}.actor_text AS TEXT', 'ALTER TABLE {s}.accounts ALTER COLUMN name TYPE {s}.actor_text')),
+            ('active_default', ('ALTER TABLE {s}.business_owners ALTER COLUMN active SET DEFAULT 1',)),
+            ('body_default', ("ALTER TABLE {s}.business_approvals ALTER COLUMN body SET DEFAULT 'changed'",)),
+            ('unexpected_default', ("ALTER TABLE {s}.accounts ALTER COLUMN name SET DEFAULT 'unrequested'",)),
+            ('dropped_attribute', ('ALTER TABLE {s}.accounts ADD COLUMN retired INTEGER', 'ALTER TABLE {s}.accounts DROP COLUMN retired')),
+            ('generated_attribute', ('ALTER TABLE {s}.codes DROP COLUMN delivered', 'ALTER TABLE {s}.codes ADD COLUMN delivered INTEGER GENERATED ALWAYS AS (1) STORED')),
+            ('side_effect_default', ("ALTER TABLE {s}.business_owners ALTER COLUMN active SET DEFAULT nextval('{s}.business_reviews_id_seq'::regclass)",)),
+        )
+        for label, statements in cases:
+            with self.subTest(ddl_damage=label):
+                schema, backend, cached = self._ddl_variant()
+                self._ddl_change(schema, statements, case=label)
+                self._ddl_refuses(schema, backend, cached)
+
+    def test_ddl_identity_sequence_declarations_gate_admission_without_counter_reset(self):
+        cases = (
+            ('missing_identity', ('ALTER TABLE {s}.business_reviews ALTER COLUMN id DROP IDENTITY',)),
+            ('always_identity', ('ALTER TABLE {s}.business_reviews ALTER COLUMN id SET GENERATED ALWAYS',)),
+            ('sequence_increment', ('ALTER SEQUENCE {s}.business_reviews_id_seq INCREMENT BY 2',)),
+            ('sequence_cycle', ('ALTER SEQUENCE {s}.business_reviews_id_seq CYCLE',)),
+            ('sequence_cache', ('ALTER SEQUENCE {s}.business_reviews_id_seq CACHE 2',)),
+            ('sequence_start', ('ALTER SEQUENCE {s}.business_reviews_id_seq START WITH 8',)),
+        )
+        for label, statements in cases:
+            with self.subTest(ddl_damage=label):
+                schema, backend, cached = self._ddl_variant()
+                self._ddl_change(schema, statements, case=label)
+                self._ddl_refuses(schema, backend, cached)
+
+    def test_ddl_unexpected_relation_and_execution_behavior_refuses_before_state_query(self):
+        cases = (
+            ('partitioned', ('ALTER TABLE {s}.sends RENAME TO saved_sends',
+                             'CREATE TABLE {s}.sends(email TEXT,at DOUBLE PRECISION) PARTITION BY RANGE(at)',
+                             'CREATE TABLE {s}.sends_partition PARTITION OF {s}.sends DEFAULT',
+                             'INSERT INTO {s}.sends SELECT * FROM {s}.saved_sends',
+                             'DROP TABLE {s}.saved_sends',
+                             'CREATE INDEX sends_email_at ON {s}.sends(email,at)')),
+            ('inherited', ('ALTER TABLE {s}.accounts INHERIT {p}.accounts',)),
+            ('unlogged', ('ALTER TABLE {s}.sends SET UNLOGGED',)),
+            ('extra_view', ('CREATE VIEW {s}.unexpected_view AS SELECT 1 AS id',)),
+            ('rls', ('ALTER TABLE {s}.auxiliary_state ENABLE ROW LEVEL SECURITY', 'CREATE POLICY hidden_state ON {s}.auxiliary_state USING (false)')),
+            ('rule', ('CREATE RULE ignore_status_update AS ON UPDATE TO {s}.business_status DO INSTEAD NOTHING',)),
+            ('function', ('CREATE FUNCTION {s}.unexpected_function() RETURNS integer LANGUAGE sql AS $$ SELECT 1 $$',)),
+            # Review regression: catalog admission must not resolve operators
+            # through an unadmitted schema or advance its identity counter.
+            ('operator_shadow', ("CREATE FUNCTION {s}.ddl_equal(name,name) RETURNS boolean LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_catalog.nextval(pg_catalog.pg_get_serial_sequence('{s}.business_reviews','id')); RETURN pg_catalog.texteq($1::text,$2::text); END $$",
+                                 'CREATE OPERATOR {s}.= (LEFTARG=name,RIGHTARG=name,FUNCTION={s}.ddl_equal)')),
+            ('trigger', ("CREATE FUNCTION {s}.unexpected_trigger() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'must not execute'; END $$", 'CREATE TRIGGER unexpected_write BEFORE UPDATE ON {s}.auxiliary_state FOR EACH ROW EXECUTE FUNCTION {s}.unexpected_trigger()')),
+        )
+        for label, statements in cases:
+            with self.subTest(ddl_damage=label):
+                schema, backend, cached = self._ddl_variant()
+                self._ddl_change(schema, statements, case=label)
+                self._ddl_refuses(schema, backend, cached)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
