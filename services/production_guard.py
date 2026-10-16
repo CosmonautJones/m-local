@@ -95,13 +95,25 @@ def _demo_enabled(env: Mapping[str, str]) -> list[str]:
 
 
 def validate_production_config(env: Mapping[str, str], app_root: Path) -> list[str]:
-    # Standalone env-only admission also covers the packaged offline preflight.
-    # Authority-only SQL fixtures must never bootstrap native/media state.
-    if env.get('MLOCAL_ONBOARDING_BACKEND', 'sqlite') != 'sqlite':
-        return ['MLOCAL_ONBOARDING_BACKEND must be sqlite for native startup. PostgreSQL authority proof mode is not a complete application backend.']
-    if not is_production(env):
+    # This function remains offline/static, including packaged preflight.
+    # The explicit local rehearsal keeps every production configuration gate;
+    # online key/catalog/photo admission belongs to the native bootstrap.
+    selected = env.get('MLOCAL_ONBOARDING_BACKEND', 'sqlite')
+    disposable = selected == 'postgres-local'
+    if disposable:
+        from services.onboarding_backend import validate_disposable_sql_config
+        problems = validate_disposable_sql_config(env, app_root)
+        if problems:
+            return problems
+    elif selected != 'sqlite':
+        return ['MLOCAL_ONBOARDING_BACKEND must select sqlite or an explicitly admitted disposable application; PostgreSQL authority proof mode cannot start native serving.']
+    elif not is_production(env):
         return []
     problems: list[str] = []
+    # Refusal must preserve even cache directory metadata. Production retains
+    # its real write probes; the disposable bootstrap proves cache publication
+    # with actual writes only after all original state has passed admission.
+    writable = (lambda directory: os.access(directory, os.W_OK)) if disposable else _writable
     # Native authcrypt and CodeStore consume these raw values. Validating a
     # trimmed path could approve preserved state while startup creates another
     # store. Reject the ambiguity before touching either location.
@@ -135,7 +147,7 @@ def validate_production_config(env: Mapping[str, str], app_root: Path) -> list[s
         problems.append(f'{ONBOARDING_DIR} must be outside the application source directory.')
     elif not directory.is_dir():
         problems.append(f'{ONBOARDING_DIR} must be an existing directory (mount the volume first).')
-    elif not _writable(directory):
+    elif not writable(directory):
         problems.append(f'{ONBOARDING_DIR} is not writable by the app.')
     elif not _mounted_volume(directory):
         problems.append(f'{ONBOARDING_DIR} must use the persistent volume; an ephemeral nested mount is insufficient.')
@@ -164,7 +176,7 @@ def validate_production_config(env: Mapping[str, str], app_root: Path) -> list[s
     native_data = (native_base / '.jac/data').resolve()
     for target, label, relative in ((native_data, 'native signing-state', '.jac/data'),
                                     ((root / 'assets/photos').resolve(), 'photo storage', 'assets/photos')):
-        if not target.is_dir() or durable is None or not _inside(target, durable) or not _writable(target) or not _mounted_volume(target):
+        if not target.is_dir() or durable is None or not _inside(target, durable) or not writable(target) or not _mounted_volume(target):
             problems.append(f'MLOCAL_DURABLE_ROOT must contain writable {label}; mount the application {relative} path onto that volume.')
     photos = root / 'assets/photos'
     if photos.is_dir() and any(photos.glob('*.jpg')) and (
@@ -250,6 +262,12 @@ def enforce_production_config(env: Mapping[str, str] | None = None, app_root: Pa
         problems = validate_production_config(source, root)
     except (OSError, ValueError, RuntimeError):
         problems = ['Production storage or configuration could not be inspected. Check MLOCAL_DURABLE_ROOT, MLOCAL_ONBOARDING_DIR and JAC_DB_URL; no replacement state was created.']
+    if not problems and source.get('MLOCAL_ONBOARDING_BACKEND') == 'postgres-local':
+        try:
+            from services.onboarding_backend import admit_disposable_sql_application
+            admit_disposable_sql_application(source, root)
+        except Exception:
+            problems = ['MLOCAL_ONBOARDING_BACKEND disposable SQL admission failed; preserve original state and cache. No replacement or fallback was used.']
     if problems:
         raise ProductionConfigError('M-Local refuses to start: production configuration is incomplete.\n- ' + '\n- '.join(problems))
     return True

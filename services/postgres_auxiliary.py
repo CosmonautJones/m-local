@@ -1,7 +1,8 @@
-"""Opt-in, disposable PostgreSQL auxiliary proof; never selected by app startup.
+"""Opt-in PostgreSQL auxiliary adapter for explicit disposable app rehearsals.
 
 This adapter covers the existing CodeStore SQL surface only. Its transaction row
 lock serializes auxiliary records, not native Jac graph or identity transactions.
+It is not a production backend.
 """
 from contextlib import contextmanager
 from collections import Counter
@@ -663,12 +664,36 @@ class PostgresAuxiliary:
             row = connection.execute('SELECT * FROM photos WHERE filename=%s AND actor=%s', (filename, actor)).fetchone()
             return row is not None and bool(_photo(row))
 
-    def materialize_photos(self, cache_dir):
+    def _validated_photos(self, connection, preserved_registry=None):
+        photos = [_photo(row) for row in connection.execute('SELECT * FROM photos ORDER BY filename')]
+        if preserved_registry is not None:
+            registry, _ = self._legacy_database(preserved_registry, {'photos': PHOTO_COLUMNS[:-1]})
+            current = {row[0]: row[:-1] for row in photos}
+            if any(current.get(row[0]) != tuple(row) for row in registry['photos']):
+                raise ValueError('Original photo registry metadata differs from preserved SQL photos')
+        return photos
+
+    def validate_photo_cache(self, cache_dir, preserved_registry=None):
+        """Validate an exact completed delivery cache without repairing any file."""
+        directory = _no_links(cache_dir)
+        if not directory.is_dir():
+            raise ValueError('Photo delivery requires a complete regular disposable cache')
+        with self._locked() as connection:
+            photos = self._validated_photos(connection, preserved_registry)
+            entries = list(directory.iterdir())
+            if {path.name for path in entries} != {row[0] for row in photos}:
+                raise ValueError('Photo delivery cache is incomplete or contains unknown entries')
+            for filename, actor, digest, length, created, content in photos:
+                path = _no_links(directory / filename)
+                if not path.is_file() or _read_file(path, PHOTO_MAX_BYTES) != content:
+                    raise ValueError('Photo delivery cache content requires explicit recovery')
+
+    def materialize_photos(self, cache_dir, preserved_registry=None):
         directory = _no_links(cache_dir)
         if directory.exists() and (not directory.is_dir() or any(directory.iterdir())):
             raise ValueError('Photo materialization requires a fresh empty disposable cache')
         with self._locked() as connection:
-            photos = [_photo(row) for row in connection.execute('SELECT * FROM photos ORDER BY filename')]
+            photos = self._validated_photos(connection, preserved_registry)
         directory.mkdir(parents=True, exist_ok=True)
         if any(directory.iterdir()):
             raise ValueError('Photo materialization requires a fresh empty disposable cache')

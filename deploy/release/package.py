@@ -706,8 +706,12 @@ def require_canonical_project_entry(app):
         raise ReleaseError("The canonical project entry must be explicitly declared as main in valid jac.toml")
 
 
-def validate_launch_inputs(package, config, evidence):
+def validate_launch_inputs(package, config, evidence, disposable_sql=False):
     """Shared local startup admission; no locks, port binds or network calls."""
+    if disposable_sql and (os.environ.get("MLOCAL_ENV") != "disposable"
+                           or os.environ.get("MLOCAL_ONBOARDING_BACKEND") != "postgres-local"
+                           or evidence.get("disposable_fixture_only") is not True):
+        raise ReleaseError("Disposable SQL startup requires explicit disposable environment, postgres-local backend and fixture-only evidence")
     package = Path(package)
     app = validate_config(config)
     manifest = verify_package(package)
@@ -718,7 +722,11 @@ def validate_launch_inputs(package, config, evidence):
     verify_installed_source(package, config, require_marker=True)
     environment = os.environ.copy()
     pg_environment(environment.get("JAC_DB_URL", ""))
-    environment.update(MLOCAL_ENV="production", MLOCAL_PUBLIC_INGRESS="restricted", MLOCAL_DEPLOYMENT_TOPOLOGY="single-instance-serialized",
+    if disposable_sql:
+        if environment.get("PGPASSFILE") not in (None, "", os.devnull):
+            raise ReleaseError("Disposable SQL startup refuses a conflicting PGPASSFILE")
+        environment.update(MLOCAL_DISPOSABLE_SQL="1", PGPASSFILE=os.devnull)
+    environment.update(MLOCAL_ENV="disposable" if disposable_sql else "production", MLOCAL_PUBLIC_INGRESS="restricted", MLOCAL_DEPLOYMENT_TOPOLOGY="single-instance-serialized",
                        MLOCAL_APP_REPLICAS="1", MLOCAL_DURABLE_ROOT=config["durable_root"], MLOCAL_ONBOARDING_DIR=config["onboarding_dir"],
                        MLOCAL_BACKEND_PORT=str(config["backend_port"]), PORT=str(config["gateway_port"]),
                        MLOCAL_INGRESS_EVENT_LOG="stderr", MLOCAL_DOMAIN_EVENT_LOG="stderr")
@@ -750,9 +758,9 @@ def require_production_config(package, app, environment):
         raise ReleaseError("Production configuration guard refused startup: " + (", ".join(names) or "required setting names unavailable; inspect protected guard check"))
 
 
-def launch(package, config, evidence):
+def launch(package, config, evidence, disposable_sql=False):
     package = Path(package)
-    app, _, _, environment = validate_launch_inputs(package, config, evidence)
+    app, _, _, environment = validate_launch_inputs(package, config, evidence, disposable_sql=disposable_sql)
     lock = acquire_lock(config)
     processes = []
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
@@ -765,7 +773,16 @@ def launch(package, config, evidence):
         # In official 0.37.23, options following a positional target become
         # script arguments. Run the declared project from its canonical cwd so
         # --no-dev/host/port stay CLI options and no default Vite server starts.
-        processes.append(subprocess.Popen([str(package / "runtime/jac"), "run", "--no-dev", "--host", "127.0.0.1", "--port", str(config["backend_port"])], cwd=app, env=environment, start_new_session=True))
+        native_command = [str(package / "runtime/jac"), "run", "--no-dev", "--host", "127.0.0.1", "--port", str(config["backend_port"])]
+        native_environment = environment
+        if disposable_sql:
+            native_environment = environment.copy()
+            for name in ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONUSERBASE", "VIRTUAL_ENV", "JACPATH", "MLOCAL_AUXILIARY_DRIVER_SITE"):
+                native_environment.pop(name, None)
+            native_environment.update(PYTHONNOUSERSITE="1", PYTHONDONTWRITEBYTECODE="1")
+            native_command = [str(app / ".jac/venv/bin/python"), "-c",
+                              "from services.onboarding_backend import bootstrap_native; bootstrap_native()", *native_command]
+        processes.append(subprocess.Popen(native_command, cwd=app, env=native_environment, start_new_session=True))
         deadline = time.monotonic() + 300
         native_ready = False
         # No gateway or public traffic exists yet. This native metadata probe
@@ -824,9 +841,12 @@ def main():
     parser.add_argument("--backup", type=Path)
     parser.add_argument("--acknowledge-quiesced", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--disposable-sql", action="store_true")
     args = parser.parse_args()
     lock = None
     try:
+        if args.disposable_sql and args.action not in {"run", "preflight"}:
+            raise ReleaseError("--disposable-sql is supported only for run and preflight")
         config = read_json(args.config) if args.config else None
         if args.action == "create":
             result = create_source_package(args.source, args.output, runtime=args.runtime, artifact=args.artifact,
@@ -867,12 +887,12 @@ def main():
             result = verify_recovery_set(args.backup)
         elif args.action == "preflight":
             app, manifest, state, environment = validate_launch_inputs(
-                args.package, config, read_json(args.evidence) if args.evidence else {})
+                args.package, config, read_json(args.evidence) if args.evidence else {}, disposable_sql=args.disposable_sql)
             require_production_config(args.package, app, environment)
             result = {"preflight": "PASS", "source_sha": manifest["source_sha"], "state_inventory": state,
                       "scope": "local static startup checks; does not certify provider durability, serving readiness, inbox, devices, or off-host recovery"}
         else:
-            launch(args.package, config, read_json(args.evidence))
+            launch(args.package, config, read_json(args.evidence), disposable_sql=args.disposable_sql)
             result = {"stopped": True}
         # Never print private-state digests/inventory or subprocess errors here.
         print(json.dumps({"action": args.action, "result": "PASS", "source_sha": result.get("source_sha"), "scope": result.get("scope")}))
