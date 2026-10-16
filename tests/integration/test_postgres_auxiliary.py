@@ -1188,5 +1188,196 @@ class PostgresAuxiliaryTests(unittest.TestCase):
         self.assertEqual(self.snapshot(self.schema), before)
 
 
+
+    def _native_key_fixture(self, raw=None):
+        import json
+        root = self.work / ('native-key-proof-' + uuid4().hex[:8])
+        base, home = root / 'app', root / 'original-native'
+        base.mkdir(parents=True)
+        signing = home / '.jac/data'
+        signing.mkdir(parents=True)
+        raw = self.native_key if raw is None else raw
+        (signing / 'jwt_secret').write_bytes(raw)
+        entry = base / 'identity-probe.py'
+        entry.write_text('# Fixed canonical synthetic auth/identity context.\n')
+        original = hashes(home)
+        self.addCleanup(lambda: self.assertEqual(hashes(home), original, 'Original native key fixture changed'))
+        # This anchor is recorded before importing or selecting SQL material.
+        expected = hashlib.sha256((signing / 'jwt_secret').read_bytes()).hexdigest()
+        descriptor = {'synthetic_disposable_only': True, 'fixture_root': str(root),
+                      'base': str(base), 'entry': str(entry), 'original_home': str(home),
+                      'packet': str(root / 'private-issued-tokens.json'), 'dsn': self.dsn,
+                      'schema': self.schema, 'expected_raw_sha256': expected}
+        with os.fdopen(os.open(root / 'original-key-fingerprint.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as stream:
+            json.dump({'raw_sha256': expected}, stream)
+        return descriptor
+
+    def _native_key_run(self, fixture, phase, selection='postgres-proof', expected_exit=0, **changes):
+        import json, signal, subprocess
+        request = {**fixture, 'phase': phase, 'selection': selection, **changes}
+        path = Path(fixture['fixture_root']) / ('request-' + uuid4().hex + '.json')
+        with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as stream:
+            json.dump(request, stream)
+        program = ('import os,runpy,sys; '
+                   'sys.path.insert(0,os.environ["MLOCAL_AUXILIARY_DRIVER_SITE"]); '
+                   'sys.path.insert(0,sys.argv.pop(1)); script=sys.argv.pop(1); '
+                   'runpy.run_path(script,run_name="__main__")')
+        environment = dict(os.environ)
+        # Poison only harmless synthetic signing overrides; the child must scrub
+        # them before loading official settings. No foreign database is supplied.
+        environment['JAC_SERVE_AUTH_SECRET'] = 'synthetic-inherited-wrong-signing-setting'
+        environment['JAC_SERVE_AUTH_ALGORITHM'] = 'HS512'
+        child = subprocess.Popen([sys.executable, '-c', program, str(ROOT),
+                                  str(ROOT / 'tests/integration/native_key_probe.py'), str(path)],
+                                 cwd=fixture['base'], env=environment, text=True,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+        try:
+            stdout, stderr = child.communicate(timeout=90)
+        except subprocess.TimeoutExpired:
+            os.killpg(child.pid, signal.SIGTERM)
+            try:
+                child.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(child.pid, signal.SIGKILL)
+                child.communicate(timeout=5)
+            self.fail('Owned synthetic key probe exceeded its deadline')
+        self.assertEqual(child.wait(timeout=5), child.returncode)
+        with self.assertRaises(ProcessLookupError):
+            os.killpg(child.pid, 0)
+        try:
+            result = json.loads(stdout.strip().splitlines()[-1])
+        except (json.JSONDecodeError, IndexError):
+            self.fail('Owned key probe did not return redacted structured evidence')
+        if child.returncode != expected_exit:
+            print('native-key probe diagnostic: ' + json.dumps({k: result.get(k) for k in
+                  ('phase', 'stage', 'status', 'error_class', 'line')}, sort_keys=True))
+        self.assertEqual(child.returncode, expected_exit, 'Owned key probe status differs from expected phase result')
+        # Boolean-only diagnostics never format private fixture values or output.
+        private_values = [self.dsn, self.native_key.decode(),
+                          (Path(fixture['original_home']) / '.jac/data/jwt_secret').read_text()]
+        packet = Path(fixture['packet'])
+        if packet.exists():
+            private_values.extend(row['token'] for row in json.loads(packet.read_text()))
+        self.assertFalse(any(value and value in output for value in private_values
+                             for output in (stdout, stderr)), 'Private fixture value appeared in probe output')
+        base = Path(fixture['base'])
+        self.assertFalse(list(base.rglob('jwt_secret*')), 'Native probe minted a fallback signing file')
+        self.assertFalse(list(base.rglob('*.sqlite*')), 'Native probe created an alternate SQLite store')
+        return result
+
+    def test_native_key_real_identities_and_issued_tokens_survive_restart_and_selection(self):
+        import json
+        fixture = self._native_key_fixture()
+        first = self._native_key_run(fixture, 'seed', selection='sqlite')
+        self.assertTrue(first['token_issuance'] and first['actual_session_pgstore'])
+        packet = Path(fixture['packet'])
+        token_bytes = packet.read_bytes()
+        private = json.loads(token_bytes)
+        self.assertEqual(len(private), 2)
+        self.assertEqual([row['user']['identities'][1]['verified'] for row in private], [True, False])
+        native = self.snapshot('public')
+        self.assertTrue(native['identity_users'] and native['anchors'])
+        # Import only after the original fingerprint and real baseline tokens exist.
+        self.import_from()
+        auxiliary = self.snapshot(self.schema)
+        pids = {first['pid']}
+        for phase, selection in (('verify', 'sqlite'), ('verify', 'postgres-proof'),
+                                 ('verify-wrong-secret', 'postgres-proof'), ('verify', 'sqlite')):
+            outcome = self._native_key_run(fixture, phase, selection=selection)
+            self.assertEqual(outcome['original_tokens_verified'], 2)
+            self.assertFalse(outcome['token_issuance'])
+            self.assertEqual((outcome['canonical_base'], outcome['canonical_entry']),
+                             (fixture['base'], fixture['entry']))
+            if selection == 'postgres-proof':
+                self.assertTrue(outcome['sql_nonblank_env'])
+            self.assertNotIn(outcome['pid'], pids)
+            pids.add(outcome['pid'])
+            self.assertTrue(packet.read_bytes() == token_bytes, 'Previously issued tokens were replaced')
+            self.assertEqual(self.snapshot('public'), native, 'Native identity/root rows changed during validation')
+            self.assertEqual(self.snapshot(self.schema), auxiliary)
+        self.assertEqual(self.backend.signing_material()['native_key'], self.native_key)
+
+    def test_native_key_original_fingerprint_and_malformed_material_refuse_before_fallback(self):
+        import runpy
+        fixture = self._native_key_fixture()
+        self.import_from()
+        native = self.snapshot('public')
+        for kind in ('wrong', 'missing_native', 'missing_code'):
+            with self.connect() as connection:
+                if kind == 'wrong':
+                    connection.execute(self.sql.SQL("UPDATE {}.signing_material SET material=%s WHERE name='native_key'").format(self.sql.Identifier(self.schema)),
+                                       (b'synthetic-different-valid-length-native-key',))
+                else:
+                    name = 'native_key' if kind == 'missing_native' else 'code_key'
+                    connection.execute(self.sql.SQL('DELETE FROM {}.signing_material WHERE name=%s').format(self.sql.Identifier(self.schema)), (name,))
+            before = self.snapshot(self.schema)
+            with self.subTest(sql_damage=kind):
+                result = self._native_key_run(fixture, 'admit', expected_exit=1)
+                self.assertEqual(result['stage'], 'admission')
+                self.assertEqual(self.snapshot(self.schema), before)
+                self.assertEqual(self.snapshot('public'), native)
+            with self.connect() as connection:
+                for name, material in (('native_key', self.native_key), ('code_key', self.code_key)):
+                    connection.execute(self.sql.SQL('INSERT INTO {}.signing_material(name,material) VALUES (%s,%s) ON CONFLICT(name) DO UPDATE SET material=excluded.material').format(self.sql.Identifier(self.schema)), (name, material))
+        probe = runpy.run_path(str(ROOT / 'tests/integration/native_key_probe.py'), run_name='native_key_contract')
+        derive = probe['effective_key']
+        bad = (b'', b'   \t\n', b'short', b'supersecretkey_for_testing_only!', b'\xffsynthetic-invalid-utf8',
+               b'synthetic-native-key-with-embedded\x00nul-only', b'synthetic-native-key-with-embedded\nline-break',
+               b'synthetic-native-key-with-embedded\rcarriage-return')
+        for raw in bad:
+            with self.subTest(material_class=bad.index(raw)):
+                with self.assertRaises(ValueError) as caught:
+                    derive(raw, hashlib.sha256(raw).hexdigest())
+                self.assertRegex(str(caught.exception).lower(), 'key|signing|material')
+        for expected in ('', 'x' * 64, '0' * 64, None):
+            with self.subTest(anchor=type(expected).__name__):
+                with self.assertRaises(ValueError):
+                    derive(self.native_key, expected)
+        self.assertEqual(self.snapshot('public'), native)
+
+    def test_native_key_effective_text_matches_official_file_and_environment_resolution(self):
+        variants = (b' \t' + self.native_key + b'\r\n',
+                    ('\u2003' + self.native_key.decode() + '\u2003').encode())
+        native = self.snapshot('public')
+        for index, raw in enumerate(variants):
+            fixture = self._native_key_fixture(raw)
+            legacy = self.work / ('native-key-variant-' + str(index))
+            shutil.copytree(self.legacy, legacy)
+            (legacy / 'jwt_secret').write_bytes(raw)
+            preserved = hashes(legacy)
+            self.addCleanup(lambda directory=legacy, before=preserved: self.assertEqual(hashes(directory), before))
+            schema = self.schema + '_key' + str(index)
+            with self.connect() as connection:
+                connection.execute(self.sql.SQL('CREATE SCHEMA {}').format(self.sql.Identifier(schema)))
+            self.schemas.append(schema)
+            backend = self.module.PostgresAuxiliary(self.dsn, schema)
+            backend.initialize()
+            backend.import_legacy(legacy / 'onboarding.sqlite3', legacy / 'photo-ownership.sqlite3',
+                                  legacy / 'photos', legacy / 'code.key', legacy / 'jwt_secret')
+            fixture['schema'] = schema
+            before = self.snapshot(schema)
+            file_result = self._native_key_run(fixture, 'resolve', selection='sqlite')
+            sql_result = self._native_key_run(fixture, 'resolve')
+            self.assertEqual(file_result['effective_sha256'], sql_result['effective_sha256'])
+            self.assertTrue(sql_result['sql_nonblank_env'])
+            self.assertEqual(backend.signing_material()['native_key'], raw)
+            self.assertEqual(self.snapshot(schema), before)
+            self.assertEqual(self.snapshot('public'), native)
+
+    def test_native_key_invalid_selection_and_outage_never_initialize_native_identity(self):
+        fixture = self._native_key_fixture()
+        self.import_from()
+        native, auxiliary = self.snapshot('public'), self.snapshot(self.schema)
+        cases = ({'selection': 'unknown'}, {'selection': ''}, {'environment': 'production'},
+                 {'schema': ''}, {'dsn': ''},
+                 {'dsn': self.psycopg.conninfo.make_conninfo(self.dsn, port=1)})
+        for changes in cases:
+            with self.subTest(configuration=tuple(changes)):
+                result = self._native_key_run(fixture, 'admit', expected_exit=1, **changes)
+                self.assertEqual(result['stage'], 'admission')
+                self.assertEqual(self.snapshot('public'), native)
+                self.assertEqual(self.snapshot(self.schema), auxiliary)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
