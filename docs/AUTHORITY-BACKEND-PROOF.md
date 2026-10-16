@@ -54,6 +54,15 @@ bootstrap have not been wired into the application. Use only the disposable
 runner and synthetic fixtures described in the prerequisite document; this is
 not a production configuration example.
 
+Selected-factory operator mutations such as `approve_business` and
+`change_business_status` still use `identity_review_lock(self.directory)` and may
+create its lock file in the configured private directory. The existing SQL
+fixture tests use disposable runtime directories for those mutations. They do
+not qualify filesystem-independent operator commands; operator mutation cutover
+and native writer coordination remain separate gates. This increment qualifies
+the selected factories, authority reads and activation preparation above, not
+all application or operator paths. The existing lock is unchanged.
+
 The SQL fixture guard currently validates table/column shape, scalar types,
 version and audit consistency. Full DDL constraint/default/identity metadata
 conformance is a separate production schema-contract gate. No broad malformed-DDL

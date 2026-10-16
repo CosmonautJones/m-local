@@ -584,8 +584,16 @@ obj CodeStore {
 }
 
 
-def store() -> CodeStore {
+def _selected_store() -> CodeStore | None {
     selected = selected_store(CodeStore, time.time);
+    if selected is None { return None; }
+    if isinstance(selected, CodeStore) { return selected; }
+    raise ValueError("Selected authority backend did not provide a CodeStore.");
+}
+
+
+def store() -> CodeStore {
+    selected = _selected_store();
     if selected is not None { return selected; }
     if os.environ.get("MLOCAL_ENV", "").strip().lower() == "production" { return existing_store(); }
     return CodeStore(Path(os.environ.get("MLOCAL_ONBOARDING_DIR", ".jac/onboarding")).resolve());
@@ -593,7 +601,7 @@ def store() -> CodeStore {
 
 
 def existing_store() -> CodeStore {
-    selected = selected_store(CodeStore, time.time);
+    selected = _selected_store();
     if selected is not None { return selected; }
     directory = Path(os.environ.get("MLOCAL_ONBOARDING_DIR", ".jac/onboarding"));
     try {
@@ -622,7 +630,7 @@ def existing_store() -> CodeStore {
 
 
 def registered_business_owner(slug: str) -> str {
-    selected = selected_store(CodeStore, time.time);
+    selected = _selected_store();
     if selected is not None { return selected.business_owner(slug); }
     if not re.fullmatch(r"business-[0-9a-f]{32}", slug) {
         return "";
@@ -642,7 +650,7 @@ def registered_business_owner(slug: str) -> str {
 
 
 def merchant_operations_allowed(actor: str) -> bool {
-    selected = selected_store(CodeStore, time.time);
+    selected = _selected_store();
     if selected is not None {
         try { actor = status_actor(actor); }
         except ValueError { return False; }
