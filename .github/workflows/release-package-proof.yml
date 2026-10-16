@@ -33,7 +33,7 @@ jobs:
         run: |
           set -euo pipefail
           sha256sum --check "$RUNNER_TEMP/release-package/archive-sha256.txt"
-          python3 - "$RUNNER_TEMP/release-package" "$RUNNER_TEMP/package-replay" <<'PY'
+          python3 -B - "$RUNNER_TEMP/release-package" "$RUNNER_TEMP/package-replay" <<'PY'
           import hashlib, importlib.util, json, sys, tarfile
           from pathlib import Path, PurePosixPath
           output, replay = map(Path, sys.argv[1:])
