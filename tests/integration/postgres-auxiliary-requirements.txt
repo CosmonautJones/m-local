@@ -1,0 +1,2 @@
+# Optional local proof only; the app default backend is unchanged.
+psycopg[binary]==3.3.6

@@ -1,0 +1,725 @@
+"""Opt-in SQL-only proof; requires an explicitly owned disposable PostgreSQL DB."""
+import concurrent.futures
+import hashlib
+import hmac
+import io
+import os
+from pathlib import Path
+import re
+import shutil
+import sqlite3
+import sys
+import tempfile
+import threading
+import time
+import unittest
+from unittest.mock import patch
+from uuid import uuid4
+
+
+ROOT = Path(__file__).resolve().parents[2]
+TABLES = (
+    'accounts', 'business_approvals', 'business_owners', 'business_reviews',
+    'business_status', 'business_status_events', 'codes', 'display_names',
+    'drafts', 'imports', 'provisioning', 'sends',
+)
+ACTOR = 'a' * 32
+STUDENT = 'b' * 32
+OTHER = 'c' * 32
+PHOTO_A = '1' * 32 + '.jpg'
+PHOTO_B = '2' * 32 + '.jpg'
+
+
+def hashes(directory):
+    return {str(p.relative_to(directory)): hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in sorted(directory.rglob('*')) if p.is_file()}
+
+
+@unittest.skipUnless(os.environ.get('MLOCAL_AUXILIARY_TEST_DSN'),
+                     'requires explicit disposable MLOCAL_AUXILIARY_TEST_DSN')
+class PostgresAuxiliaryTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import psycopg
+        from psycopg import sql
+        from psycopg.conninfo import conninfo_to_dict
+        cls.psycopg, cls.sql = psycopg, sql
+        cls.dsn = os.environ['MLOCAL_AUXILIARY_TEST_DSN']
+        cls.schema_base = os.environ.get('MLOCAL_AUXILIARY_TEST_SCHEMA', '')
+        if any(name in os.environ for name in ('PGHOSTADDR', 'PGSERVICE', 'PGSERVICEFILE')):
+            raise ValueError('Unset inherited libpq redirection before disposable testing')
+        try:
+            settings = conninfo_to_dict(cls.dsn)
+        except Exception:
+            raise ValueError('Invalid explicit disposable test DSN') from None
+        if (settings.get('host') not in {'127.0.0.1', '::1', 'localhost'}
+                or settings.get('hostaddr', '127.0.0.1') not in {'127.0.0.1', '::1'}
+                or not settings.get('dbname', '').startswith('mlocal_aux_test_')
+                or 'service' in settings
+                or not re.fullmatch(r'mlocal_aux_test_[a-z0-9_]{1,24}', cls.schema_base)):
+            raise ValueError('Refusing a database/schema outside explicit loopback test ownership')
+        temporary = os.environ.get('TMPDIR', '')
+        if not temporary or not Path(temporary).is_absolute():
+            raise ValueError('Set TMPDIR to the owned X-backed disposable fixture directory')
+        sys.path.insert(0, str(ROOT))
+        import jaclang  # Register the pinned runtime's unchanged Jac module importer.
+        from services.email_codes import CodeStore, business_revision
+        from services import postgres_auxiliary
+        from PIL import Image
+        cls.CodeStore = CodeStore
+        cls.business_revision = staticmethod(business_revision)
+        cls.module = postgres_auxiliary
+        cls.Image = Image
+        # Build once through the unchanged business class; each test imports a
+        # fresh byte-for-byte copy rather than repeating Jac fixture execution.
+        cls.template_temporary = tempfile.TemporaryDirectory(prefix='mlocal-aux-template-', dir=temporary)
+        cls.addClassCleanup(cls.template_temporary.cleanup)
+        template = cls(methodName='test_import_preserves_all_tables_keys_photos_and_exact_replay')
+        template.legacy = Path(cls.template_temporary.name) / 'originals'
+        template.legacy.mkdir()
+        template.now = time.time()
+        template._make_originals()
+        cls.template = template
+        cls.template_hashes = hashes(template.legacy)
+
+    def connect(self):
+        try:
+            connection = self.psycopg.connect(self.dsn, connect_timeout=5)
+        except self.psycopg.Error:
+            raise RuntimeError('Owned PostgreSQL fixture connection unavailable') from None
+        actual = connection.execute('SELECT current_database()').fetchone()[0]
+        if not actual.startswith('mlocal_aux_test_'):
+            connection.close()
+            raise ValueError('Refusing a non-fixture PostgreSQL database')
+        return connection
+
+    def setUp(self):
+        self.schemas = []
+        self.temporary = tempfile.TemporaryDirectory(prefix='mlocal-aux-', dir=os.environ['TMPDIR'])
+        self.work = Path(self.temporary.name)
+        self.legacy = self.work / 'originals'
+        shutil.copytree(self.template.legacy, self.legacy)
+        self.runtime = self.work / 'runtime'
+        self.runtime.mkdir()
+        self.now = self.template.now
+        self.fields = dict(self.template.fields)
+        self.code_key, self.native_key = self.template.code_key, self.template.native_key
+        self.jpeg_a, self.jpeg_b = self.template.jpeg_a, self.template.jpeg_b
+        self.photos_dir = self.legacy / 'photos'
+        self.original_transaction = self.CodeStore.transaction
+        self.original_hashes = hashes(self.legacy)
+        self.addCleanup(self.finish)
+        suffix = uuid4().hex[:12]
+        self.schema = self.schema_base + '_' + suffix
+        self.native_schema = 'mlocal_aux_test_native_' + suffix
+        with self.connect() as connection:
+            for schema in (self.schema, self.native_schema):
+                connection.execute(self.sql.SQL('CREATE SCHEMA {}').format(self.sql.Identifier(schema)))
+                self.schemas.append(schema)
+            for table in ('anchors', 'identity_lookups'):
+                connection.execute(self.sql.SQL('CREATE TABLE {}.{} (id TEXT PRIMARY KEY, payload TEXT NOT NULL)').format(
+                    self.sql.Identifier(self.native_schema), self.sql.Identifier(table)))
+                connection.execute(self.sql.SQL('INSERT INTO {}.{} VALUES (%s,%s)').format(
+                    self.sql.Identifier(self.native_schema), self.sql.Identifier(table)),
+                    ('synthetic-native-sentinel', 'must remain unchanged'))
+        self.native_before = self.snapshot(self.native_schema)
+        self.backend = self.module.PostgresAuxiliary(self.dsn, self.schema)
+        self.backend.initialize()
+
+    def finish(self):
+        try:
+            self.assertEqual(hashes(self.legacy), self.original_hashes, 'Original fixture bytes changed')
+            self.assertEqual(hashes(self.template.legacy), self.template_hashes, 'Fixture template bytes changed')
+            self.assertIs(self.CodeStore.transaction, self.original_transaction,
+                          'The unchanged CodeStore class was globally patched')
+            if hasattr(self, 'native_before'):
+                self.assertEqual(self.snapshot(self.native_schema), self.native_before,
+                                 'Synthetic native sentinel schema changed')
+        finally:
+            try:
+                with self.connect() as connection:
+                    for schema in reversed(self.schemas):
+                        if not re.fullmatch(r'mlocal_aux_test_[a-z0-9_]+', schema):
+                            raise ValueError('Refusing cleanup outside owned test schemas')
+                        connection.execute(self.sql.SQL('DROP SCHEMA {} CASCADE').format(self.sql.Identifier(schema)))
+            finally:
+                self.temporary.cleanup()
+
+    def jpeg(self, color):
+        output = io.BytesIO()
+        self.Image.new('RGB', (32, 32), color).save(output, format='JPEG', quality=82)
+        return output.getvalue()
+
+    def _make_originals(self):
+        self.old = self.CodeStore(self.legacy, clock=lambda: self.now)
+        self.old.remember_account(ACTOR, 'owner@example.test', 'business', 'Fixture owner')
+        self.old.remember_account(STUDENT, 'legacy@umich.edu', 'student', 'Fixture student')
+        self.old.remember_account(OTHER, 'other@example.test', 'business', 'Other owner')
+        self.old.save_display_name('d' * 32, 'Fixture demo preference')
+        self.old.provisioning('pending@example.test', 'business', 'Pending fixture')
+        self.fields = {'name': 'Fixture cafe', 'address': '123 Test St',
+                       'cuisine': 'Fixture', 'description': 'Synthetic only',
+                       'image_url': '/static/photos/' + PHOTO_A, 'menu_text': 'Soup'}
+        self.old.save_draft(ACTOR, self.fields)
+        self.old.approve_business(ACTOR, 'Fixture reviewer', 'Verified synthetic authority',
+                                  self.business_revision(self.fields))
+        self.old.reserve_business(ACTOR)
+        self.old.activate_business(ACTOR, self.fields)
+        self.old.change_business_status(ACTOR, 'suspended', 'Fixture reviewer', 'Fixture suspension', 0, '0' * 29 + '101')
+        self.old.change_business_status(ACTOR, 'active', 'Fixture reviewer', 'Fixture reinstatement', 1, '0' * 29 + '102')
+        self.old.reserve_import(ACTOR)
+        self.old.request('legacy', 'student', 'Fixture student', lambda email, code: None)
+        with self.old.transaction() as database:
+            database.execute('UPDATE business_reviews SET id=41')
+        self.code_key = (self.legacy / 'code.key').read_bytes()
+        self.native_key = b'fixture-original-native-jwt-signing-material'
+        (self.legacy / 'jwt_secret').write_bytes(self.native_key)
+        self.photos_dir = self.legacy / 'photos'
+        self.photos_dir.mkdir()
+        self.jpeg_a, self.jpeg_b = self.jpeg('red'), self.jpeg('blue')
+        with sqlite3.connect(self.legacy / 'photo-ownership.sqlite3') as database:
+            database.execute('CREATE TABLE photos (filename TEXT PRIMARY KEY, actor TEXT NOT NULL, digest TEXT NOT NULL, bytes INTEGER NOT NULL, created REAL NOT NULL, UNIQUE(actor,digest))')
+            for filename, actor, data in ((PHOTO_A, ACTOR, self.jpeg_a), (PHOTO_B, OTHER, self.jpeg_b)):
+                (self.photos_dir / filename).write_bytes(data)
+                database.execute('INSERT INTO photos VALUES (?,?,?,?,?)',
+                                 (filename, actor, hashlib.sha256(data).hexdigest(), len(data), self.now))
+
+    def import_from(self, original=None):
+        original = original or self.legacy
+        return self.backend.import_legacy(original / 'onboarding.sqlite3',
+                                          original / 'photo-ownership.sqlite3', original / 'photos',
+                                          original / 'code.key', original / 'jwt_secret')
+
+    def state(self):
+        state = self.backend.code_store(self.CodeStore, self.runtime, clock=lambda: self.now)
+        self.assertIs(type(state), self.CodeStore)
+        self.assertEqual(state.key, self.code_key)
+        self.assertFalse((self.runtime / 'onboarding.sqlite3').exists())
+        return state
+
+    def snapshot(self, schema):
+        with self.connect() as connection:
+            names = connection.execute('SELECT tablename FROM pg_tables WHERE schemaname=%s ORDER BY tablename', (schema,)).fetchall()
+            return {name: sorted(repr(tuple(row)) for row in connection.execute(
+                self.sql.SQL('SELECT * FROM {}.{}').format(self.sql.Identifier(schema), self.sql.Identifier(name))))
+                    for (name,) in names}
+
+    def rows(self, table, columns='*'):
+        with self.connect() as connection:
+            query = self.sql.SQL('SELECT {} FROM {}.{}').format(
+                self.sql.SQL(columns), self.sql.Identifier(self.schema), self.sql.Identifier(table))
+            return connection.execute(query).fetchall()
+
+    def key_cells(self):
+        """Independent SQL BYTEA readback, without depending on the key table name."""
+        found = []
+        with self.connect() as connection:
+            columns = connection.execute(
+                "SELECT table_name,column_name FROM information_schema.columns "
+                "WHERE table_schema=%s AND data_type='bytea' AND table_name!='photos'",
+                (self.schema,)).fetchall()
+            for table, column in columns:
+                query = self.sql.SQL('SELECT {} FROM {}.{} WHERE {} IN (%s,%s)').format(
+                    self.sql.Identifier(column), self.sql.Identifier(self.schema),
+                    self.sql.Identifier(table), self.sql.Identifier(column))
+                for (value,) in connection.execute(query, (self.code_key, self.native_key)):
+                    found.append((table, column, bytes(value)))
+        return found
+
+    def parallel(self, count, action):
+        barrier = threading.Barrier(count, timeout=15)
+        def invoke(index):
+            barrier.wait()
+            return action(index)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=count) as pool:
+            return list(pool.map(invoke, range(count)))
+
+    def test_import_preserves_all_tables_keys_photos_and_exact_replay(self):
+        receipt = self.import_from()
+        self.assertRegex(receipt['digest'], r'^[0-9a-f]{64}$')
+        self.assertIsInstance(receipt['summary'], dict)
+        with sqlite3.connect(self.legacy / 'onboarding.sqlite3') as original:
+            for table in TABLES:
+                with self.subTest(table=table):
+                    expected = sorted(repr(tuple(row)) for row in original.execute('SELECT * FROM ' + table))
+                    self.assertEqual(sorted(repr(tuple(row)) for row in self.rows(table)), expected)
+                    self.assertTrue(expected, 'Each legacy application table must be represented')
+        self.assertEqual(self.backend.signing_material(), {'code_key': self.code_key, 'native_key': self.native_key})
+        self.assertCountEqual([value for table, column, value in self.key_cells()],
+                              [self.code_key, self.native_key])
+        self.assertEqual(self.state().digest('fixture-challenge', '123456'),
+                         hmac.new(self.code_key, b'fixture-challenge:123456', hashlib.sha256).hexdigest())
+        photos = self.rows('photos', "filename,actor,digest,bytes,created,content")
+        self.assertEqual({row[0] for row in photos}, {PHOTO_A, PHOTO_B})
+        with sqlite3.connect(self.legacy / 'photo-ownership.sqlite3') as original:
+            metadata = {row[0]: tuple(row) for row in original.execute('SELECT filename,actor,digest,bytes,created FROM photos')}
+        for filename, actor, digest, length, created, content in photos:
+            self.assertEqual((filename, actor, digest, length, created), metadata[filename])
+            expected = (self.photos_dir / filename).read_bytes()
+            self.assertEqual(bytes(content), expected)
+            self.assertEqual((digest, length, created), (hashlib.sha256(expected).hexdigest(), len(expected), self.now))
+        before = self.snapshot(self.schema)
+        replay = self.import_from()
+        self.assertEqual((replay['digest'], replay['summary']), (receipt['digest'], receipt['summary']))
+        self.assertEqual(self.snapshot(self.schema), before)
+
+    def test_conflicting_import_does_not_replace_any_state(self):
+        self.import_from()
+        before = self.snapshot(self.schema)
+        variant = self.work / 'conflicting-originals'
+        shutil.copytree(self.legacy, variant)
+        (variant / 'code.key').write_bytes(b'x' * 32)
+        variant_before = hashes(variant)
+        with self.assertRaises((ValueError, RuntimeError)):
+            self.import_from(variant)
+        self.assertEqual(self.snapshot(self.schema), before)
+        self.assertEqual(hashes(variant), variant_before)
+
+    def test_incomplete_legacy_suspension_audit_is_refused_atomically(self):
+        variant = self.work / 'incomplete-originals'
+        shutil.copytree(self.legacy, variant)
+        with sqlite3.connect(variant / 'onboarding.sqlite3') as database:
+            database.execute('DROP TABLE business_status_events')
+        variant_before, target_before = hashes(variant), self.snapshot(self.schema)
+        with self.assertRaises((ValueError, RuntimeError)):
+            self.import_from(variant)
+        self.assertEqual(self.snapshot(self.schema), target_before)
+        self.assertEqual(hashes(variant), variant_before)
+
+    def test_source_status_latest_audit_mismatch_is_refused_atomically(self):
+        variant = self.work / 'inconsistent-originals'
+        shutil.copytree(self.legacy, variant)
+        with sqlite3.connect(variant / 'onboarding.sqlite3') as database:
+            database.execute('UPDATE business_status SET revision=revision+1')
+        variant_before, target_before = hashes(variant), self.snapshot(self.schema)
+        with self.assertRaises((ValueError, RuntimeError)):
+            self.import_from(variant)
+        self.assertEqual(self.snapshot(self.schema), target_before)
+        self.assertEqual(hashes(variant), variant_before)
+
+    def test_incompatible_source_and_established_target_versions_refuse_without_mutation(self):
+        variant = self.work / 'unsupported-version-originals'
+        shutil.copytree(self.legacy, variant)
+        with sqlite3.connect(variant / 'onboarding.sqlite3') as database:
+            database.execute('PRAGMA user_version=2')
+        variant_before, target_before = hashes(variant), self.snapshot(self.schema)
+        with self.assertRaises((ValueError, RuntimeError)):
+            self.import_from(variant)
+        self.assertEqual(hashes(variant), variant_before)
+        self.assertEqual(self.snapshot(self.schema), target_before)
+
+        self.import_from()
+        for column in ('schema_version', 'legacy_version'):
+            with self.subTest(target_version_column=column):
+                with self.connect() as connection:
+                    connection.execute(self.sql.SQL('UPDATE {}.auxiliary_state SET {}=2 WHERE id=1').format(
+                        self.sql.Identifier(self.schema), self.sql.Identifier(column)))
+                before = self.snapshot(self.schema)
+                with self.assertRaises((ValueError, RuntimeError)):
+                    self.backend.initialize()
+                self.assertEqual(self.snapshot(self.schema), before)
+                with self.assertRaises((ValueError, RuntimeError)):
+                    with self.backend.transaction():
+                        self.fail('An incompatible established schema admitted a transaction')
+                self.assertEqual(self.snapshot(self.schema), before)
+                with self.assertRaises((ValueError, RuntimeError)):
+                    self.import_from()
+                self.assertEqual(self.snapshot(self.schema), before)
+                with self.connect() as connection:
+                    connection.execute(self.sql.SQL('UPDATE {}.auxiliary_state SET {}=1 WHERE id=1').format(
+                        self.sql.Identifier(self.schema), self.sql.Identifier(column)))
+
+    def test_exact_import_replay_refuses_target_business_divergence(self):
+        self.import_from()
+        self.state().save_draft(ACTOR, {**self.fields, 'description': 'A later legitimate fixture write'})
+        before = self.snapshot(self.schema)
+        with self.assertRaises((ValueError, RuntimeError)):
+            self.import_from()
+        self.assertEqual(self.snapshot(self.schema), before)
+
+    def test_exact_import_replay_refuses_target_key_divergence(self):
+        self.import_from()
+        cells = [cell for cell in self.key_cells() if cell[2] == self.code_key]
+        self.assertEqual(len(cells), 1, 'Original code key must have one independently readable BYTEA value')
+        table, column, value = cells[0]
+        changed = bytes([value[0] ^ 1]) + value[1:]
+        with self.connect() as connection:
+            connection.execute(self.sql.SQL('UPDATE {}.{} SET {}=%s WHERE {}=%s').format(
+                self.sql.Identifier(self.schema), self.sql.Identifier(table),
+                self.sql.Identifier(column), self.sql.Identifier(column)), (changed, value))
+        before = self.snapshot(self.schema)
+        with self.assertRaises((ValueError, RuntimeError)):
+            self.import_from()
+        self.assertEqual(self.snapshot(self.schema), before)
+
+    def test_exact_import_replay_refuses_target_photo_divergence(self):
+        self.import_from()
+        changed = self.jpeg('purple')
+        with self.connect() as connection:
+            connection.execute(self.sql.SQL('UPDATE {}.photos SET content=%s,digest=%s,bytes=%s WHERE filename=%s').format(
+                self.sql.Identifier(self.schema)),
+                (changed, hashlib.sha256(changed).hexdigest(), len(changed), PHOTO_A))
+        before = self.snapshot(self.schema)
+        with self.assertRaises((ValueError, RuntimeError)):
+            self.import_from()
+        self.assertEqual(self.snapshot(self.schema), before)
+
+    def test_transaction_rows_rowcount_and_failure_rollback(self):
+        self.import_from()
+        with self.backend.transaction() as database:
+            row = database.execute('SELECT actor,email,kind,name FROM accounts WHERE actor=?', (ACTOR,)).fetchone()
+            self.assertEqual(row[0], row['actor'])
+            self.assertEqual(dict(row)['email'], 'owner@example.test')
+            self.assertEqual(len(database.execute('SELECT actor FROM accounts').fetchall()), 3)
+            self.assertEqual(database.execute('UPDATE accounts SET name=? WHERE actor=?', ('Updated', ACTOR)).rowcount, 1)
+            self.assertEqual(database.execute('UPDATE accounts SET name=? WHERE actor=?', ('Absent', 'f' * 32)).rowcount, 0)
+        before = self.snapshot(self.schema)
+        with self.assertRaisesRegex(ValueError, 'fixture rollback'):
+            with self.backend.transaction() as database:
+                database.execute('UPDATE accounts SET name=? WHERE actor=?', ('Abandoned', ACTOR))
+                raise ValueError('fixture rollback')
+        self.assertEqual(self.snapshot(self.schema), before)
+        self.assertEqual(self.state().account(ACTOR)['name'], 'Updated')
+
+    def test_actual_codestore_eight_way_otp_consumption_has_one_winner(self):
+        self.import_from()
+        sent = []
+        result = self.state().request('freshfixture', 'student', 'Fixture', lambda email, code: sent.append(code))
+        def consume(_):
+            try:
+                return self.state().consume(result['challenge'], sent[0])['email']
+            except ValueError:
+                return None
+        self.assertEqual(self.parallel(8, consume).count('freshfixture@umich.edu'), 1)
+
+    def test_actual_codestore_failed_delivery_and_attempt_expiry_limits(self):
+        self.import_from()
+        state, baseline = self.state(), self.state().pending_count()
+        def failed(email, code):
+            raise OSError('synthetic SMTP sink failure')
+        with self.assertRaisesRegex(ValueError, 'could not send'):
+            state.request('failedfixture', 'student', 'Fixture', failed)
+        self.assertEqual(state.pending_count(), baseline)
+        self.assertEqual(len(self.rows('sends')), 2, 'Failed delivery must retain its reservation')
+        sent = []
+        result = state.request('attemptfixture', 'student', 'Fixture', lambda email, code: sent.append(code))
+        wrong = '000000' if sent[0] != '000000' else '111111'
+        for _ in range(5):
+            with self.assertRaises(ValueError):
+                state.consume(result['challenge'], wrong)
+        with self.assertRaises(ValueError):
+            state.consume(result['challenge'], sent[0])
+        self.now += 61
+        result = state.request('attemptfixture', 'student', 'Fixture', lambda email, code: sent.append(code))
+        self.now += 601
+        with self.assertRaises(ValueError):
+            state.consume(result['challenge'], sent[-1])
+
+    def test_actual_codestore_hourly_and_daily_quota_races_do_not_overshoot(self):
+        self.import_from()
+        for name, count, age, ceiling in (('hourly', 59, 0, 60), ('daily', 299, 7200, 300)):
+            with self.subTest(quota=name):
+                with self.backend.transaction() as database:
+                    database.execute('DELETE FROM sends')
+                    database.execute('DELETE FROM codes')
+                    for index in range(count):
+                        database.execute('INSERT INTO sends VALUES (?,?)', (f'seed{index}@example.test', self.now - age))
+                delivered = []
+                def request(index):
+                    try:
+                        self.state().request(f'{name}fixture{index}', 'student', 'Fixture', lambda email, code: delivered.append(email))
+                        return True
+                    except ValueError:
+                        return False
+                self.assertEqual(self.parallel(2, request).count(True), 1)
+                self.assertEqual(len(delivered), 1)
+                self.assertEqual(len(self.rows('sends')), ceiling)
+
+    def test_actual_codestore_provisioning_approval_and_review_sequence(self):
+        self.import_from()
+        state = self.state()
+        first = state.provisioning('fresh-owner@example.test', 'business', 'Original name')
+        self.assertEqual(state.provisioning('fresh-owner@example.test', 'student', 'Changed name'), first)
+        state.remember_account('e' * 32, 'fresh-owner@example.test', 'business', 'Original name')
+        self.assertEqual(state.provisioning('fresh-owner@example.test'), {})
+        self.assertEqual(state.reserve_business(ACTOR), 'business-' + ACTOR)
+        changed = {**self.fields, 'name': 'Reviewed fixture name'}
+        state.save_draft(ACTOR, changed)
+        with self.assertRaises(ValueError):
+            state.approve_business(ACTOR, 'Fixture reviewer', 'Stale submission', self.business_revision(self.fields))
+        revision = self.business_revision(changed)
+        state.approve_business(ACTOR, 'Fixture reviewer', 'Fresh fixture review', revision)
+        state.approve_business(ACTOR, 'Fixture reviewer', 'Exact identity retry', revision)
+        reviews = self.rows('business_reviews')
+        self.assertEqual(len(reviews), 2)
+        self.assertGreater(max(row[0] for row in reviews), 41)
+        self.assertEqual(state.activate_business(ACTOR, changed)['name'], changed['name'])
+
+    def test_actual_codestore_suspension_exact_retry_and_stale_commands(self):
+        self.import_from()
+        command = '0' * 29 + '201'
+        def suspend(_):
+            return self.state().change_business_status(ACTOR, 'suspended', 'Fixture reviewer', 'New fixture complaint', 2, command)
+        results = self.parallel(8, suspend)
+        self.assertTrue(all(result == results[0] for result in results))
+        self.assertEqual(len(self.state().business_status_events(ACTOR)), 3)
+        self.state().change_business_status(ACTOR, 'active', 'Fixture reviewer', 'Fixture resolved', 3, '0' * 29 + '202')
+        self.assertEqual(suspend(0), results[0])
+        self.assertEqual(self.state().business_status(ACTOR)['revision'], 4)
+        with self.assertRaises(ValueError):
+            self.state().change_business_status(ACTOR, 'active', 'Fixture reviewer', 'Changed command payload', 2, command)
+        with self.assertRaises(ValueError):
+            self.state().change_business_status(ACTOR, 'suspended', 'Fixture reviewer', 'Stale revision', 3, '0' * 29 + '203')
+
+    def test_missing_established_audit_fails_closed_without_recreation(self):
+        self.import_from()
+        with self.connect() as connection:
+            connection.execute(self.sql.SQL('DROP TABLE {}.business_status_events').format(self.sql.Identifier(self.schema)))
+        before = self.snapshot(self.schema)
+        with self.assertRaises((ValueError, RuntimeError)):
+            self.state().business_status(ACTOR)
+        with self.assertRaises((ValueError, RuntimeError)):
+            self.backend.initialize()
+        with self.assertRaises((ValueError, RuntimeError)):
+            self.import_from()
+        self.assertEqual(self.snapshot(self.schema), before)
+
+    def test_target_status_latest_audit_mismatch_fails_closed(self):
+        self.import_from()
+        with self.connect() as connection:
+            connection.execute(self.sql.SQL('UPDATE {}.business_status SET revision=revision+1').format(
+                self.sql.Identifier(self.schema)))
+        before = self.snapshot(self.schema)
+        with self.assertRaises((ValueError, RuntimeError)):
+            self.state().business_status(ACTOR)
+        with self.assertRaises((ValueError, RuntimeError)):
+            self.backend.initialize()
+        with self.assertRaises((ValueError, RuntimeError)):
+            self.import_from()
+        self.assertEqual(self.snapshot(self.schema), before)
+
+    def test_photo_defaults_dedup_ownership_and_reopen_retry(self):
+        self.import_from()
+        self.assertEqual((self.module.PHOTO_MAX_BYTES, self.module.PHOTO_ACTOR_MAX_BYTES,
+                          self.module.PHOTO_TOTAL_MAX_BYTES, self.module.PHOTO_DAILY_LIMIT),
+                         (8 * 1024 * 1024, 32 * 1024 * 1024, 512 * 1024 * 1024, 30))
+        jpeg = self.jpeg('green')
+        filename = self.backend.photo_save(ACTOR, '3' * 32 + '.jpg', jpeg, self.now)
+        self.assertEqual(filename, '3' * 32 + '.jpg')
+        reopened = self.module.PostgresAuxiliary(self.dsn, self.schema)
+        # Simulate loss of the successful caller result, not COMMIT wire acknowledgement loss.
+        self.assertEqual(reopened.photo_save(ACTOR, '4' * 32 + '.jpg', jpeg, self.now + 1), filename)
+        self.assertTrue(reopened.photo_owned(filename, ACTOR))
+        self.assertFalse(reopened.photo_owned(filename, OTHER))
+        self.assertFalse(reopened.photo_owned('../' + filename, ACTOR))
+        self.assertEqual(reopened.photo_save(OTHER, '5' * 32 + '.jpg', jpeg, self.now), '5' * 32 + '.jpg')
+        self.assertEqual(len(self.rows('photos')), 4)
+        with patch.object(self.module, 'PHOTO_DAILY_LIMIT', 0):
+            self.assertEqual(reopened.photo_save(ACTOR, '7' * 32 + '.jpg', jpeg, self.now + 1), filename,
+                             'An exact deduplication retry must precede new-upload quota checks')
+        with self.assertRaises((ValueError, RuntimeError)):
+            reopened.photo_save(ACTOR, '6' * 32 + '.jpg', b'x' * (8 * 1024 * 1024 + 1), self.now)
+
+    def test_photo_filename_collision_and_cache_path_inputs_are_refused(self):
+        self.import_from()
+        before = self.snapshot(self.schema)
+        for actor, filename in ((OTHER, PHOTO_A), (ACTOR, PHOTO_A),
+                                (ACTOR, '../escape.jpg'), (ACTOR, '/tmp/escape.jpg'),
+                                (ACTOR, 'A' * 32 + '.jpg'), (ACTOR, '3' * 32 + '.png')):
+            with self.subTest(actor=actor, filename=filename), self.assertRaises((ValueError, RuntimeError)):
+                self.backend.photo_save(actor, filename, self.jpeg('green'), self.now)
+        self.assertEqual(self.snapshot(self.schema), before)
+
+    def test_photo_dedup_refuses_inconsistent_existing_bytes(self):
+        self.import_from()
+        with self.connect() as connection:
+            # Same length permits a length CHECK while breaking the preserved digest.
+            connection.execute(self.sql.SQL('UPDATE {}.photos SET content=set_byte(content,0,0) WHERE filename=%s').format(
+                self.sql.Identifier(self.schema)), (PHOTO_A,))
+        before = self.snapshot(self.schema)
+        with self.assertRaises((ValueError, RuntimeError)):
+            self.backend.photo_save(ACTOR, '3' * 32 + '.jpg', self.jpeg_a, self.now)
+        self.assertEqual(self.snapshot(self.schema), before)
+
+    def photo_quota_race(self, constant):
+        self.import_from()
+        candidates = (self.jpeg('green'), self.jpeg('yellow'))
+        existing = self.rows('photos', 'actor,bytes,created')
+        allowance = max(map(len, candidates))
+        boundary = {'PHOTO_ACTOR_MAX_BYTES': sum(row[1] for row in existing if row[0] == ACTOR) + allowance,
+                    'PHOTO_TOTAL_MAX_BYTES': sum(row[1] for row in existing) + allowance,
+                    'PHOTO_DAILY_LIMIT': sum(row[0] == ACTOR for row in existing) + 1}[constant]
+        def save(index):
+            try:
+                return self.backend.photo_save(ACTOR, str(index + 3) * 32 + '.jpg', candidates[index], self.now)
+            except ValueError:
+                return None
+        with patch.object(self.module, constant, boundary):
+            self.assertEqual(sum(value is not None for value in self.parallel(2, save)), 1)
+        rows = self.rows('photos', 'actor,bytes,content')
+        self.assertEqual(len(rows), 3)
+        self.assertTrue(all(length == len(content) for actor, length, content in rows))
+
+    def test_photo_actor_byte_quota_race(self):
+        self.photo_quota_race('PHOTO_ACTOR_MAX_BYTES')
+
+    def test_photo_global_byte_quota_race(self):
+        self.photo_quota_race('PHOTO_TOTAL_MAX_BYTES')
+
+    def test_photo_daily_quota_race(self):
+        self.photo_quota_race('PHOTO_DAILY_LIMIT')
+
+    def test_photo_insert_failure_rolls_back_and_cache_reconstructs(self):
+        self.import_from()
+        before = self.snapshot(self.schema)
+        with self.connect() as connection:
+            connection.execute(self.sql.SQL("CREATE FUNCTION {}.reject_photo() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic photo write failure'; END $$").format(self.sql.Identifier(self.schema)))
+            connection.execute(self.sql.SQL('CREATE TRIGGER reject_photo BEFORE INSERT ON {}.photos FOR EACH ROW EXECUTE FUNCTION {}.reject_photo()').format(self.sql.Identifier(self.schema), self.sql.Identifier(self.schema)))
+        with self.assertRaises((ValueError, RuntimeError, self.psycopg.Error)):
+            self.backend.photo_save(ACTOR, '3' * 32 + '.jpg', self.jpeg('green'), self.now)
+        self.assertEqual(self.snapshot(self.schema), before)
+        with self.connect() as connection:
+            connection.execute(self.sql.SQL('DROP TRIGGER reject_photo ON {}.photos').format(self.sql.Identifier(self.schema)))
+        self.backend.photo_save(ACTOR, '3' * 32 + '.jpg', self.jpeg('green'), self.now)
+        cache = self.work / 'cache'
+        self.backend.materialize_photos(cache)
+        expected = {filename: hashlib.sha256(bytes(content)).hexdigest()
+                    for filename, content in self.rows('photos', 'filename,content')}
+        self.assertEqual(hashes(cache), expected)
+        retained = self.snapshot(self.schema)
+        shutil.rmtree(cache)
+        self.module.PostgresAuxiliary(self.dsn, self.schema).materialize_photos(cache)
+        self.assertEqual(hashes(cache), expected)
+        self.assertEqual(self.snapshot(self.schema), retained)
+
+    def test_late_import_sql_failure_rolls_back_all_staged_state(self):
+        before = self.snapshot(self.schema)
+        def sequences():
+            with self.connect() as connection:
+                names = connection.execute('SELECT sequencename FROM pg_sequences WHERE schemaname=%s ORDER BY sequencename', (self.schema,)).fetchall()
+                return {name: connection.execute(self.sql.SQL('SELECT last_value,is_called FROM {}.{}').format(
+                    self.sql.Identifier(self.schema), self.sql.Identifier(name))).fetchone() for (name,) in names}
+        sequences_before = sequences()
+        with self.connect() as connection:
+            connection.execute(self.sql.SQL("""
+                CREATE FUNCTION {schema}.reject_late_import() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN
+                    IF (SELECT COUNT(*) FROM {schema}.accounts) != 3
+                       OR (SELECT COUNT(*) FROM {schema}.signing_material) != 2
+                       OR (SELECT COUNT(*) FROM {schema}.photos) != 2 THEN
+                        RAISE EXCEPTION 'late trigger did not observe staged fixture rows';
+                    END IF;
+                    RAISE EXCEPTION 'synthetic late import rollback' USING ERRCODE='PZ001';
+                END $$
+            """).format(schema=self.sql.Identifier(self.schema)))
+            connection.execute(self.sql.SQL('CREATE TRIGGER reject_late_import BEFORE UPDATE OF import_digest ON {}.auxiliary_state FOR EACH ROW EXECUTE FUNCTION {}.reject_late_import()').format(
+                self.sql.Identifier(self.schema), self.sql.Identifier(self.schema)))
+        with self.assertRaises(self.psycopg.Error) as refused:
+            self.import_from()
+        self.assertEqual(refused.exception.sqlstate, 'PZ001', 'Failure must follow all staged onboarding/key/photo writes')
+        self.assertEqual(self.snapshot(self.schema), before)
+        self.assertEqual(sequences(), sequences_before, 'Failed import changed a preserved sequence')
+        self.assertEqual(hashes(self.legacy), self.original_hashes)
+
+    def test_independent_sql_row_lock_blocks_another_backend_transaction(self):
+        self.import_from()
+        before = self.snapshot(self.schema)
+        locker = self.connect()
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        entered, started = threading.Event(), threading.Event()
+        other = self.module.PostgresAuxiliary(self.dsn, self.schema)
+        locker.execute(self.sql.SQL('SELECT id FROM {}.auxiliary_state WHERE id=1 FOR UPDATE').format(
+            self.sql.Identifier(self.schema)))
+        locker_pid = locker.info.backend_pid
+        def attempt():
+            started.set()
+            with other.transaction() as database:
+                entered.set()
+                return database.execute('SELECT COUNT(*) FROM accounts').fetchone()[0]
+        pending = pool.submit(attempt)
+        observed = False
+        try:
+            self.assertTrue(started.wait(2), 'Independent backend worker did not start')
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                with self.connect() as observer:
+                    observed = bool(observer.execute(
+                        "SELECT 1 FROM pg_stat_activity WHERE datname=current_database() "
+                        "AND wait_event_type='Lock' AND %s=ANY(pg_blocking_pids(pid))",
+                        (locker_pid,)).fetchone())
+                if observed:
+                    break
+                time.sleep(0.02)
+            self.assertTrue(observed, 'PostgreSQL did not observe the independent row-lock wait')
+            self.assertFalse(entered.is_set(), 'Auxiliary transaction bypassed the database row lock')
+        finally:
+            locker.rollback()
+            locker.close()
+            try:
+                self.assertEqual(pending.result(timeout=10), 3)
+            finally:
+                pool.shutdown(wait=True, cancel_futures=True)
+        self.assertTrue(entered.is_set())
+        self.assertEqual(self.snapshot(self.schema), before)
+
+    def test_materialization_refuses_originals_and_every_nonempty_cache_before_writes(self):
+        self.import_from()
+        other_cache = self.work / 'nonempty-cache'
+        other_cache.mkdir()
+        (other_cache / ('9' * 32 + '.jpg')).write_bytes(self.jpeg('purple'))
+        def stats(directory):
+            # Reading files can update atime; compare the mutation-relevant stat fields.
+            result = {}
+            for path in (directory, *sorted(directory.rglob('*'))):
+                value = path.lstat()
+                result[str(path.relative_to(directory))] = (
+                    value.st_mode, value.st_size, value.st_mtime_ns, value.st_ctime_ns,
+                    value.st_ino, value.st_dev, value.st_nlink)
+            return result
+        target_before = self.snapshot(self.schema)
+        for directory in (self.photos_dir, other_cache):
+            with self.subTest(directory=directory.name):
+                bytes_before, stat_before = hashes(directory), stats(directory)
+                with self.assertRaises((ValueError, RuntimeError)):
+                    self.backend.materialize_photos(directory)
+                self.assertEqual(hashes(directory), bytes_before)
+                self.assertEqual(stats(directory), stat_before)
+        self.assertEqual(self.snapshot(self.schema), target_before)
+
+    def test_header_verified_but_truncated_jpeg_is_refused_without_mutation(self):
+        truncated = None
+        for trim in range(2, min(64, len(self.jpeg_a))):
+            candidate = self.jpeg_a[:-trim]
+            try:
+                with self.Image.open(io.BytesIO(candidate)) as image:
+                    image.verify()
+            except (OSError, ValueError):
+                continue
+            try:
+                with patch('PIL.ImageFile.LOAD_TRUNCATED_IMAGES', False):
+                    with self.Image.open(io.BytesIO(candidate)) as image:
+                        image.load()
+            except OSError:
+                truncated = candidate
+                break
+        self.assertIsNotNone(truncated, 'Fixture must pass header verification but fail pixel decoding')
+        variant = self.work / 'truncated-photo-originals'
+        shutil.copytree(self.legacy, variant)
+        (variant / 'photos' / PHOTO_A).write_bytes(truncated)
+        with sqlite3.connect(variant / 'photo-ownership.sqlite3') as database:
+            database.execute('UPDATE photos SET digest=?,bytes=? WHERE filename=?',
+                             (hashlib.sha256(truncated).hexdigest(), len(truncated), PHOTO_A))
+        variant_before, before = hashes(variant), self.snapshot(self.schema)
+        with self.assertRaises((ValueError, RuntimeError)):
+            self.import_from(variant)
+        self.assertEqual(hashes(variant), variant_before)
+        self.assertEqual(self.snapshot(self.schema), before)
+        self.import_from()
+        before = self.snapshot(self.schema)
+        with self.assertRaises((ValueError, RuntimeError)):
+            self.backend.photo_save(ACTOR, '3' * 32 + '.jpg', truncated, self.now)
+        self.assertEqual(self.snapshot(self.schema), before)
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)

@@ -64,6 +64,37 @@ jobs:
           if [[ -f scripts/test-monitoring.sh ]]; then bash scripts/test-monitoring.sh; fi
       - name: Test deployment source and data separation
         run: python3 -m unittest discover -s tests/tooling -p 'test_*.py'
+      - name: Prove PostgreSQL auxiliary preservation and concurrency
+        timeout-minutes: 8
+        shell: bash
+        run: |
+          set -euo pipefail
+          source scripts/runtime.sh
+          proof="$RUNNER_TEMP/auxiliary-proof"
+          test ! -e "$proof"
+          mkdir -m 700 "$proof" "$proof/tmp" "$proof/socket"
+          export MLOCAL_AUXILIARY_DRIVER_SITE="$proof/driver"
+          # Install for the pinned Jac interpreter, not the runner's Python ABI.
+          python3 -m pip install --disable-pip-version-check --no-input \
+            --target "$MLOCAL_AUXILIARY_DRIVER_SITE" --only-binary=:all: \
+            --python-version 3.14 --implementation cp --abi cp314 \
+            -r tests/integration/postgres-auxiliary-requirements.txt
+          unset PGHOSTADDR PGSERVICE PGSERVICEFILE
+          export PGPASSFILE=/dev/null
+          pg_bin=/usr/lib/postgresql/16/bin
+          test -x "$pg_bin/initdb"
+          port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
+          "$pg_bin/initdb" -D "$proof/postgres" --auth=trust --no-locale --encoding=UTF8
+          trap '"$pg_bin/pg_ctl" -D "$proof/postgres" -m fast -w stop' EXIT
+          "$pg_bin/pg_ctl" -D "$proof/postgres" -l "$proof/postgres.log" \
+            -o "-h 127.0.0.1 -p $port -k $proof/socket -c shared_buffers=16MB -c max_connections=24" -w start
+          "$pg_bin/createdb" -h 127.0.0.1 -p "$port" -U "$(id -un)" mlocal_aux_test_ci
+          export TMPDIR="$proof/tmp"
+          export MLOCAL_AUXILIARY_TEST_DSN="postgresql://$(id -un)@127.0.0.1:$port/mlocal_aux_test_ci"
+          export MLOCAL_AUXILIARY_TEST_SCHEMA=mlocal_aux_test_ci
+          # -c/runpy avoids the pinned executable's direct-file project takeover.
+          bash scripts/python.sh -c \
+            'import os,runpy,sys; sys.path.insert(0,os.environ["MLOCAL_AUXILIARY_DRIVER_SITE"]); sys.argv=["tests/integration/test_postgres_auxiliary.py","-v"]; runpy.run_path(sys.argv[0],run_name="__main__")'
       - name: Build compiled app and client dependencies
         run: ./scripts/build.sh
       - name: Run gateway and UI unit tests
