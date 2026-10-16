@@ -631,10 +631,10 @@ def existing_store() -> CodeStore {
 
 def registered_business_owner(slug: str) -> str {
     selected = _selected_store();
-    if selected is not None { return selected.business_owner(slug); }
     if not re.fullmatch(r"business-[0-9a-f]{32}", slug) {
         return "";
     }
+    if selected is not None { return selected.business_owner(slug); }
     try {
         directory = Path(os.environ.get("MLOCAL_ONBOARDING_DIR", ".jac/onboarding")).resolve();
         if len((directory / "code.key").read_bytes()) != 32 { return ""; }
