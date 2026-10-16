@@ -29,17 +29,22 @@ def client_libraries(tools):
 
 def installed_driver(app, environment, workspace, check):
     """Fail as an assertion before starting PostgreSQL if normal deps lack SQL."""
-    program = '''import json,sys
+    program = '''import hashlib,json,sys
 from pathlib import Path
 import psycopg
 from psycopg import pq
+from psycopg_binary import pq as binary_pq, _psycopg as binary_c
 root=Path.cwd()/".jac/venv"
 module=Path(psycopg.__file__).resolve()
 assert Path(sys.prefix).resolve()==root.resolve()
 assert module.is_relative_to((root/"lib").resolve())
 assert psycopg.__version__=="3.3.6" and pq.__impl__=="binary"
+assert pq.PGconn is binary_pq.PGconn
+extensions=[Path(module.__file__).resolve() for module in (binary_pq,binary_c)]
+assert all(path.is_relative_to((root/"lib").resolve()) for path in extensions)
 print(json.dumps({"version":psycopg.__version__,"implementation":pq.__impl__,
-                  "relative_module":str(module.relative_to(root.resolve()))}))
+                  "relative_module":str(module.relative_to(root.resolve())),
+                  "extensions":{str(path.relative_to(root.resolve())):hashlib.sha256(path.read_bytes()).hexdigest() for path in extensions}}))
 '''
     result = subprocess.run([str(app / '.jac/venv/bin/python'), '-c', program], cwd=app,
                             env=environment, capture_output=True, timeout=30)
