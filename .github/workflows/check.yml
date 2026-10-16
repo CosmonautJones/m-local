@@ -38,32 +38,6 @@ jobs:
           "$JAC_BIN" install
       - name: Check Jac sources
         run: ./scripts/check.sh
-      - name: Run core tests
-        run: ./scripts/test.sh core
-      - name: Verify named core test inventory
-        run: python3 scripts/test-inventory.py --core-log .jac/release-core-outcomes.log --binding .jac/release-core-binding.json --output .jac/release-test-inventory.json
-      - name: Run access context tests
-        run: ./scripts/test.sh context
-      - name: Run business insights tests
-        run: ./scripts/test.sh insights
-      - name: Run onboarding security tests
-        run: bash scripts/test.sh onboarding
-      - name: Verify shared onboarding across processes
-        timeout-minutes: 10
-        run: bash scripts/python.sh -m unittest discover -s tests/integration -p test_onboarding_shared.py
-      - name: Test photo normalization and ownership
-        run: bash scripts/python.sh -m unittest tests/photo_media.py
-      - name: Verify business approval over HTTP and after restart
-        run: bash scripts/test-business-approval.sh
-      - name: Verify coordinated recovery and recovered restart
-        timeout-minutes: 22
-        run: GITHUB_SHA="$(git rev-parse HEAD)" bash scripts/test-recovery.sh
-      - name: Verify redacted domain failures and local SMTP quota events
-        timeout-minutes: 17
-        run: |
-          if [[ -f scripts/test-monitoring.sh ]]; then bash scripts/test-monitoring.sh; fi
-      - name: Test deployment source and data separation
-        run: python3 -m unittest discover -s tests/tooling -p 'test_*.py'
       - name: Prove PostgreSQL auxiliary preservation and concurrency
         timeout-minutes: 8
         shell: bash
@@ -76,6 +50,8 @@ jobs:
           evidence=.jac/postgres-auxiliary-proof
           mkdir -p "$evidence"
           : > "$evidence/unittest.log"
+          export MLOCAL_AUXILIARY_OUTCOMES_FILE="$evidence/named-outcomes.jsonl"
+          : > "$MLOCAL_AUXILIARY_OUTCOMES_FILE"
           pg_bin=/usr/lib/postgresql/16/bin
           port= suite_exit=-1 initialized=0 database_created=0
           cleanup() {
@@ -100,14 +76,14 @@ jobs:
             fi
             python3 - "$evidence" "$proof" "$port" "$suite_exit" "$original_exit" \
               "$remaining" "$schema_exit" "$stop_exit" "$status_exit" "$initialized" "$database_created" <<'PY'
-          import ast, errno, hashlib, json, os, re, socket, subprocess, sys
+          import ast, errno, hashlib, json, os, socket, subprocess, sys
           from pathlib import Path
           evidence, proof = map(Path, sys.argv[1:3])
           port, suite_exit, original_exit, remaining, schema_exit, stop_exit, status_exit, initialized, database_created = sys.argv[3:]
-          log = (evidence / 'unittest.log').read_text()
-          named = [{'name': name, 'identity': identity, 'outcome': outcome or 'see_log'}
-                   for name, identity, outcome in re.findall(
-                       r'^(test_\w+) \(([^)\n]+)\) \.\.\. ?(ok|FAIL|ERROR|skipped)?', log, re.M)]
+          events = [json.loads(line) for line in (evidence / 'named-outcomes.jsonl').read_text().splitlines() if line]
+          named = [row for row in events if row.get('event') == 'test']
+          summaries = [row for row in events if row.get('event') == 'summary']
+          summary = summaries[0] if len(summaries) == 1 else {}
           test_source = Path('tests/integration/test_postgres_auxiliary.py')
           test_class = next(node for node in ast.parse(test_source.read_text()).body
                             if isinstance(node, ast.ClassDef) and node.name == 'PostgresAuxiliaryTests')
@@ -118,12 +94,9 @@ jobs:
           inventory_matches = (len(expected_names) == len(expected_pairs) == 27
                                and len(observed_pairs) == len(set(observed_pairs)) == 27
                                and set(observed_pairs) == expected_pairs)
-          summary = re.findall(r'^Ran (\d+) tests? in ([\d.]+)s$', log, re.M)
-          failed = re.search(r'^FAILED \(([^\n]+)\)', log, re.M)
-          counts = {name: int(value) for name, value in re.findall(r'(failures|errors|skipped)=(\d+)', failed[1] if failed else log)}
-          counts.update(run=int(summary[-1][0]) if summary else 0, passed=sum(row['outcome'] == 'ok' for row in named))
-          for name in ('failures', 'errors', 'skipped'):
-              counts.setdefault(name, 0)
+          counts = {name: summary.get(name, 0) for name in
+                    ('run', 'failures', 'errors', 'skipped', 'expected_failures', 'unexpected_successes')}
+          counts['passed'] = sum(row['outcome'] == 'ok' for row in named)
           listener_closed = None
           if initialized == '1' and port:
               with socket.socket() as probe:
@@ -145,8 +118,9 @@ jobs:
                      'tests/integration/test_postgres_auxiliary.py', 'tests/integration/postgres-auxiliary-requirements.txt',
                      '.github/workflows/check.yml', '.jac-version', 'scripts/python.sh', 'scripts/runtime.sh')
           versions = json.loads((evidence / 'versions.json').read_text()) if (evidence / 'versions.json').exists() else None
-          complete = (suite_exit == '0' and counts['run'] == 27 and counts['passed'] == 27
-                      and inventory_matches and not any(counts[name] for name in ('failures', 'errors', 'skipped'))
+          complete = (suite_exit == '0' and summary.get('successful') is True
+                      and counts['run'] == 27 and counts['passed'] == 27 and inventory_matches
+                      and not any(counts[name] for name in ('failures', 'errors', 'skipped', 'expected_failures', 'unexpected_successes'))
                       and versions is not None)
           receipt = {
               'source_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
@@ -158,8 +132,9 @@ jobs:
               'expected_test_count': len(expected_names), 'expected_test_names': expected_names,
               'expected_test_identities': sorted(identity for name, identity in expected_pairs),
               'test_inventory_matches': inventory_matches,
-              'exception_classes': re.findall(r'^(\w+): diagnostic details withheld', log, re.M),
+              'exception_classes': [row['exception_class'] for row in named if row.get('exception_class')],
               'verbose_log_sha256': hashlib.sha256((evidence / 'unittest.log').read_bytes()).hexdigest(),
+              'structured_outcomes_sha256': hashlib.sha256((evidence / 'named-outcomes.jsonl').read_bytes()).hexdigest(),
               'cleanup': cleanup, 'complete_sql_proof': complete, 'cleanup_ok': cleanup_ok,
               'github_run_id': os.environ.get('GITHUB_RUN_ID'), 'github_run_attempt': os.environ.get('GITHUB_RUN_ATTEMPT'),
           }
@@ -211,11 +186,52 @@ jobs:
               raise SystemExit(1)
           ' "$evidence/versions.json"
           # Preserve -v names/statuses, withholding assertion/exception details that can contain rows or keys.
-          program='import os,runpy,sys,unittest
+          program='import json,os,runpy,sys,unittest
           sys.path.insert(0,os.environ["MLOCAL_AUXILIARY_DRIVER_SITE"])
           def safe_error(self, error, test):
               return error[0].__name__ + ": diagnostic details withheld from public evidence\n"
           unittest.TextTestResult._exc_info_to_string=safe_error
+          class EvidenceResult(unittest.TextTestResult):
+              def canonical_test(self, test):
+                  return getattr(test, "test_case", test)
+              def getDescription(self, test):
+                  return self.canonical_test(test).id()
+              def write_event(self, event):
+                  with open(os.environ["MLOCAL_AUXILIARY_OUTCOMES_FILE"], "a", encoding="utf-8") as stream:
+                      stream.write(json.dumps(event, sort_keys=True) + "\n")
+              def record(self, test, outcome, error=None):
+                  test = self.canonical_test(test)
+                  self.write_event({"event":"test", "name":test.id().rsplit(".",1)[-1],
+                                    "identity":test.id(), "outcome":outcome,
+                                    "exception_class":error[0].__name__ if error else None})
+              def addSuccess(self, test):
+                  super().addSuccess(test)
+                  self.record(test, "ok")
+              def addFailure(self, test, error):
+                  super().addFailure(test, error)
+                  self.record(test, "FAIL", error)
+              def addError(self, test, error):
+                  super().addError(test, error)
+                  self.record(test, "ERROR", error)
+              def addSkip(self, test, reason):
+                  super().addSkip(test, "skip reason withheld from public evidence")
+                  self.record(test, "skipped")
+              def addExpectedFailure(self, test, error):
+                  super().addExpectedFailure(test, error)
+                  self.record(test, "expected_failure", error)
+              def addUnexpectedSuccess(self, test):
+                  super().addUnexpectedSuccess(test)
+                  self.record(test, "unexpected_success")
+              def addSubTest(self, test, subtest, error):
+                  super().addSubTest(test, subtest, error)
+                  if error:
+                      self.record(test, "FAIL" if issubclass(error[0], test.failureException) else "ERROR", error)
+              def stopTestRun(self):
+                  super().stopTestRun()
+                  self.write_event({"event":"summary", "run":self.testsRun, "successful":self.wasSuccessful(),
+                                    "failures":len(self.failures), "errors":len(self.errors), "skipped":len(self.skipped),
+                                    "expected_failures":len(self.expectedFailures), "unexpected_successes":len(self.unexpectedSuccesses)})
+          unittest.TextTestRunner.resultclass=EvidenceResult
           sys.argv=["tests/integration/test_postgres_auxiliary.py","-v"]
           runpy.run_path(sys.argv[0],run_name="__main__")'
           proof_command=(bash scripts/python.sh -c "$program")
@@ -228,6 +244,32 @@ jobs:
           suite_exit="${statuses[0]}"
           if [[ "$suite_exit" != 0 ]]; then exit "$suite_exit"; fi
           exit "${statuses[1]}"
+      - name: Run core tests
+        run: ./scripts/test.sh core
+      - name: Verify named core test inventory
+        run: python3 scripts/test-inventory.py --core-log .jac/release-core-outcomes.log --binding .jac/release-core-binding.json --output .jac/release-test-inventory.json
+      - name: Run access context tests
+        run: ./scripts/test.sh context
+      - name: Run business insights tests
+        run: ./scripts/test.sh insights
+      - name: Run onboarding security tests
+        run: bash scripts/test.sh onboarding
+      - name: Verify shared onboarding across processes
+        timeout-minutes: 10
+        run: bash scripts/python.sh -m unittest discover -s tests/integration -p test_onboarding_shared.py
+      - name: Test photo normalization and ownership
+        run: bash scripts/python.sh -m unittest tests/photo_media.py
+      - name: Verify business approval over HTTP and after restart
+        run: bash scripts/test-business-approval.sh
+      - name: Verify coordinated recovery and recovered restart
+        timeout-minutes: 22
+        run: GITHUB_SHA="$(git rev-parse HEAD)" bash scripts/test-recovery.sh
+      - name: Verify redacted domain failures and local SMTP quota events
+        timeout-minutes: 17
+        run: |
+          if [[ -f scripts/test-monitoring.sh ]]; then bash scripts/test-monitoring.sh; fi
+      - name: Test deployment source and data separation
+        run: python3 -m unittest discover -s tests/tooling -p 'test_*.py'
       - name: Build compiled app and client dependencies
         run: ./scripts/build.sh
       - name: Run gateway and UI unit tests
