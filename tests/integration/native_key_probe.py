@@ -22,9 +22,19 @@ class ProbeRefusal(ValueError):
 
 
 def effective_key(material, expected_sha256):
-    # Failing-first seed: preserve the existing raw-key conversion before
-    # enforcing the independent preservation/representability boundary.
-    return material.decode('utf-8').strip()
+    refusal = 'Preserved native signing key is unavailable or incompatible; no replacement was generated.'
+    if (not isinstance(material, bytes) or not isinstance(expected_sha256, str)
+            or not re.fullmatch(r'[0-9a-f]{64}', expected_sha256)
+            or not secrets.compare_digest(hashlib.sha256(material).hexdigest(), expected_sha256)):
+        raise ProbeRefusal(refusal)
+    try:
+        effective = material.decode('utf-8').strip()
+    except UnicodeDecodeError:
+        raise ProbeRefusal(refusal) from None
+    if (len(effective.encode('utf-8')) < 32 or effective == PLACEHOLDER
+            or any(character in effective for character in ('\x00', '\r', '\n'))):
+        raise ProbeRefusal(refusal)
+    return effective
 
 
 def owned_request(path):
@@ -186,13 +196,19 @@ def run(request):
                       wrong_native_secret_denied=request['phase'] == 'verify-wrong-secret')
         return result
     finally:
-        if users is not None:
-            users.close()
-        context.close()
-        store = shared_store()
-        if store is not None:
-            store.close()
-        drain_all()
+        try:
+            if users is not None:
+                users.close()
+        finally:
+            try:
+                context.close()
+            finally:
+                try:
+                    store = shared_store()
+                    if store is not None:
+                        store.close()
+                finally:
+                    drain_all()
 
 
 def main():
