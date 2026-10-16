@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 
 def main():
+    fixture_source = Path(__file__).resolve(strict=True)
     parser = argparse.ArgumentParser()
     parser.add_argument('--package', type=Path, required=True)
     parser.add_argument('--tools', type=Path, required=True)
@@ -60,7 +61,7 @@ def main():
     processes, checks = [], []
     pg_started, sink_closed, sink = False, False, None
     receipt = {'verdict': 'BLOCKED', 'source_sha': manifest['source_sha'],
-        'fixture_sha256': pkg.digest(Path(__file__).resolve()),
+        'fixture_sha256': pkg.digest(fixture_source),
         'source_tree': manifest['source_tree'], 'manifest_sha256': pkg.digest(args.package / 'manifest.json'),
         'official_runtime': manifest['runtime'], 'disposable_fixture_only': True,
         'live_deployment': False, 'external_email': False, 'hosted_acceptance': False,
@@ -405,7 +406,7 @@ def main():
                 student_token=student_token, merchant_token=merchant_token, historical_token=historical_token,
                 student_actor=student_actor, merchant_actor=merchant_actor, historical_actor=historical_actor,
                 original_offer=offer, original_claim=claim, historical_claim=historical_claim,
-                root_python=Path(__file__).resolve().parents[2] / '.jac/venv/bin/python', receipt=receipt))
+                root_python=fixture_source.parents[2] / '.jac/venv/bin/python', receipt=receipt))
         sink_closed = sink.closed
         check(sink_closed, 'owned local TLS SMTP fixture closes')
         receipt['verdict'] = 'PASS'

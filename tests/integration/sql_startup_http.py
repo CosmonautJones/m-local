@@ -80,7 +80,7 @@ Path(sys.argv[2]).write_text(json.dumps({"bin":str(bin_dir),"tools":tools}))
     server_bin = Path(distribution['bin'])
     client_bin = tools / 'usr/lib/postgresql/18/bin'
     clients = {}
-    for name in ('createdb', 'pg_dump', 'pg_restore'):
+    for name in ('createdb', 'pg_dump', 'pg_restore', 'psql'):
         executable = client_bin / name
         check(executable.is_file(), 'package fixture has matching PostgreSQL18 client ' + name)
         version = command(str(executable), '--version').decode().strip()
@@ -108,6 +108,9 @@ def encode(value):
 def decode(value):
     return bytes.fromhex(value["bytea"]) if set(value)=={"bytea"} else value
 request=json.loads(sys.stdin.read(),object_hook=decode)
+observer=Path(request["observer_venv"]).resolve()
+assert Path(sys.prefix).resolve()==observer
+assert Path(psycopg.__file__).resolve().is_relative_to(observer/"lib")
 dsn,schema=request["dsn"],request["schema"]
 assert schema.startswith("mlocal_aux_test_")
 with psycopg.connect(dsn,connect_timeout=5,options="-c statement_timeout=15000 -c lock_timeout=5000") as c:
@@ -187,7 +190,8 @@ def run_sql_startup_checks(f):
     native_key, code_key = app / '.jac/data/jwt_secret', onboarding / 'code.key'
     cache, originals = app / 'assets/photos', workspace / 'retained-sql-original-photos'
     root_python = f['root_python']
-    check(root_python.is_file(), 'SQL fixture uses an independent normal root project venv observer')
+    check(root_python.is_file() and root_python.parent.parent.resolve() != (app / '.jac/venv').resolve(),
+          'SQL fixture uses an independent normal root project venv observer')
     cache.rename(originals)
     cache.mkdir(mode=0o700)
     original_paths = [onboarding / name for name in ('onboarding.sqlite3','photo-ownership.sqlite3','code.key')]
@@ -224,7 +228,8 @@ def run_sql_startup_checks(f):
     def decoded(value):
         return bytes.fromhex(value['bytea']) if set(value) == {'bytea'} else value
     def observe(action, target_dsn=None, **values):
-        request = dict(dsn=target_dsn or dsn, schema=schema, action=action, **values)
+        request = dict(dsn=target_dsn or dsn, schema=schema, action=action,
+                       observer_venv=str(root_python.parent.parent.resolve()), **values)
         result = subprocess.run([str(root_python), '-c', _OBSERVER], cwd=app, env=environment,
                                 input=json.dumps(request, default=encoded).encode(), capture_output=True, timeout=90)
         if result.returncode:
