@@ -73,6 +73,108 @@ jobs:
           proof="$RUNNER_TEMP/auxiliary-proof"
           test ! -e "$proof"
           mkdir -m 700 "$proof" "$proof/tmp" "$proof/socket"
+          evidence=.jac/postgres-auxiliary-proof
+          mkdir -p "$evidence"
+          : > "$evidence/unittest.log"
+          pg_bin=/usr/lib/postgresql/16/bin
+          port= suite_exit=-1 initialized=0 database_created=0
+          cleanup() {
+            original_exit=$?
+            trap - EXIT
+            set +e
+            remaining=-1 schema_exit=-1 stop_exit=0 status_exit=-1
+            if [[ "$database_created" == 1 ]]; then
+              remaining="$(timeout --signal=TERM --kill-after=2s 15s env PGCONNECT_TIMEOUT=5 PGOPTIONS='-c statement_timeout=5000 -c lock_timeout=5000' "$pg_bin/psql" \
+                -h 127.0.0.1 -p "$port" -U "$(id -un)" -d mlocal_aux_test_ci -Atqc \
+                "SELECT count(*) FROM pg_namespace WHERE left(nspname,16)='mlocal_aux_test_'" 2> "$proof/schema-check.log")"
+              schema_exit=$?
+            fi
+            if [[ "$initialized" == 1 ]]; then
+              "$pg_bin/pg_ctl" -D "$proof/postgres" status > "$proof/status-before.log" 2>&1
+              if [[ $? == 0 || -e "$proof/postgres/postmaster.pid" ]]; then
+                "$pg_bin/pg_ctl" -D "$proof/postgres" -m fast -t 30 -w stop > "$proof/stop.log" 2>&1
+                stop_exit=$?
+              fi
+              "$pg_bin/pg_ctl" -D "$proof/postgres" status > "$proof/status-after.log" 2>&1
+              status_exit=$?
+            fi
+            python3 - "$evidence" "$proof" "$port" "$suite_exit" "$original_exit" \
+              "$remaining" "$schema_exit" "$stop_exit" "$status_exit" "$initialized" "$database_created" <<'PY'
+          import ast, errno, hashlib, json, os, re, socket, subprocess, sys
+          from pathlib import Path
+          evidence, proof = map(Path, sys.argv[1:3])
+          port, suite_exit, original_exit, remaining, schema_exit, stop_exit, status_exit, initialized, database_created = sys.argv[3:]
+          log = (evidence / 'unittest.log').read_text()
+          named = [{'name': name, 'identity': identity, 'outcome': outcome or 'see_log'}
+                   for name, identity, outcome in re.findall(
+                       r'^(test_\w+) \(([^)\n]+)\) \.\.\. ?(ok|FAIL|ERROR|skipped)?', log, re.M)]
+          test_source = Path('tests/integration/test_postgres_auxiliary.py')
+          test_class = next(node for node in ast.parse(test_source.read_text()).body
+                            if isinstance(node, ast.ClassDef) and node.name == 'PostgresAuxiliaryTests')
+          expected_names = sorted(node.name for node in test_class.body
+                                  if isinstance(node, ast.FunctionDef) and node.name.startswith('test_'))
+          expected_pairs = {(name, '__main__.PostgresAuxiliaryTests.' + name) for name in expected_names}
+          observed_pairs = [(row['name'], row['identity']) for row in named]
+          inventory_matches = (len(expected_names) == len(expected_pairs) == 27
+                               and len(observed_pairs) == len(set(observed_pairs)) == 27
+                               and set(observed_pairs) == expected_pairs)
+          summary = re.findall(r'^Ran (\d+) tests? in ([\d.]+)s$', log, re.M)
+          failed = re.search(r'^FAILED \(([^\n]+)\)', log, re.M)
+          counts = {name: int(value) for name, value in re.findall(r'(failures|errors|skipped)=(\d+)', failed[1] if failed else log)}
+          counts.update(run=int(summary[-1][0]) if summary else 0, passed=sum(row['outcome'] == 'ok' for row in named))
+          for name in ('failures', 'errors', 'skipped'):
+              counts.setdefault(name, 0)
+          listener_closed = None
+          if initialized == '1' and port:
+              with socket.socket() as probe:
+                  probe.settimeout(1)
+                  listener_closed = probe.connect_ex(('127.0.0.1', int(port))) == errno.ECONNREFUSED
+          cleanup = {
+              'owned_schemas_removed': database_created != '1' or (schema_exit == '0' and remaining == '0'),
+              'remaining_owned_schemas': int(remaining) if remaining.isdigit() else None,
+              'schema_check_exit': int(schema_exit), 'stop_exit': int(stop_exit),
+              'postgres_stopped': initialized != '1' or (status_exit == '3' and not (proof / 'postgres/postmaster.pid').exists()),
+              'pg_ctl_status_exit': int(status_exit), 'listener_closed': listener_closed,
+              'socket_removed': not any((proof / 'socket').glob('.s.PGSQL.*')),
+              'server_was_initialized': initialized == '1',
+          }
+          cleanup_ok = (cleanup['owned_schemas_removed'] and cleanup['postgres_stopped']
+                        and cleanup['stop_exit'] == 0 and cleanup['socket_removed']
+                        and (initialized != '1' or listener_closed is True))
+          sources = ('services/postgres_auxiliary.py', 'services/email_codes.jac',
+                     'tests/integration/test_postgres_auxiliary.py', 'tests/integration/postgres-auxiliary-requirements.txt',
+                     '.github/workflows/check.yml', '.jac-version', 'scripts/python.sh', 'scripts/runtime.sh')
+          versions = json.loads((evidence / 'versions.json').read_text()) if (evidence / 'versions.json').exists() else None
+          complete = (suite_exit == '0' and counts['run'] == 27 and counts['passed'] == 27
+                      and inventory_matches and not any(counts[name] for name in ('failures', 'errors', 'skipped'))
+                      and versions is not None)
+          receipt = {
+              'source_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'source_tree': subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip(),
+              'source_sha256': {name: hashlib.sha256(Path(name).read_bytes()).hexdigest() for name in sources},
+              'command': (evidence / 'command.txt').read_text().strip() if (evidence / 'command.txt').exists() else None,
+              'versions': versions, 'suite_exit': int(suite_exit) if suite_exit != '-1' else None,
+              'step_exit_before_cleanup': int(original_exit), 'named_outcomes': named, 'counts': counts,
+              'expected_test_count': len(expected_names), 'expected_test_names': expected_names,
+              'expected_test_identities': sorted(identity for name, identity in expected_pairs),
+              'test_inventory_matches': inventory_matches,
+              'exception_classes': re.findall(r'^(\w+): diagnostic details withheld', log, re.M),
+              'verbose_log_sha256': hashlib.sha256((evidence / 'unittest.log').read_bytes()).hexdigest(),
+              'cleanup': cleanup, 'complete_sql_proof': complete, 'cleanup_ok': cleanup_ok,
+              'github_run_id': os.environ.get('GITHUB_RUN_ID'), 'github_run_attempt': os.environ.get('GITHUB_RUN_ATTEMPT'),
+          }
+          (evidence / 'receipt.json').write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
+          print('PostgreSQL auxiliary receipt: tests=%s passed=%s suite_exit=%s cleanup_ok=%s' %
+                (counts['run'], counts['passed'], receipt['suite_exit'], cleanup_ok))
+          sys.exit(0 if complete and cleanup_ok else 1)
+          PY
+            receipt_exit=$?
+            if [[ "$original_exit" != 0 ]]; then exit "$original_exit"; fi
+            exit "$receipt_exit"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
           export MLOCAL_AUXILIARY_DRIVER_SITE="$proof/driver"
           # Install for the pinned Jac interpreter, not the runner's Python ABI.
           python3 -m pip install --disable-pip-version-check --no-input \
@@ -80,21 +182,52 @@ jobs:
             --python-version 3.14 --implementation cp --abi cp314 \
             -r tests/integration/postgres-auxiliary-requirements.txt
           unset PGHOSTADDR PGSERVICE PGSERVICEFILE
-          export PGPASSFILE=/dev/null
-          pg_bin=/usr/lib/postgresql/16/bin
+          export PGPASSFILE=/dev/null NO_COLOR=1 PYTHON_COLORS=0
           test -x "$pg_bin/initdb"
           port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
           "$pg_bin/initdb" -D "$proof/postgres" --auth=trust --no-locale --encoding=UTF8
-          trap '"$pg_bin/pg_ctl" -D "$proof/postgres" -m fast -w stop' EXIT
+          initialized=1
           "$pg_bin/pg_ctl" -D "$proof/postgres" -l "$proof/postgres.log" \
             -o "-h 127.0.0.1 -p $port -k $proof/socket -c shared_buffers=16MB -c max_connections=24" -w start
           "$pg_bin/createdb" -h 127.0.0.1 -p "$port" -U "$(id -un)" mlocal_aux_test_ci
+          database_created=1
           export TMPDIR="$proof/tmp"
           export MLOCAL_AUXILIARY_TEST_DSN="postgresql://$(id -un)@127.0.0.1:$port/mlocal_aux_test_ci"
           export MLOCAL_AUXILIARY_TEST_SCHEMA=mlocal_aux_test_ci
-          # -c/runpy avoids the pinned executable's direct-file project takeover.
-          bash scripts/python.sh -c \
-            'import os,runpy,sys; sys.path.insert(0,os.environ["MLOCAL_AUXILIARY_DRIVER_SITE"]); sys.argv=["tests/integration/test_postgres_auxiliary.py","-v"]; runpy.run_path(sys.argv[0],run_name="__main__")'
+          bash scripts/python.sh -c '
+          import json, os, sys
+          from pathlib import Path
+          sys.path.insert(0, os.environ["MLOCAL_AUXILIARY_DRIVER_SITE"])
+          try:
+              import psycopg
+              with psycopg.connect(os.environ["MLOCAL_AUXILIARY_TEST_DSN"], connect_timeout=5) as connection:
+                  server_version = int(connection.execute("SHOW server_version_num").fetchone()[0])
+              versions = {"server_version_num": server_version, "psycopg": psycopg.__version__}
+              if server_version // 10000 != 16 or psycopg.__version__ != "3.3.6":
+                  raise ValueError("Unexpected proof dependency version")
+              Path(sys.argv[1]).write_text(json.dumps(versions, sort_keys=True) + "\n")
+          except Exception as error:
+              print(type(error).__name__ + ": version probe failed; connection details withheld")
+              raise SystemExit(1)
+          ' "$evidence/versions.json"
+          # Preserve -v names/statuses, withholding assertion/exception details that can contain rows or keys.
+          program='import os,runpy,sys,unittest
+          sys.path.insert(0,os.environ["MLOCAL_AUXILIARY_DRIVER_SITE"])
+          def safe_error(self, error, test):
+              return error[0].__name__ + ": diagnostic details withheld from public evidence\n"
+          unittest.TextTestResult._exc_info_to_string=safe_error
+          sys.argv=["tests/integration/test_postgres_auxiliary.py","-v"]
+          runpy.run_path(sys.argv[0],run_name="__main__")'
+          proof_command=(bash scripts/python.sh -c "$program")
+          printf '%q ' "${proof_command[@]}" > "$evidence/command.txt"
+          printf '\n' >> "$evidence/command.txt"
+          set +e
+          "${proof_command[@]}" 2>&1 | tee "$evidence/unittest.log"
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          suite_exit="${statuses[0]}"
+          if [[ "$suite_exit" != 0 ]]; then exit "$suite_exit"; fi
+          exit "${statuses[1]}"
       - name: Build compiled app and client dependencies
         run: ./scripts/build.sh
       - name: Run gateway and UI unit tests
@@ -115,4 +248,5 @@ jobs:
             .jac/release-core-binding.json
             .jac/release-test-inventory.json
             .jac/release-native/monitoring.json
+            .jac/postgres-auxiliary-proof/
             dist/*.jab
