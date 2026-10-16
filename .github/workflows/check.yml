@@ -91,8 +91,8 @@ jobs:
                                   if isinstance(node, ast.FunctionDef) and node.name.startswith('test_'))
           expected_pairs = {(name, '__main__.PostgresAuxiliaryTests.' + name) for name in expected_names}
           observed_pairs = [(row['name'], row['identity']) for row in named]
-          inventory_matches = (len(expected_names) == len(expected_pairs) == 27
-                               and len(observed_pairs) == len(set(observed_pairs)) == 27
+          inventory_matches = (len(expected_names) == len(expected_pairs) == 39
+                               and len(observed_pairs) == len(set(observed_pairs)) == 39
                                and set(observed_pairs) == expected_pairs)
           counts = {name: summary.get(name, 0) for name in
                     ('run', 'failures', 'errors', 'skipped', 'expected_failures', 'unexpected_successes')}
@@ -119,7 +119,7 @@ jobs:
                      '.github/workflows/check.yml', '.jac-version', 'scripts/python.sh', 'scripts/runtime.sh')
           versions = json.loads((evidence / 'versions.json').read_text()) if (evidence / 'versions.json').exists() else None
           complete = (suite_exit == '0' and summary.get('successful') is True
-                      and counts['run'] == 27 and counts['passed'] == 27 and inventory_matches
+                      and counts['run'] == 39 and counts['passed'] == 39 and inventory_matches
                       and not any(counts[name] for name in ('failures', 'errors', 'skipped', 'expected_failures', 'unexpected_successes'))
                       and versions is not None)
           receipt = {

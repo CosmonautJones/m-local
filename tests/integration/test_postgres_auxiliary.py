@@ -720,6 +720,272 @@ class PostgresAuxiliaryTests(unittest.TestCase):
             self.backend.photo_save(ACTOR, '3' * 32 + '.jpg', truncated, self.now)
         self.assertEqual(self.snapshot(self.schema), before)
 
+    def _authority_sqlite_copy(self, *, contradictory=False, preserve=True):
+        directory = self.work / 'configured-sqlite'
+        shutil.copytree(self.legacy, directory)
+        if contradictory:
+            with sqlite3.connect(directory / 'onboarding.sqlite3') as database:
+                database.execute("UPDATE accounts SET kind='student',name='Stale SQLite identity' WHERE actor=?", (ACTOR,))
+                database.execute('UPDATE business_owners SET active=0 WHERE actor=?', (ACTOR,))
+                database.execute('DELETE FROM business_approvals WHERE actor=?', (ACTOR,))
+        before = hashes(directory)
+        if preserve:
+            self.addCleanup(lambda: self.assertEqual(hashes(directory), before,
+                                                     'Selected PostgreSQL authority changed configured SQLite/key/photo bytes'))
+        else:
+            # Default SQLite startup may reassert its existing schema version.
+            retained = {name: digest for name, digest in before.items() if name != 'onboarding.sqlite3'}
+            self.addCleanup(lambda: self.assertEqual(
+                {name: digest for name, digest in hashes(directory).items() if name != 'onboarding.sqlite3'}, retained))
+        return directory
+
+    def _authority_environment(self, directory, **changes):
+        return {'MLOCAL_ENV': 'development', 'MLOCAL_ONBOARDING_BACKEND': 'postgres-proof',
+                'MLOCAL_ONBOARDING_DIR': str(directory), 'MLOCAL_MERCHANT_OWNERS': '{}',
+                'MLOCAL_AUXILIARY_TEST_DSN': self.dsn, 'MLOCAL_AUXILIARY_TEST_SCHEMA': self.schema,
+                'JAC_DB_URL': self.dsn, **changes}
+
+    def _authority_calls(self):
+        from services import email_codes, qr_auth, onboarding_support
+        slug = 'business-' + ACTOR
+        return (
+            ('store', lambda: email_codes.store().account(ACTOR)),
+            ('existing_store', lambda: email_codes.existing_store().account(ACTOR)),
+            ('registered_owner', lambda: email_codes.registered_business_owner(slug)),
+            ('noncanonical_owner', lambda: email_codes.registered_business_owner('fixture-configured')),
+            ('merchant_status', lambda: email_codes.merchant_operations_allowed(ACTOR)),
+            ('qr_owner', lambda: qr_auth.merchant_owner(slug)),
+            ('qr_operations', lambda: qr_auth.merchant_operations_enabled(slug)),
+            ('qr_visibility', lambda: qr_auth.listing_visible(slug, 'business_signup')),
+            ('qr_noncanonical_owner', lambda: qr_auth.merchant_owner('fixture-configured')),
+            ('qr_noncanonical_operations', lambda: qr_auth.merchant_operations_enabled('fixture-configured')),
+            ('activation', lambda: onboarding_support.prepare_business_activation(ACTOR, {**self.fields, 'image_url': ''})),
+        )
+
+    def _authority_refuses(self, directory):
+        for name, invoke in self._authority_calls():
+            with self.subTest(api=name):
+                with self.assertRaises(ValueError) as caught:
+                    invoke()
+                message = str(caught.exception)
+                for secret in (self.dsn, str(directory), self.code_key.hex(), str(self.code_key),
+                               self.native_key.decode(), 'fixture-driver-secret'):
+                    self.assertNotIn(secret, message)
+                self.assertRegex(message.lower(), r'backend|authority|proof')
+
+    def test_authority_unset_and_sqlite_keep_existing_default_behavior(self):
+        from services import email_codes, qr_auth
+        directory = self._authority_sqlite_copy(preserve=False)
+        for selector in (None, 'sqlite'):
+            with self.subTest(selector=selector), patch.dict(os.environ, self._authority_environment(directory)):
+                if selector is None:
+                    os.environ.pop('MLOCAL_ONBOARDING_BACKEND', None)
+                else:
+                    os.environ['MLOCAL_ONBOARDING_BACKEND'] = selector
+                self.assertEqual(email_codes.store().account(ACTOR)['kind'], 'business')
+                self.assertEqual(email_codes.existing_store().key, self.code_key)
+                self.assertEqual(email_codes.registered_business_owner('business-' + ACTOR), ACTOR)
+                self.assertTrue(email_codes.merchant_operations_allowed(ACTOR))
+                self.assertEqual(qr_auth.merchant_owner('business-' + ACTOR), ACTOR)
+
+    def test_authority_postgres_state_overrides_contradictory_sqlite(self):
+        from services import email_codes, qr_auth, onboarding_support
+        self.import_from()
+        directory = self._authority_sqlite_copy(contradictory=True)
+        before = self.snapshot(self.schema)
+        with patch.dict(os.environ, self._authority_environment(directory)):
+            for factory in (email_codes.store, email_codes.existing_store):
+                with self.subTest(factory=factory.__name__):
+                    state = factory()
+                    self.assertEqual(state.account(ACTOR), {'email': 'owner@example.test', 'kind': 'business', 'name': 'Fixture owner'})
+                    self.assertEqual(state.key, self.code_key)
+            self.assertEqual(email_codes.registered_business_owner('business-' + ACTOR), ACTOR)
+            self.assertTrue(email_codes.merchant_operations_allowed(ACTOR))
+            self.assertEqual(qr_auth.merchant_owner('business-' + ACTOR), ACTOR)
+            self.assertTrue(qr_auth.merchant_operations_enabled('business-' + ACTOR))
+            self.assertTrue(qr_auth.listing_visible('business-' + ACTOR, 'business_signup'))
+            result = onboarding_support.prepare_business_activation(ACTOR, {**self.fields, 'image_url': ''})
+            self.assertEqual((result['slug'], result['status']), ('business-' + ACTOR, 'draft'))
+        self.assertEqual(self.snapshot(self.schema), before)
+
+    def test_authority_postgres_reads_do_not_require_accessible_sqlite(self):
+        from services import email_codes, qr_auth, onboarding_support
+        self.import_from()
+        directory = self.work / 'absent-sqlite'
+        before = self.snapshot(self.schema)
+        with patch.dict(os.environ, self._authority_environment(directory)), \
+                patch.object(sqlite3, 'connect', side_effect=AssertionError('Unexpected SQLite authority access')):
+            self.assertEqual(email_codes.store().account(ACTOR)['kind'], 'business')
+            self.assertEqual(email_codes.existing_store().key, self.code_key)
+            self.assertEqual(email_codes.registered_business_owner('business-' + ACTOR), ACTOR)
+            self.assertTrue(email_codes.merchant_operations_allowed(ACTOR))
+            self.assertEqual(qr_auth.merchant_owner('business-' + ACTOR), ACTOR)
+            self.assertTrue(qr_auth.merchant_operations_enabled('business-' + ACTOR))
+            self.assertEqual(onboarding_support.prepare_business_activation(ACTOR, {**self.fields, 'image_url': ''})['slug'], 'business-' + ACTOR)
+        self.assertFalse(directory.exists(), 'SQL authority selection created replacement local state')
+        self.assertEqual(self.snapshot(self.schema), before)
+
+    def test_authority_sql_suspension_overrides_stale_sqlite_active_status(self):
+        from services import email_codes, qr_auth, onboarding_support
+        self.import_from()
+        directory = self._authority_sqlite_copy()
+        self.state().change_business_status(ACTOR, 'suspended', 'Fixture reviewer', 'SQL authority suspension', 2, '0' * 29 + '301')
+        before = self.snapshot(self.schema)
+        with patch.dict(os.environ, self._authority_environment(directory)):
+            self.assertFalse(email_codes.merchant_operations_allowed(ACTOR))
+            self.assertEqual(email_codes.store().business_status(ACTOR)['status'], 'suspended')
+            self.assertEqual(email_codes.existing_store().business_status(ACTOR)['revision'], 3)
+            self.assertEqual(qr_auth.merchant_owner('business-' + ACTOR), ACTOR, 'Suspension must preserve ownership')
+            self.assertFalse(qr_auth.merchant_operations_enabled('business-' + ACTOR))
+            self.assertFalse(qr_auth.listing_visible('business-' + ACTOR, 'business_signup'))
+            with self.assertRaises(ValueError):
+                onboarding_support.prepare_business_activation(ACTOR, {**self.fields, 'image_url': ''})
+        self.assertEqual(self.snapshot(self.schema), before)
+
+    def test_authority_sql_revocation_returns_genuine_no_owner_without_sqlite_fallback(self):
+        from services import email_codes, qr_auth
+        self.import_from()
+        directory = self._authority_sqlite_copy()
+        changes = (
+            ('inactive', "UPDATE business_owners SET active=0 WHERE actor=%s", "UPDATE business_owners SET active=1 WHERE actor=%s"),
+            ('account_kind', "UPDATE accounts SET kind='student' WHERE actor=%s", "UPDATE accounts SET kind='business' WHERE actor=%s"),
+            ('approval_identity', "UPDATE business_approvals SET body='{{}}' WHERE actor=%s", None),
+        )
+        for label, damage, restore in changes:
+            with self.connect() as connection:
+                connection.execute(self.sql.SQL(damage.replace('business_owners', '{}.business_owners').replace('accounts', '{}.accounts').replace('business_approvals', '{}.business_approvals')).format(self.sql.Identifier(self.schema)), (ACTOR,))
+            before = self.snapshot(self.schema)
+            with self.subTest(reason=label), patch.dict(os.environ, self._authority_environment(directory)):
+                self.assertEqual(email_codes.registered_business_owner('business-' + ACTOR), '')
+                self.assertEqual(qr_auth.merchant_owner('business-' + ACTOR), '')
+                self.assertFalse(qr_auth.merchant_operations_enabled('business-' + ACTOR))
+                self.assertEqual(email_codes.registered_business_owner('business-' + OTHER), '')
+            self.assertEqual(self.snapshot(self.schema), before)
+            if restore is not None:
+                with self.connect() as connection:
+                    connection.execute(self.sql.SQL(restore.replace('business_owners', '{}.business_owners').replace('accounts', '{}.accounts')).format(self.sql.Identifier(self.schema)), (ACTOR,))
+
+    def test_authority_configured_owner_precedence_is_preserved(self):
+        import json
+        from services import qr_auth
+        self.import_from()
+        directory = self._authority_sqlite_copy()
+        for configured, slug, owner in (
+                ({'fixture-configured': ACTOR}, 'fixture-configured', ACTOR),
+                ({'fixture-configured': ACTOR}, 'business-' + ACTOR, ''),
+                ({'business-' + ACTOR: OTHER}, 'business-' + ACTOR, ''),
+                ({'business-' + ACTOR: ACTOR}, 'business-' + ACTOR, ACTOR)):
+            with self.subTest(slug=slug, expected_owner=owner), patch.dict(os.environ, self._authority_environment(
+                    directory, MLOCAL_MERCHANT_OWNERS=json.dumps(configured))):
+                self.assertEqual(qr_auth.merchant_owner(slug), owner)
+
+    def test_authority_first_activation_uses_stored_status_without_prior_owner_requirement(self):
+        from services import email_codes, onboarding_support
+        self.import_from()
+        directory = self._authority_sqlite_copy(contradictory=True)
+        with self.connect() as connection:
+            connection.execute(self.sql.SQL('DELETE FROM {}.business_owners WHERE actor=%s').format(self.sql.Identifier(self.schema)), (ACTOR,))
+            connection.execute(self.sql.SQL('DELETE FROM {}.business_status_events WHERE actor=%s').format(self.sql.Identifier(self.schema)), (ACTOR,))
+            connection.execute(self.sql.SQL('DELETE FROM {}.business_status WHERE actor=%s').format(self.sql.Identifier(self.schema)), (ACTOR,))
+        with patch.dict(os.environ, self._authority_environment(directory)):
+            self.assertEqual(email_codes.registered_business_owner('business-' + ACTOR), '')
+            self.assertTrue(email_codes.merchant_operations_allowed(ACTOR))
+            result = onboarding_support.prepare_business_activation(ACTOR, {**self.fields, 'image_url': ''})
+            self.assertEqual((result['slug'], result['status']), ('business-' + ACTOR, 'draft'))
+        self.assertEqual(self.rows('business_owners', 'actor,slug,active'), [(ACTOR, 'business-' + ACTOR, 0)])
+        self.assertEqual(self.rows('business_status'), [])
+        self.assertEqual(self.rows('business_status_events'), [])
+
+    def test_authority_unknown_selector_incomplete_config_and_production_fail_stop(self):
+        self.import_from()
+        directory = self._authority_sqlite_copy()
+        before = self.snapshot(self.schema)
+        for changes in ({'MLOCAL_ONBOARDING_BACKEND': 'unknown-proof'}, {'MLOCAL_ONBOARDING_BACKEND': ''},
+                        {'MLOCAL_AUXILIARY_TEST_DSN': ''}, {'MLOCAL_AUXILIARY_TEST_SCHEMA': ''},
+                        {'MLOCAL_ENV': 'production'}, {'MLOCAL_ENV': ' Production '}):
+            with self.subTest(settings=tuple(changes)), patch.dict(os.environ, self._authority_environment(directory, **changes)):
+                self._authority_refuses(directory)
+            self.assertEqual(self.snapshot(self.schema), before)
+
+    def test_authority_unavailable_schema_audit_versions_and_keys_fail_stop_without_repair(self):
+        self.import_from()
+        directory = self._authority_sqlite_copy()
+        cases = ('missing_schema', 'uninitialized', 'schema_version', 'legacy_version',
+                 'missing_audit', 'partial_audit', 'revision_mismatch', 'missing_keys')
+        for index, kind in enumerate(cases):
+            schema = self.schema + '_bad' + str(index)
+            if kind != 'missing_schema':
+                with self.connect() as connection:
+                    connection.execute(self.sql.SQL('CREATE SCHEMA {}').format(self.sql.Identifier(schema)))
+                self.schemas.append(schema)
+                if kind != 'uninitialized':
+                    target = self.module.PostgresAuxiliary(self.dsn, schema)
+                    target.initialize()
+                    target.import_legacy(self.legacy / 'onboarding.sqlite3', self.legacy / 'photo-ownership.sqlite3',
+                                         self.photos_dir, self.legacy / 'code.key', self.legacy / 'jwt_secret')
+                    statement = {
+                        'schema_version': 'UPDATE {}.auxiliary_state SET schema_version=2',
+                        'legacy_version': 'UPDATE {}.auxiliary_state SET legacy_version=2',
+                        'missing_audit': 'DROP TABLE {}.business_status_events',
+                        'partial_audit': 'DELETE FROM {}.business_status_events WHERE revision=1',
+                        'revision_mismatch': 'UPDATE {}.business_status SET revision=revision+1',
+                        'missing_keys': 'DELETE FROM {}.signing_material',
+                    }[kind]
+                    with self.connect() as connection:
+                        connection.execute(self.sql.SQL(statement).format(self.sql.Identifier(schema)))
+            before = self.snapshot(schema)
+            with self.subTest(unavailable=kind), patch.dict(os.environ, self._authority_environment(
+                    directory, MLOCAL_AUXILIARY_TEST_SCHEMA=schema)):
+                self._authority_refuses(directory)
+            self.assertEqual(self.snapshot(schema), before, 'Authority selection repaired or replaced unavailable state')
+            if kind == 'missing_schema':
+                with self.connect() as connection:
+                    self.assertIsNone(connection.execute('SELECT 1 FROM pg_namespace WHERE nspname=%s', (schema,)).fetchone())
+
+    def test_authority_driver_failure_is_sanitized_and_never_falls_back_to_sqlite(self):
+        self.import_from()
+        directory = self._authority_sqlite_copy()
+        before = self.snapshot(self.schema)
+        with patch.dict(os.environ, self._authority_environment(directory)), patch.object(
+                self.psycopg, 'connect', side_effect=self.psycopg.OperationalError('fixture-driver-secret ' + self.dsn)):
+            self._authority_refuses(directory)
+        self.assertEqual(self.snapshot(self.schema), before)
+
+    def test_authority_native_startup_refuses_proof_before_nonproduction_or_filesystem_checks(self):
+        from services import production_guard
+        directory = self._authority_sqlite_copy()
+        native_root = self.work / 'uncreated-native-app'
+        before = hashes(self.work)
+        for environment in ('development', 'production'):
+            settings = self._authority_environment(directory, MLOCAL_ENV=environment)
+            with self.subTest(environment=environment), patch.object(
+                    production_guard.tempfile, 'NamedTemporaryFile', side_effect=AssertionError('Unexpected filesystem write probe')):
+                with self.assertRaises(production_guard.ProductionConfigError) as caught:
+                    production_guard.enforce_production_config(settings, native_root)
+                self.assertIn('MLOCAL_ONBOARDING_BACKEND', str(caught.exception))
+                self.assertNotIn(self.dsn, str(caught.exception))
+                self.assertNotIn(str(directory), str(caught.exception))
+            self.assertEqual(hashes(self.work), before)
+        self.assertFalse(native_root.exists())
+
+    def test_authority_media_paths_refuse_proof_before_filesystem_mutation(self):
+        import base64
+        from services import media_upload
+        directory = self._authority_sqlite_copy()
+        before = hashes(self.work)
+        payload = 'data:image/jpeg;base64,' + base64.b64encode(self.jpeg_a).decode()
+        actions = (('directory', media_upload.photo_directory), ('registry', media_upload.photo_registry),
+                   ('save_bytes', lambda: media_upload.save_image_bytes(self.jpeg_a, ACTOR)),
+                   ('save_payload', lambda: media_upload.save_photo(payload, ACTOR)),
+                   ('owned_photo', lambda: media_upload.owned_photo('/static/photos/' + PHOTO_A, ACTOR)))
+        with patch.dict(os.environ, self._authority_environment(directory)), patch.object(
+                Path, 'mkdir', side_effect=AssertionError('Unexpected media filesystem mutation')):
+            for name, invoke in actions:
+                with self.subTest(api=name):
+                    with self.assertRaises(ValueError) as caught:
+                        invoke()
+                    self.assertRegex(str(caught.exception).lower(), r'backend|authority|proof')
+        self.assertEqual(hashes(self.work), before)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
