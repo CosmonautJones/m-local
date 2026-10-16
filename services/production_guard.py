@@ -95,6 +95,10 @@ def _demo_enabled(env: Mapping[str, str]) -> list[str]:
 
 
 def validate_production_config(env: Mapping[str, str], app_root: Path) -> list[str]:
+    # Standalone env-only admission also covers the packaged offline preflight.
+    # Authority-only SQL fixtures must never bootstrap native/media state.
+    if env.get('MLOCAL_ONBOARDING_BACKEND', 'sqlite') != 'sqlite':
+        return ['MLOCAL_ONBOARDING_BACKEND must be sqlite for native startup. PostgreSQL authority proof mode is not a complete application backend.']
     if not is_production(env):
         return []
     problems: list[str] = []

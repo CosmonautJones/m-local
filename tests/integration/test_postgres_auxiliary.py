@@ -867,7 +867,7 @@ class PostgresAuxiliaryTests(unittest.TestCase):
 
     def test_authority_configured_owner_precedence_is_preserved(self):
         import json
-        from services import qr_auth
+        from services import email_codes, qr_auth
         self.import_from()
         directory = self._authority_sqlite_copy()
         for configured, slug, owner in (
@@ -878,6 +878,18 @@ class PostgresAuxiliaryTests(unittest.TestCase):
             with self.subTest(slug=slug, expected_owner=owner), patch.dict(os.environ, self._authority_environment(
                     directory, MLOCAL_MERCHANT_OWNERS=json.dumps(configured))):
                 self.assertEqual(qr_auth.merchant_owner(slug), owner)
+        # A malformed stored slug must not gain self-service authority merely
+        # because its row still has an approved business account and active flag.
+        with self.connect() as connection:
+            connection.execute(self.sql.SQL('UPDATE {}.business_owners SET slug=%s WHERE actor=%s').format(
+                self.sql.Identifier(self.schema)), ('fixture-noncanonical', ACTOR))
+        before = self.snapshot(self.schema)
+        with patch.dict(os.environ, self._authority_environment(directory)):
+            self.assertEqual(email_codes.registered_business_owner('fixture-noncanonical'), '')
+            self.assertEqual(qr_auth.merchant_owner('fixture-noncanonical'), '')
+            self.assertTrue(qr_auth.merchant_operations_enabled('fixture-noncanonical'))
+            self.assertFalse(qr_auth.listing_visible('fixture-noncanonical', 'business_signup'))
+        self.assertEqual(self.snapshot(self.schema), before)
 
     def test_authority_first_activation_uses_stored_status_without_prior_owner_requirement(self):
         from services import email_codes, onboarding_support
@@ -943,12 +955,33 @@ class PostgresAuxiliaryTests(unittest.TestCase):
                     self.assertIsNone(connection.execute('SELECT 1 FROM pg_namespace WHERE nspname=%s', (schema,)).fetchone())
 
     def test_authority_driver_failure_is_sanitized_and_never_falls_back_to_sqlite(self):
+        from services import email_codes
         self.import_from()
         directory = self._authority_sqlite_copy()
         before = self.snapshot(self.schema)
+        failure = self.psycopg.OperationalError('fixture-driver-secret ' + self.dsn)
         with patch.dict(os.environ, self._authority_environment(directory)), patch.object(
-                self.psycopg, 'connect', side_effect=self.psycopg.OperationalError('fixture-driver-secret ' + self.dsn)):
+                self.psycopg, 'connect', side_effect=failure):
             self._authority_refuses(directory)
+        # Admission can succeed before a later connection fails. The returned
+        # real CodeStore must retain the same fail-stop/error-redaction boundary.
+        with patch.dict(os.environ, self._authority_environment(directory)):
+            for factory in (email_codes.store, email_codes.existing_store):
+                state = factory()
+                self.assertEqual(state.account(ACTOR)['kind'], 'business')
+                def read_transaction():
+                    with state.transaction() as database:
+                        return database.execute('SELECT actor FROM accounts WHERE actor=?', (ACTOR,)).fetchone()
+                with patch.object(self.psycopg, 'connect', side_effect=failure):
+                    for operation, invoke in (('account', lambda: state.account(ACTOR)),
+                                              ('transaction', read_transaction)):
+                        with self.subTest(factory=factory.__name__, operation=operation):
+                            with self.assertRaises(ValueError) as caught:
+                                invoke()
+                            message = str(caught.exception)
+                            self.assertRegex(message.lower(), r'backend|authority|proof')
+                            for secret in (self.dsn, str(directory), 'fixture-driver-secret'):
+                                self.assertNotIn(secret, message)
         self.assertEqual(self.snapshot(self.schema), before)
 
     def test_authority_native_startup_refuses_proof_before_nonproduction_or_filesystem_checks(self):
@@ -956,16 +989,18 @@ class PostgresAuxiliaryTests(unittest.TestCase):
         directory = self._authority_sqlite_copy()
         native_root = self.work / 'uncreated-native-app'
         before = hashes(self.work)
-        for environment in ('development', 'production'):
-            settings = self._authority_environment(directory, MLOCAL_ENV=environment)
-            with self.subTest(environment=environment), patch.object(
-                    production_guard.tempfile, 'NamedTemporaryFile', side_effect=AssertionError('Unexpected filesystem write probe')):
-                with self.assertRaises(production_guard.ProductionConfigError) as caught:
-                    production_guard.enforce_production_config(settings, native_root)
-                self.assertIn('MLOCAL_ONBOARDING_BACKEND', str(caught.exception))
-                self.assertNotIn(self.dsn, str(caught.exception))
-                self.assertNotIn(str(directory), str(caught.exception))
-            self.assertEqual(hashes(self.work), before)
+        for selector in ('postgres-proof', 'unknown-proof', ''):
+            for environment in ('development', 'production'):
+                settings = self._authority_environment(directory, MLOCAL_ENV=environment,
+                                                       MLOCAL_ONBOARDING_BACKEND=selector)
+                with self.subTest(selector=selector, environment=environment), patch.object(
+                        production_guard.tempfile, 'NamedTemporaryFile', side_effect=AssertionError('Unexpected filesystem write probe')):
+                    with self.assertRaises(production_guard.ProductionConfigError) as caught:
+                        production_guard.enforce_production_config(settings, native_root)
+                    self.assertIn('MLOCAL_ONBOARDING_BACKEND', str(caught.exception))
+                    self.assertNotIn(self.dsn, str(caught.exception))
+                    self.assertNotIn(str(directory), str(caught.exception))
+                self.assertEqual(hashes(self.work), before)
         self.assertFalse(native_root.exists())
 
     def test_authority_media_paths_refuse_proof_before_filesystem_mutation(self):
@@ -978,14 +1013,16 @@ class PostgresAuxiliaryTests(unittest.TestCase):
                    ('save_bytes', lambda: media_upload.save_image_bytes(self.jpeg_a, ACTOR)),
                    ('save_payload', lambda: media_upload.save_photo(payload, ACTOR)),
                    ('owned_photo', lambda: media_upload.owned_photo('/static/photos/' + PHOTO_A, ACTOR)))
-        with patch.dict(os.environ, self._authority_environment(directory)), patch.object(
-                Path, 'mkdir', side_effect=AssertionError('Unexpected media filesystem mutation')):
-            for name, invoke in actions:
-                with self.subTest(api=name):
-                    with self.assertRaises(ValueError) as caught:
-                        invoke()
-                    self.assertRegex(str(caught.exception).lower(), r'backend|authority|proof')
-        self.assertEqual(hashes(self.work), before)
+        for selector in ('postgres-proof', 'unknown-proof', ''):
+            with patch.dict(os.environ, self._authority_environment(
+                    directory, MLOCAL_ONBOARDING_BACKEND=selector)), patch.object(
+                    Path, 'mkdir', side_effect=AssertionError('Unexpected media filesystem mutation')):
+                for name, invoke in actions:
+                    with self.subTest(selector=selector, api=name):
+                        with self.assertRaises(ValueError) as caught:
+                            invoke()
+                        self.assertRegex(str(caught.exception).lower(), r'backend|authority|proof')
+            self.assertEqual(hashes(self.work), before)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

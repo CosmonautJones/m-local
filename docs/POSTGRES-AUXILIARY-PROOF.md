@@ -1,5 +1,8 @@
 # PostgreSQL auxiliary storage proof
 
+The subsequent [application authority proof](AUTHORITY-BACKEND-PROOF.md) adds an
+explicit fixture-only selector and records its separate refusal boundaries.
+
 This is a local SQL compatibility proof for storing the onboarding records,
 photo ownership and bounded JPEG bytes in one PostgreSQL database. It does not
 select a new application backend, change startup defaults, migrate a deployment,
