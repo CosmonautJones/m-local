@@ -268,6 +268,34 @@ def run_sql_startup_checks(f):
         f['stop_process'](process)
         check(not f['process_group_alive'](process) and f['closed'](config['backend_port']) and f['closed'](config['gateway_port']),
               label + ' stops the entire owned group and both listeners')
+    # Real public preflight entry point must not need a reachable SQL server.
+    # Reuse the package's full static guard, not an imported/mocked validator.
+    ports()
+    unavailable_port = f['next_port']()
+    check(f['closed'](unavailable_port), 'disposable offline preflight target port is actually closed')
+    unavailable_dsn = dsn.replace(':' + str(environment['PGPORT']) + '/', ':' + str(unavailable_port) + '/')
+    offline = dict(local, JAC_DB_URL=unavailable_dsn, MLOCAL_AUXILIARY_TEST_DSN=unavailable_dsn)
+    before_preflight = (observe('snapshot'), observe('snapshot', target_dsn=dsn.replace('_restored', '_original')))
+    cache_before_preflight = fingerprint([cache, *sorted(cache.rglob('*'))])
+    preflight = subprocess.run([str(root_python), str(app / 'scripts/release-preflight.py'),
+        '--package', str(f['package']), '--config', str(f['config_file']),
+        '--evidence', str(f['evidence_file']), '--disposable-sql'], cwd=app, env=offline,
+        capture_output=True, timeout=60)
+    if preflight.returncode:
+        (workspace / 'sql-offline-preflight.log').write_bytes(preflight.stdout + preflight.stderr)
+    check(preflight.returncode == 0, 'actual disposable package preflight passes with both SQL URLs at a closed port')
+    preflight_result = json.loads(preflight.stdout)
+    check(preflight_result.get('result') == 'PASS' and preflight_result.get('action') == 'preflight'
+          and 'local static startup checks' in preflight_result.get('scope', '')
+          and unavailable_dsn.encode() not in preflight.stdout + preflight.stderr,
+          'actual disposable preflight reports only static scope without connection settings')
+    check((observe('snapshot'), observe('snapshot', target_dsn=dsn.replace('_restored', '_original'))) == before_preflight
+          and fingerprint(original_paths) == preserved
+          and fingerprint([cache, *sorted(cache.rglob('*'))]) == cache_before_preflight
+          and f['closed'](config['backend_port']) and f['closed'](config['gateway_port'])
+          and f['closed'](unavailable_port),
+          'actual offline disposable preflight preserves both native databases SQL originals cache and closed listeners')
+
     def launch(label):
         ports()
         process = f['start'](launch_args, local, label)
@@ -391,6 +419,14 @@ def run_sql_startup_checks(f):
         ('dsn-query', {'JAC_DB_URL': dsn + '?application_name=unsupported', 'MLOCAL_AUXILIARY_TEST_DSN': dsn + '?application_name=unsupported'}),
         ('remote-dsn', {'JAC_DB_URL': dsn.replace('@127.0.0.1:', '@example.invalid:'), 'MLOCAL_AUXILIARY_TEST_DSN': dsn.replace('@127.0.0.1:', '@example.invalid:')}),
         ('wrong-configured-key', {'JAC_SERVE_AUTH_SECRET': 'DISPOSABLE_WRONG_ORIGINAL_KEY_' + 'x' * 32}),
+        ('ambient-hostaddr', {'PGHOSTADDR': '127.0.0.1'}),
+        ('ambient-service', {'PGSERVICE': 'owned-fixture'}),
+        ('ambient-service-file', {'PGSERVICEFILE': str(workspace / 'unsupported-service')}),
+        ('ambient-options', {'PGOPTIONS': '-c role=other'}),
+        ('ambient-password', {'PGPASSWORD': 'owned-fixture-password'}),
+        ('ambient-password-file', {'PGPASSFILE': str(workspace / 'unsupported-password-file')}),
+        ('native-sibling', {'JAC_SV_SIBLING': '1'}),
+        ('injected-driver-site', {'MLOCAL_AUXILIARY_DRIVER_SITE': str(workspace / 'unsupported-driver-site')}),
     ):
         refused(label, changes)
     refused('explicit-flag-required', use_flag=False)
