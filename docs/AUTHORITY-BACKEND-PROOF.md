@@ -5,6 +5,8 @@ preserved auxiliary SQL fixture. It closes the stale-SQLite authority gap inside
 that proof. It does not admit PostgreSQL as a hosted application backend. Official
 Jac **0.37.23**, graph/identity handling and all existing release gates remain.
 The prior [SQL preservation proof](POSTGRES-AUXILIARY-PROOF.md) is its prerequisite.
+The subsequent [SQL photo-reference proof](SQL-PHOTO-REFERENCE-PROOF.md) extends
+only existing uploaded-reference validation and activation helper coverage.
 
 ## Acceptance recorded before implementation
 
@@ -48,10 +50,11 @@ sanitize driver failures. Genuine validated absence still returns no owner.
 
 `MLOCAL_ENV=production` refuses this selection even through direct helpers.
 The standalone startup/preflight guard refuses every non-SQLite selector even in
-development. The existing photo registry, directory, normalization and ownership
-paths likewise refuse proof mode: SQL photo storage/cache serving and native key
-bootstrap have not been wired into the application. Use only the disposable
-runner and synthetic fixtures described in the prerequisite document; this is
+development. Photo registry, directory, normalization and upload paths likewise
+refuse proof mode. The subsequent photo-reference increment validates existing
+SQL-owned references through actual activation helpers; a returned URL proves
+ownership only. SQL upload/static delivery and native key bootstrap have not
+been wired into the application. Use only the disposable runner and synthetic fixtures described in the prerequisite document; this is
 not a production configuration example.
 
 Selected-factory operator mutations such as `approve_business` and
@@ -72,10 +75,11 @@ or live migration admission is claimed here.
 
 Before any live cutover, define the production schema/migration contract; stop the
 SQLite writer; finish SQL media/cache and native signing-key resolution; qualify
-native writer fencing and uncertain commit behavior; and execute changed-store
-backup, authenticated restore and restart acceptance for graph/identity, both
+native writer fencing, non-overlapping rollout and uncertain commit behavior; and
+execute changed-store backup, authenticated restore and restart acceptance for graph/identity, both
 auxiliary stores, suspension audit, original keys and photos. Preserve the exact
-matching release/recovery artifacts. No deployment or cutover is authorized here.
+matching release/recovery artifacts. The auxiliary SQL lock does not fence native
+writers or prove rollout overlap safe. No deployment or cutover is authorized here.
 
 Hosting provider, durable store/backup ownership and single-backend routing remain
 human acceptance decisions. Privacy/terms or an explicit restricted pilot launch,

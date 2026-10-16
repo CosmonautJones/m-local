@@ -124,6 +124,7 @@ jobs:
                       'services/onboarding_backend.py', 'services/qr_auth.jac', 'services/onboarding_support.jac',
                       'services/production_guard.py', 'services/media_upload.py',
                       'tests/tooling/test_onboarding_backend.py', 'docs/AUTHORITY-BACKEND-PROOF.md',
+                      'docs/SQL-PHOTO-REFERENCE-PROOF.md',
                      'tests/integration/test_postgres_auxiliary.py', 'tests/integration/postgres-auxiliary-requirements.txt',
                      '.github/workflows/check.yml', '.jac-version', 'scripts/python.sh', 'scripts/runtime.sh')
           versions = json.loads((evidence / 'versions.json').read_text()) if (evidence / 'versions.json').exists() else None

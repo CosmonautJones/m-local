@@ -1056,9 +1056,7 @@ class PostgresAuxiliaryTests(unittest.TestCase):
         photos = app / 'assets/photos'
         photos.mkdir(parents=True)
         link = photos / PHOTO_A
-        link.symlink_to(self.photos_dir / PHOTO_A)
         target_before = hashes(self.legacy)
-        link_before = (os.readlink(link), link.lstat().st_mtime_ns)
         before = self.snapshot(self.schema)
         with patch.dict(os.environ, self._authority_environment(directory)), \
                 patch.object(media_upload, '__file__', str(app / 'services/media_upload.py')), \
@@ -1066,6 +1064,11 @@ class PostgresAuxiliaryTests(unittest.TestCase):
                 patch.object(media_upload, 'photo_registry', side_effect=AssertionError('Unexpected local registry lookup')), \
                 patch.object(sqlite3, 'connect', side_effect=AssertionError('Unexpected SQLite authority access')):
             url = '/static/photos/' + PHOTO_A
+            self.assertFalse(link.exists())
+            self.assertEqual(media_upload.owned_photo(url, ACTOR), url)
+            self.assertEqual(photo_reference.image_reference(url, ACTOR), url)
+            link.symlink_to(self.photos_dir / PHOTO_A)
+            link_before = (os.readlink(link), link.lstat().st_mtime_ns)
             self.assertEqual(media_upload.owned_photo(url, ACTOR), url)
             self.assertEqual(photo_reference.image_reference(url, ACTOR), url)
         self.assertFalse(directory.exists())
