@@ -163,7 +163,15 @@ elif action in ("extra_photo","admit"):
     from services.postgres_auxiliary import PostgresAuxiliary
     backend=PostgresAuxiliary(dsn,schema)
     if action=="extra_photo":
-        backend.photo_save(request["actor"],request["filename"],request["content"],time.time())
+        from io import BytesIO
+        from PIL import Image
+        pixels=b"".join(hashlib.sha256(str(index).encode()).digest() for index in range(6144))
+        image=Image.frombytes("RGB",(256,256),pixels)
+        output=BytesIO()
+        image.save(output,format="JPEG",quality=90)
+        content=output.getvalue()
+        assert len(content)>len(request["content"])
+        backend.photo_save(request["actor"],request["filename"],content,time.time())
     backend.signing_material()
     result={"healthy":backend.photo_owned(request["filename"],request["actor"])}
 print(json.dumps(result,default=encode,sort_keys=True))
@@ -225,7 +233,9 @@ def run_sql_startup_checks(f):
             photos=str(originals), code_key=str(code_key), native_key=str(native_key))
     # A second real SQL-owned photo makes missing-one-file a nonempty partial
     # cache, distinct from the supported fresh/empty-cache reconstruction path.
-    extra_photo = secrets.token_hex(16) + '.jpg'
+    extra_photo = 'f' * 32 + '.jpg'
+    first_photo = f['photo']['url'].rsplit('/', 1)[-1]
+    check(first_photo < extra_photo, 'real cache failure fixture orders the original JPEG before its larger second JPEG')
     check(observe('extra_photo', actor=f['student_actor'], filename=extra_photo, content=photo_bytes)['healthy'],
           'SQL fixture establishes two real photo rows for partial-cache admission')
     check(observe('snapshot')['server_version_num'] // 10000 == 18, 'actual integrated native and auxiliary database is PostgreSQL18')
@@ -320,7 +330,7 @@ def run_sql_startup_checks(f):
     check(merchant.call('resolve_claim', qr_payload=held['qr_payload']).get('ok'), 'reconstructed SQL cache restart preserves the prior held QR and owner')
     stopped(process, 'sql-cache-rebuild-restart')
 
-    def refused(label, changes=None, use_flag=True):
+    def refused(label, changes=None, use_flag=True, command_args=None):
         ports()
         env = dict(local)
         for name, value in (changes or {}).items():
@@ -333,7 +343,7 @@ def run_sql_startup_checks(f):
         before_files = fingerprint(original_paths)
         cache_paths = sorted(cache.rglob('*'))
         cache_files = fingerprint([cache, *cache_paths])
-        process = f['start'](launch_args if use_flag else launch_args[:-1], env, 'sql-refusal-' + label)
+        process = f['start'](command_args or (launch_args if use_flag else launch_args[:-1]), env, 'sql-refusal-' + label)
         try:
             code = process.wait(timeout=60)
         except subprocess.TimeoutExpired:
@@ -348,6 +358,8 @@ def run_sql_startup_checks(f):
         private = [dsn.encode(), original_native_bytes.strip(), original_code_bytes.hex().encode()]
         private += [f[name + '_token'].encode() for name in ('student','merchant','historical')]
         private += [env[name].encode() for name in ('JAC_DB_URL','MLOCAL_AUXILIARY_TEST_DSN','JAC_SERVE_AUTH_SECRET') if env.get(name)]
+        if native_key.is_file():
+            private.extend((native_key.read_bytes(), repr(native_key.read_bytes()).encode()))
         check(not any(value and value in diagnostic for value in private), 'SQL startup ' + label + ' keeps private diagnostics out of its launcher output')
 
     for label, changes in (
@@ -356,6 +368,14 @@ def run_sql_startup_checks(f):
         ('missing-schema', {'MLOCAL_AUXILIARY_TEST_SCHEMA': schema + '_absent'}),
         ('different-native-database', {'MLOCAL_AUXILIARY_TEST_DSN': dsn.replace('_restored', '_original')}),
         ('production-requested', {'MLOCAL_ENV': 'production'}),
+        ('wrong-environment', {'MLOCAL_ENV': 'development'}),
+        ('missing-environment', {'MLOCAL_ENV': None}),
+        ('legacy-proof-selector', {'MLOCAL_ONBOARDING_BACKEND': 'postgres-proof'}),
+        ('unknown-selector', {'MLOCAL_ONBOARDING_BACKEND': 'unknown-proof'}),
+        ('empty-selector', {'MLOCAL_ONBOARDING_BACKEND': ''}),
+        ('missing-selector', {'MLOCAL_ONBOARDING_BACKEND': None}),
+        ('dsn-query', {'JAC_DB_URL': dsn + '?application_name=unsupported', 'MLOCAL_AUXILIARY_TEST_DSN': dsn + '?application_name=unsupported'}),
+        ('remote-dsn', {'JAC_DB_URL': dsn.replace('@127.0.0.1:', '@example.invalid:'), 'MLOCAL_AUXILIARY_TEST_DSN': dsn.replace('@127.0.0.1:', '@example.invalid:')}),
         ('wrong-configured-key', {'JAC_SERVE_AUTH_SECRET': 'DISPOSABLE_WRONG_ORIGINAL_KEY_' + 'x' * 32}),
     ):
         refused(label, changes)
@@ -368,6 +388,10 @@ def run_sql_startup_checks(f):
         refused('fixture-evidence-required')
     finally:
         f['evidence_file'].write_bytes(original_evidence)
+    unsupported_output = workspace / 'unsupported-disposable-inventory.json'
+    refused('flag-on-unsupported-action', command_args=[str(root_python), str(app / 'deploy/release/package.py'),
+        'inventory', '--config', str(f['config_file']), '--output', str(unsupported_output), '--disposable-sql'])
+    check(not unsupported_output.exists(), 'disposable flag cannot write an unsupported inventory action result')
     # Real invalid SQL state, restored explicitly only after refusal preservation.
     for name in ('native_key', 'code_key'):
         material = sql(('SELECT material FROM signing_material WHERE name=%s', [name]))[0][0][0]
@@ -376,11 +400,31 @@ def run_sql_startup_checks(f):
             refused('wrong-' + name)
         finally:
             sql(('UPDATE signing_material SET material=%s WHERE name=%s', [material, name]))
-    material = sql(('DELETE FROM signing_material WHERE name=%s RETURNING material', ['native_key']))[0][0][0]
-    try:
-        refused('missing-native-key')
-    finally:
-        sql(('INSERT INTO signing_material VALUES (%s,%s)', ['native_key', material]))
+    for name in ('native_key', 'code_key'):
+        material = sql(('DELETE FROM signing_material WHERE name=%s RETURNING material', [name]))[0][0][0]
+        try:
+            refused('missing-' + name)
+        finally:
+            sql(('INSERT INTO signing_material VALUES (%s,%s)', [name, material]))
+    # Preserve the original inode/bytes elsewhere while installing a synthetic
+    # malformed stand-in. Both anchors match, so mismatch alone cannot pass these.
+    for label, material in (
+        ('utf8', b'\xff' + b'a' * 40), ('interior-lf', b'a' * 32 + b'\n' + b'b' * 32),
+        ('interior-crlf', b'a' * 32 + b'\r\n' + b'b' * 32), ('nul', b'a' * 32 + b'\x00'),
+        ('placeholder', b'supersecretkey_for_testing_only!'), ('short', b'a' * 31),
+        ('unicode-outer-space', '\u2003'.encode() + b'a' * 40),
+    ):
+        held_key = workspace / ('preserved-native-key-' + label)
+        native_key.rename(held_key)
+        native_key.write_bytes(material)
+        native_key.chmod(0o600)
+        sql(('UPDATE signing_material SET material=%s WHERE name=%s', [material, 'native_key']))
+        try:
+            refused('matched-native-' + label)
+        finally:
+            sql(('UPDATE signing_material SET material=%s WHERE name=%s', [original_native_bytes, 'native_key']))
+            native_key.unlink()
+            held_key.rename(native_key)
     sql(('UPDATE business_status SET revision=revision+1 WHERE actor=%s', [f['merchant_actor']]))
     try:
         refused('incomplete-suspension-audit')
@@ -428,12 +472,13 @@ def run_sql_startup_checks(f):
             refused('cache-' + kind)
         finally:
             extra.rmdir() if kind == 'directory' else extra.unlink()
-    original_key_hold = workspace / 'retained-missing-native-key'
-    native_key.rename(original_key_hold)
-    try:
-        refused('missing-original-native-file')
-    finally:
-        original_key_hold.rename(native_key)
+    for label, path in (('native', native_key), ('code', code_key)):
+        original_key_hold = workspace / ('retained-missing-' + label + '-key')
+        path.rename(original_key_hold)
+        try:
+            refused('missing-original-' + label + '-file')
+        finally:
+            original_key_hold.rename(path)
     hidden = workspace / 'retained-application-driver'
     driver = next((app / '.jac/venv/lib').glob('python*/site-packages/psycopg'))
     driver.rename(hidden)
@@ -443,10 +488,60 @@ def run_sql_startup_checks(f):
         hidden.rename(driver)
     unavailable = dsn.replace(':' + str(environment['PGPORT']) + '/', ':' + str(f['next_port']()) + '/')
     refused('database-outage', {'JAC_DB_URL': unavailable, 'MLOCAL_AUXILIARY_TEST_DSN': unavailable})
+    # An empty delivery target cannot conceal a lost imported photo row. The
+    # original registry remains an independent read-only anchor for that row.
+    check({p.name for p in cache.iterdir()} == expected_cache and all(p.is_file() and not p.is_symlink() for p in cache.iterdir()),
+          'missing-photo witness starts with only the proven generated cache')
+    cache_contents = {p.name: p.read_bytes() for p in cache.iterdir()}
+    for path in cache.iterdir():
+        path.unlink()
+    missing_photo = sql(('DELETE FROM photos WHERE filename=%s RETURNING *', [first_photo]))[0][0]
+    try:
+        refused('missing-original-photo-with-empty-cache')
+    finally:
+        sql(('INSERT INTO photos VALUES (%s,%s,%s,%s,%s,%s)', missing_photo))
+        for name, content in cache_contents.items():
+            path = cache / name
+            path.write_bytes(content)
+            path.chmod(0o600)
+    # A real, inherited byte limit permits the first complete JPEG and fails the
+    # larger second write. The wrapper execs bash in its own existing PID/group;
+    # no unsafe preexec_fn is used in the SMTP fixture's threaded parent.
+    check({p.name for p in cache.iterdir()} == expected_cache and all(p.is_file() and not p.is_symlink() for p in cache.iterdir()),
+          'interrupted construction removes only the complete fixture-owned cache')
+    for path in cache.iterdir():
+        path.unlink()
+    prior = (observe('snapshot'), observe('snapshot', target_dsn=dsn.replace('_restored', '_original')))
+    prior_originals = fingerprint(original_paths)
+    limiter = '''import os,resource,signal,sys
+limit=int(sys.argv[1])
+resource.setrlimit(resource.RLIMIT_FSIZE,(limit,limit))
+signal.signal(signal.SIGXFSZ,signal.SIG_IGN)
+os.execvp(sys.argv[2],sys.argv[2:])
+'''
+    ports()
+    process = f['start']([str(root_python), '-c', limiter, str(len(photo_bytes)), *launch_args], local, 'sql-real-cache-write-failure')
+    try:
+        code = process.wait(timeout=60)
+    except subprocess.TimeoutExpired:
+        stopped(process, 'sql-real-cache-write-failure')
+        check(False, 'real SQL cache write failure reaches bounded fail-stop')
+    check(code != 0 and not f['process_group_alive'](process) and f['closed'](config['backend_port']) and f['closed'](config['gateway_port']),
+          'real cache file-size failure never starts native or gateway listeners')
+    check((cache / first_photo).is_file() and (cache / first_photo).read_bytes() == photo_bytes
+          and not (cache / extra_photo).exists(),
+          'real EFBIG witness completes the first exact JPEG and refuses the larger second write')
+    check((observe('snapshot'), observe('snapshot', target_dsn=dsn.replace('_restored', '_original'))) == prior
+          and fingerprint(original_paths) == prior_originals,
+          'real interrupted cache construction preserves both native databases SQL and original inputs')
+    refused('real-interrupted-partial-cache')
+    check({p.name for p in cache.iterdir()} == {first_photo} and not (cache / first_photo).is_symlink(),
+          'interrupted cache cleanup is bounded to its one proven generated JPEG')
+    (cache / first_photo).unlink()
     check(observe('admit', filename=f['photo']['url'].rsplit('/',1)[-1], actor=f['merchant_actor'])['healthy'],
           'all SQL startup negative fixtures restore a healthy original authority')
     check(fingerprint(original_paths) == preserved, 'complete SQL startup and refusal matrix preserves every original SQLite key and photo byte')
     f['receipt']['sql_startup_scope'] = dict(canonical_entry_unchanged=True, original_tokens_reused=True,
         startup_only=True, ongoing_sql_readiness_certified=False, uploads_supported=False,
-        cache_reconstructed_after_stop=True, interrupted_cache_construction_certified=False,
+        cache_reconstructed_after_stop=True, interrupted_cache_construction_certified=True,
         fixture_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())

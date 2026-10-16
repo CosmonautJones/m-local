@@ -30,6 +30,7 @@ def main():
     args = parser.parse_args()
     if args.receipt.exists():
         raise RuntimeError('Fresh receipt required')
+    sys.dont_write_bytecode = True
     spec = importlib.util.spec_from_file_location('package_tool', args.package / 'source/deploy/release/package.py')
     pkg = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(pkg)
@@ -45,11 +46,14 @@ def main():
     pg_bin = None
     environment = {k: v for k, v in os.environ.items() if not k.startswith(('MLOCAL_', 'JAC_')) and k not in ('PYTHONPATH', 'JACPATH')}
     environment.pop('LD_LIBRARY_PATH', None)
+    for name in ('PGHOSTADDR', 'PGSERVICE', 'PGSERVICEFILE', 'PGPASSFILE'):
+        environment.pop(name, None)
     environment.update(PATH=os.environ['PATH'],
         PGHOST='127.0.0.1', PGPORT=str(free_port()), PGUSER=getpass.getuser(),
         NO_PROXY='127.0.0.1,localhost,::1', no_proxy='127.0.0.1,localhost,::1',
         JAC_CACHE_HOME=str(workspace / 'runtime-cache'), MLOCAL_ENV='development',
         MLOCAL_ONBOARDING_DIR=str(onboarding), MLOCAL_SHOW_SAMPLES='0',
+        PYTHONDONTWRITEBYTECODE='1',
         MLOCAL_DEMO_MODE='false', MLOCAL_DEMO_COMPANIES='0', MLOCAL_DEMO_STUDENTS='[]',
         MLOCAL_HOSTED_DATASET='false')
     os.environ.update(environment)
