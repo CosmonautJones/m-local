@@ -204,7 +204,11 @@ def run_sql_startup_checks(f):
             if path.is_symlink():
                 kind, content = 'link', os.readlink(path)
             elif path.is_file():
-                kind, content = 'file', hashlib.sha256(path.read_bytes()).hexdigest()
+                kind = 'file'
+                try:
+                    content = hashlib.sha256(path.read_bytes()).hexdigest()
+                except PermissionError:
+                    content = 'unreadable'
             else:
                 kind, content = 'directory', None
             result.append((str(path), kind, content, metadata))
@@ -504,6 +508,52 @@ def run_sql_startup_checks(f):
             path = cache / name
             path.write_bytes(content)
             path.chmod(0o600)
+    # A valid JPEG with a different valid owner is still a changed imported row.
+    # Keep delivery empty so a filename-only cache check cannot mask this loss.
+    for path in cache.iterdir():
+        path.unlink()
+    original_photo = sql(('SELECT * FROM photos WHERE filename=%s', [first_photo]))[0][0]
+    sql(('UPDATE photos SET actor=%s WHERE filename=%s', [f['student_actor'], first_photo]))
+    try:
+        refused('changed-original-photo-owner-with-empty-cache')
+    finally:
+        sql(('UPDATE photos SET actor=%s WHERE filename=%s', [original_photo[1], first_photo]))
+        for name, content in cache_contents.items():
+            path = cache / name
+            path.write_bytes(content)
+            path.chmod(0o600)
+    check(sql(('SELECT * FROM photos WHERE filename=%s', [first_photo]))[0][0] == original_photo,
+          'changed original photo owner witness restores the exact imported SQL row')
+    # Retain the original registry inode intact while testing unavailable and
+    # malformed stand-ins. Even an empty delivery target cannot bypass it.
+    for path in cache.iterdir():
+        path.unlink()
+    registry = onboarding / 'photo-ownership.sqlite3'
+    held_registry = workspace / 'retained-original-photo-registry'
+    registry.rename(held_registry)
+    registry_standin = b'owned malformed photo registry witness; not SQLite'
+    try:
+        refused('missing-original-photo-registry-with-empty-cache')
+        registry.write_bytes(registry_standin)
+        registry.chmod(0o600)
+        refused('malformed-original-photo-registry-with-empty-cache')
+        registry.chmod(0)
+        check(not os.access(registry, os.R_OK), 'unreadable original photo registry witness denies actual file reads')
+        refused('unreadable-original-photo-registry-with-empty-cache')
+        registry.chmod(0o600)
+        check(registry.read_bytes() == registry_standin,
+              'unreadable registry refusal preserves the exact synthetic stand-in bytes')
+    finally:
+        if registry.exists():
+            registry.chmod(0o600)
+            registry.unlink()
+        held_registry.rename(registry)
+        for name, content in cache_contents.items():
+            path = cache / name
+            path.write_bytes(content)
+            path.chmod(0o600)
+    check(fingerprint(original_paths) == preserved,
+          'registry refusal witnesses restore every original inode and byte')
     # A real, inherited byte limit permits the first complete JPEG and fails the
     # larger second write. The wrapper execs bash in its own existing PID/group;
     # no unsafe preexec_fn is used in the SMTP fixture's threaded parent.
