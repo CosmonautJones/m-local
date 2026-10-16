@@ -1443,10 +1443,22 @@ class PostgresAuxiliaryTests(unittest.TestCase):
         cached = backend.code_store(self.CodeStore, self.runtime, lambda: self.now)
         return schema, backend, cached
 
-    def _ddl_change(self, schema, statements):
+    def _ddl_change(self, schema, statements, case='canonical'):
+        import json
         with self.connect() as connection:
-            for statement in statements:
-                connection.execute(self.sql.SQL(statement).format(s=self.sql.Identifier(schema), p=self.sql.Identifier(self.schema)))
+            for index, statement in enumerate(statements):
+                fields = {'s': self.sql.Identifier(schema), 'p': self.sql.Identifier(self.schema)}
+                if '{photo_content_check}' in statement:
+                    row = connection.execute("SELECT c.conname FROM pg_catalog.pg_constraint c JOIN pg_catalog.pg_class r ON r.oid=c.conrelid JOIN pg_catalog.pg_namespace n ON n.oid=r.relnamespace WHERE n.nspname=%s AND r.relname='photos' AND c.contype='c' AND pg_catalog.pg_get_constraintdef(c.oid,false)=%s",
+                                             (schema, 'CHECK ((octet_length(content) = bytes))')).fetchone()
+                    self.assertIsNotNone(row, 'Canonical photo-content CHECK is absent from owned fixture')
+                    fields['photo_content_check'] = self.sql.Identifier(row[0])
+                try:
+                    connection.execute(self.sql.SQL(statement).format(**fields))
+                except self.psycopg.Error as error:
+                    print('ddl fixture setup diagnostic: ' + json.dumps({'case': case, 'statement_index': index,
+                          'sqlstate': error.sqlstate, 'error_class': type(error).__name__}, sort_keys=True))
+                    raise
 
     def _ddl_refuses(self, schema, backend, cached, *, established=True):
         from contextlib import contextmanager
@@ -1568,12 +1580,12 @@ class PostgresAuxiliaryTests(unittest.TestCase):
         for label, statements in cases:
             with self.subTest(ddl_damage=label):
                 schema, backend, cached = self._ddl_variant()
-                self._ddl_change(schema, statements)
+                self._ddl_change(schema, statements, case=label)
                 self._ddl_refuses(schema, backend, cached)
 
     def test_ddl_checks_nullability_types_and_defaults_are_not_evaluated_or_repaired(self):
         cases = (
-            ('photo_check', ('ALTER TABLE {s}.photos DROP CONSTRAINT photos_content_check',)),
+            ('photo_check', ('ALTER TABLE {s}.photos DROP CONSTRAINT {photo_content_check}',)),
             ('status_check', ('ALTER TABLE {s}.business_status DROP CONSTRAINT business_status_revision_check', 'ALTER TABLE {s}.business_status ADD CHECK(revision>=0)')),
             ('unvalidated_check', ('ALTER TABLE {s}.photos DROP CONSTRAINT photos_bytes_check', 'ALTER TABLE {s}.photos ADD CHECK(bytes>0 AND bytes<=8388608) NOT VALID')),
             ('nullable', ('ALTER TABLE {s}.photos ALTER COLUMN actor DROP NOT NULL',)),
@@ -1588,7 +1600,7 @@ class PostgresAuxiliaryTests(unittest.TestCase):
         for label, statements in cases:
             with self.subTest(ddl_damage=label):
                 schema, backend, cached = self._ddl_variant()
-                self._ddl_change(schema, statements)
+                self._ddl_change(schema, statements, case=label)
                 self._ddl_refuses(schema, backend, cached)
 
     def test_ddl_identity_sequence_declarations_gate_admission_without_counter_reset(self):
@@ -1603,7 +1615,7 @@ class PostgresAuxiliaryTests(unittest.TestCase):
         for label, statements in cases:
             with self.subTest(ddl_damage=label):
                 schema, backend, cached = self._ddl_variant()
-                self._ddl_change(schema, statements)
+                self._ddl_change(schema, statements, case=label)
                 self._ddl_refuses(schema, backend, cached)
 
     def test_ddl_unexpected_relation_and_execution_behavior_refuses_before_state_query(self):
@@ -1625,7 +1637,7 @@ class PostgresAuxiliaryTests(unittest.TestCase):
         for label, statements in cases:
             with self.subTest(ddl_damage=label):
                 schema, backend, cached = self._ddl_variant()
-                self._ddl_change(schema, statements)
+                self._ddl_change(schema, statements, case=label)
                 self._ddl_refuses(schema, backend, cached)
 
 if __name__ == '__main__':
