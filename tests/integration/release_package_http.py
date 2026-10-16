@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 
 def main():
+    fixture_source = Path(__file__).resolve(strict=True)
     parser = argparse.ArgumentParser()
     parser.add_argument('--package', type=Path, required=True)
     parser.add_argument('--tools', type=Path, required=True)
@@ -30,6 +31,7 @@ def main():
     args = parser.parse_args()
     if args.receipt.exists():
         raise RuntimeError('Fresh receipt required')
+    sys.dont_write_bytecode = True
     spec = importlib.util.spec_from_file_location('package_tool', args.package / 'source/deploy/release/package.py')
     pkg = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(pkg)
@@ -42,21 +44,24 @@ def main():
     workspace = Path(tempfile.mkdtemp(prefix='m-local-package-live.', dir=args.durable_base))
     workspace.chmod(0o700)
     app, onboarding = workspace / 'app', workspace / 'onboarding'
-    pg_bin = args.tools / 'usr/lib/postgresql/16/bin'
+    pg_bin = None
     environment = {k: v for k, v in os.environ.items() if not k.startswith(('MLOCAL_', 'JAC_')) and k not in ('PYTHONPATH', 'JACPATH')}
-    environment.update(PATH=str(pg_bin) + ':' + os.environ['PATH'],
-        LD_LIBRARY_PATH=str(args.tools / 'usr/lib/x86_64-linux-gnu'),
+    environment.pop('LD_LIBRARY_PATH', None)
+    for name in ('PGHOSTADDR', 'PGSERVICE', 'PGSERVICEFILE', 'PGPASSFILE'):
+        environment.pop(name, None)
+    environment.update(PATH=os.environ['PATH'],
         PGHOST='127.0.0.1', PGPORT=str(free_port()), PGUSER=getpass.getuser(),
         NO_PROXY='127.0.0.1,localhost,::1', no_proxy='127.0.0.1,localhost,::1',
         JAC_CACHE_HOME=str(workspace / 'runtime-cache'), MLOCAL_ENV='development',
         MLOCAL_ONBOARDING_DIR=str(onboarding), MLOCAL_SHOW_SAMPLES='0',
+        PYTHONDONTWRITEBYTECODE='1',
         MLOCAL_DEMO_MODE='false', MLOCAL_DEMO_COMPANIES='0', MLOCAL_DEMO_STUDENTS='[]',
         MLOCAL_HOSTED_DATASET='false')
     os.environ.update(environment)
     processes, checks = [], []
     pg_started, sink_closed, sink = False, False, None
     receipt = {'verdict': 'BLOCKED', 'source_sha': manifest['source_sha'],
-        'fixture_sha256': pkg.digest(Path(__file__).resolve()),
+        'fixture_sha256': pkg.digest(fixture_source),
         'source_tree': manifest['source_tree'], 'manifest_sha256': pkg.digest(args.package / 'manifest.json'),
         'official_runtime': manifest['runtime'], 'disposable_fixture_only': True,
         'live_deployment': False, 'external_email': False, 'hosted_acceptance': False,
@@ -72,7 +77,11 @@ def main():
         print('PASS ' + label, flush=True)
 
     def command(*command_args):
-        result = subprocess.run(command_args, env=environment, capture_output=True, timeout=120)
+        client_bin = args.tools / 'usr/lib/postgresql/18/bin'
+        command_env = environment
+        if Path(command_args[0]).parent == client_bin:
+            command_env = dict(environment, LD_LIBRARY_PATH=str(args.tools / 'usr/lib/x86_64-linux-gnu'))
+        result = subprocess.run(command_args, env=command_env, capture_output=True, timeout=120)
         if result.returncode:
             (workspace / ('command-' + secrets.token_hex(4) + '.log')).write_bytes(result.stdout + result.stderr)
             raise RuntimeError('Disposable command failed; protected logs retained')
@@ -132,16 +141,19 @@ def main():
             'native_signing_file': str(app / '.jac/data/jwt_secret'), 'photos_dir': str(app / 'assets/photos'),
             'backend_port': 18840, 'gateway_port': 18841, 'topology': 'single-instance-serialized', 'replicas': 1}, require_marker=True)
         check(True, 'complete packaged source and offline libraries install with exact source marker')
+        from sql_startup_http import installed_driver, postgres18_tools, client_libraries, run_sql_startup_checks
+        receipt['sql_application_driver'] = installed_driver(app, environment, workspace, check)
+        pg_bin = postgres18_tools(args.package, args.tools, workspace, environment, command, check, receipt)
         command(str(pg_bin / 'initdb'), '-D', str(workspace / 'postgres'), '--auth=trust', '--no-locale', '--encoding=UTF8',
-            '-L', str(args.tools / 'usr/share/postgresql/16'))
+            '-L', str(pg_bin.parent / 'share/postgresql'))
         (workspace / 'pg-socket').mkdir(mode=0o700)
         command(str(pg_bin / 'pg_ctl'), '-D', str(workspace / 'postgres'), '-l', str(workspace / 'postgres.log'),
             '-o', '-h 127.0.0.1 -p ' + environment['PGPORT'] + ' -k ' + str(workspace / 'pg-socket'), '-w', 'start')
         pg_started = True
-        command(str(pg_bin / 'createdb'), 'package_original')
-        command(str(pg_bin / 'createdb'), 'package_restored')
+        command(str(args.tools / 'usr/lib/postgresql/18/bin/createdb'), 'mlocal_aux_test_package_original')
+        command(str(args.tools / 'usr/lib/postgresql/18/bin/createdb'), 'mlocal_aux_test_package_restored')
         connection_base = 'postgresql://' + quote(environment['PGUSER'], safe='') + '@127.0.0.1:' + environment['PGPORT'] + '/'
-        environment['JAC_DB_URL'] = connection_base + 'package_original'
+        environment['JAC_DB_URL'] = connection_base + 'mlocal_aux_test_package_original'
         os.environ.update(environment)
         used_ports = set()
 
@@ -184,6 +196,10 @@ def main():
             historical = Api(anonymous.origin, historical_token)
             student_actor, merchant_actor = student.call('current_session')['actor_id'], merchant.call('current_session')['actor_id']
             historical_actor = historical.call('current_session')['actor_id']
+            check(student.call('save_account_profile', display_name='Preserved SQL student profile').get('ok'),
+                'SQL fixture seeds an authenticated original student profile before recovery')
+            check(merchant.call('save_account_profile', display_name='Preserved SQL merchant profile').get('ok'),
+                'SQL fixture seeds an authenticated original merchant profile before recovery')
             fields = dict(name='Disposable Package Cafe', cuisine='Cafe', description='Fictional package recovery fixture',
                 address='123 Fixture Street', website='', menu_text='', menu_url='', image_url='', confirmed=True)
             check(merchant.call('save_business_draft', **fields)['status'] == 'pending_review', 'package keeps manual business admission')
@@ -353,7 +369,8 @@ def main():
             backup = workspace / 'recovery-set'
             sqlite_names = ('onboarding.sqlite3', 'photo-ownership.sqlite3')
             before_backup_sqlite = {name: sqlite_fingerprint(onboarding / name) for name in sqlite_names}
-            pkg.coordinated_backup(config, backup, args.package)
+            with client_libraries(args.tools):
+                pkg.coordinated_backup(config, backup, args.package)
             pkg.verify_recovery_set(backup)
             check(True, 'actual PostgreSQL graph identity and private stores produce a complete verified recovery set')
             check(all(sqlite_fingerprint(backup / 'private' / name) == before_backup_sqlite[name] for name in sqlite_names),
@@ -364,8 +381,9 @@ def main():
             app.rename(workspace / 'retained-original-app')
             onboarding.rename(workspace / 'retained-original-onboarding')
             pkg.install_source(args.package, app)
-            os.environ['MLOCAL_RECOVERY_DB_URL'] = connection_base + 'package_restored'
-            pkg.coordinated_restore(backup, config, args.package)
+            os.environ['MLOCAL_RECOVERY_DB_URL'] = connection_base + 'mlocal_aux_test_package_restored'
+            with client_libraries(args.tools):
+                pkg.coordinated_restore(backup, config, args.package)
             restored_inventory = pkg.state_inventory(config)
             check(restored_inventory['sqlite'] == original_inventory['sqlite']
                 and restored_inventory['photos'] == original_inventory['photos']
@@ -373,13 +391,22 @@ def main():
                 and all(restored_inventory['files'][name]['sha256'] == pkg.digest(backup / 'private' / name)
                     and sqlite_fingerprint(onboarding / name) == before_backup_sqlite[name] for name in sqlite_names),
                 'logical restore retains exact backup bytes all SQLite schema and rows and original keys and photos')
-            environment['JAC_DB_URL'] = connection_base + 'package_restored'
+            environment['JAC_DB_URL'] = connection_base + 'mlocal_aux_test_package_restored'
             os.environ.update(environment)
             production('packaged-restored-startup')
             production('packaged-restored-suspension-restart', redeem_held=True)
             production('packaged-post-redemption-restart', held=False, suspended=False)
             check(all(pkg.digest(path) == keys[name] for name, path in {'code': onboarding / 'code.key', 'jwt': app / '.jac/data/jwt_secret'}.items()),
                 'restored startup never replaces original native and email signing keys')
+            run_sql_startup_checks(dict(pkg=pkg, package=args.package, app=app, onboarding=onboarding,
+                workspace=workspace, environment=environment, config=config, config_file=config_file,
+                evidence_file=evidence_file, start=start, ready=ready, check=check, closed=closed,
+                next_port=next_port, stop_process=stop_process, process_group_alive=process_group_alive,
+                Api=Api, photo=photo, photo_payload=PHOTO_PAYLOAD, fields=fields,
+                student_token=student_token, merchant_token=merchant_token, historical_token=historical_token,
+                student_actor=student_actor, merchant_actor=merchant_actor, historical_actor=historical_actor,
+                original_offer=offer, original_claim=claim, historical_claim=historical_claim,
+                root_python=fixture_source.parents[2] / '.jac/venv/bin/python', receipt=receipt))
         sink_closed = sink.closed
         check(sink_closed, 'owned local TLS SMTP fixture closes')
         receipt['verdict'] = 'PASS'

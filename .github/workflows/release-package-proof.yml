@@ -17,7 +17,7 @@ concurrency:
 jobs:
   package:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,19 +29,127 @@ jobs:
         run: bash scripts/setup.sh
       - name: Build and verify the exact-source offline package
         run: bash scripts/build-release-package.sh "$RUNNER_TEMP/release-package"
+      - name: Replay the exact portable package archive
+        run: |
+          set -euo pipefail
+          sha256sum --check "$RUNNER_TEMP/release-package/archive-sha256.txt"
+          python3 -B - "$RUNNER_TEMP/release-package" "$RUNNER_TEMP/package-replay" <<'PY'
+          import hashlib, importlib.util, json, sys, tarfile
+          from pathlib import Path, PurePosixPath
+          output, replay = map(Path, sys.argv[1:])
+          archive = output / 'offline-package.tar.gz'
+          assert not replay.exists(), 'Replay destination must be fresh'
+          replay.mkdir(mode=0o700)
+          with tarfile.open(archive, 'r:gz') as stream:
+              members = stream.getmembers()
+              names = set()
+              for member in members:
+                  name = PurePosixPath(member.name)
+                  assert (not name.is_absolute() and name.parts and name.parts[0] == 'release'
+                      and '..' not in name.parts and '\\' not in member.name and ':' not in member.name
+                      and (member.isfile() or member.isdir()) and str(name) not in names), 'Unsafe or duplicate package member'
+                  names.add(str(name))
+              stream.extractall(replay, members=members, filter='data')
+          package = replay / 'release'
+          spec = importlib.util.spec_from_file_location('replayed_package', package / 'source/deploy/release/package.py')
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          manifest = module.verify_package(package)
+          assert manifest == json.loads((output / 'package-manifest.json').read_text()), 'Replayed manifest differs'
+          checksum = module.digest(archive)
+          (output / 'archive-portable-sha256.txt').write_text(checksum + '  offline-package.tar.gz\n')
+          receipt = dict(verdict='PASS', source_sha=manifest['source_sha'], source_tree=manifest['source_tree'],
+              archive_name=archive.name, archive_sha256=checksum, archive_bytes=archive.stat().st_size,
+              manifest_sha256=module.digest(package / 'manifest.json'), verified_files=len(manifest['files']),
+              archive_members=len(members), fixture_input_is_replayed_extraction=True, payload_retention='BLOCKED_UNVERIFIED_NO_SPEND_CAPACITY')
+          (output / 'archive-replay.json').write_text(json.dumps(receipt, sort_keys=True, indent=2) + '\n')
+          print('PASS exact archive replay and complete package inventory')
+          PY
+      - name: Fetch authenticated matching PostgreSQL18 clients without installation
+        run: |
+          set -euo pipefail
+          (
+            unset LD_PRELOAD LD_AUDIT LD_LIBRARY_PATH
+            . /etc/os-release
+            test "$ID:$VERSION_ID" = ubuntu:24.04
+            test "$(dpkg --print-architecture)" = amd64
+            test "$(id -u)" -ne 0
+            umask 022
+            p="$RUNNER_TEMP/pg18-clients"
+            tools="$RUNNER_TEMP/package-pg18-tools"
+            mkdir -m 755 "$p" "$tools"
+            mkdir -p "$p"/{etc/apt.conf.d,etc/sources.list.d,etc/trusted.gpg.d,etc/preferences.d,state/lists/partial,cache/archives/partial,log,debs,tmp}
+            mkdir -m 700 "$p/gnupg"
+            : > "$p/etc/empty.conf"
+            : > "$p/etc/trusted.gpg"
+            : > "$p/state/status"
+            curl --fail --location --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 120 --retry 2 \
+              https://www.postgresql.org/media/keys/ACCC4CF8.asc -o "$p/pgdg.asc"
+            gpg --batch --no-options --homedir "$p/gnupg" --with-colons --show-keys "$p/pgdg.asc" > "$p/key.txt"
+            fp="$(awk -F: '$1=="pub"{wanted=1;next} wanted && $1=="fpr"{print $10;wanted=0}' "$p/key.txt")"
+            test "$fp" = B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8
+            printf 'deb [arch=amd64 signed-by=%s/pgdg.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main\n' "$p" > "$p/etc/sources.list"
+            cat > "$p/apt.conf" <<EOF
+          Dir::Etc "$p/etc";
+          Dir::Etc::main "empty.conf";
+          Dir::Etc::parts "apt.conf.d";
+          Dir::Etc::sourcelist "sources.list";
+          Dir::Etc::sourceparts "sources.list.d";
+          Dir::Etc::trusted "trusted.gpg";
+          Dir::Etc::trustedparts "trusted.gpg.d";
+          Dir::State "$p/state";
+          Dir::State::status "$p/state/status";
+          Dir::State::lists "lists";
+          Dir::Cache "$p/cache";
+          Dir::Cache::archives "archives";
+          Dir::Cache::pkgcache "";
+          Dir::Cache::srcpkgcache "";
+          Dir::Log "$p/log";
+          APT::Architecture "amd64";
+          Acquire::Languages "none";
+          Acquire::Retries "2";
+          Acquire::https::Timeout "30";
+          EOF
+            APT_CONFIG="$p/apt.conf" TMPDIR="$p/tmp" apt-get --error-on=any update 2>&1 | tee "$p/update.log"
+            v=18.6-1.pgdg24.04+2
+            (cd "$p/debs"; APT_CONFIG="$p/apt.conf" TMPDIR="$p/tmp" apt-get download "postgresql-client-18:amd64=$v" "libpq5:amd64=$v")
+            (cd "$p/debs"; sha256sum --check <<EOF
+          b9d10d99a73bf7aa375be2fe36626c40499cfdf553d0ad174674a88a1b256b43  postgresql-client-18_${v}_amd64.deb
+          b487c5ed2ceb9244c6a9d6ae65818ed6707c3c44a2e14488394ae4194c52c53b  libpq5_${v}_amd64.deb
+          EOF
+            )
+            for pkg in postgresql-client-18 libpq5; do
+              deb="$p/debs/${pkg}_${v}_amd64.deb"
+              test "$(dpkg-deb -f "$deb" Package)" = "$pkg"
+              test "$(dpkg-deb -f "$deb" Version)" = "$v"
+              test "$(dpkg-deb -f "$deb" Architecture)" = amd64
+              dpkg-deb -f "$deb" Package Version Architecture Depends >> "$p/packages.txt"
+              TMPDIR="$p/tmp" dpkg-deb -x "$deb" "$tools"
+            done
+            bin="$tools/usr/lib/postgresql/18/bin"
+            lib="$tools/usr/lib/x86_64-linux-gnu"
+            for client in pg_dump pg_restore createdb psql; do
+              test -f "$bin/$client" && test -x "$bin/$client"
+              LD_LIBRARY_PATH="$lib" ldd "$bin/$client" > "$p/ldd-$client.txt"
+              ! grep -Fq 'not found' "$p/ldd-$client.txt"
+              grep -Fq "libpq.so.5 => $lib/libpq.so.5" "$p/ldd-$client.txt"
+              LD_LIBRARY_PATH="$lib" "$bin/$client" --version | tee "$p/version-$client.txt"
+              grep -Eq "^$client \(PostgreSQL\) 18\.6([[:space:]]|$)" "$p/version-$client.txt"
+              sha256sum "$bin/$client" >> "$p/executable-sha256.txt"
+            done
+            sha256sum "$p/pgdg.asc" "$lib/libpq.so.5" "$p"/state/lists/*InRelease > "$p/provenance-sha256.txt"
+          )
       - name: Prepare only the owned disposable state mount
         run: |
-          test -x /usr/lib/postgresql/16/bin/initdb
-          test -x /usr/lib/postgresql/16/bin/pg_dump
           mkdir -m 700 "$RUNNER_TEMP/package-backing" "$RUNNER_TEMP/package-mount"
           sudo mount --bind "$RUNNER_TEMP/package-backing" "$RUNNER_TEMP/package-mount"
       - name: Prove packaged startup and authenticated logical recovery
         run: |
           source scripts/runtime.sh
           export JAC_BIN JAC_CACHE_HOME="$RUNNER_TEMP/package-fixture-bootstrap-cache"
-          timeout --signal=TERM --kill-after=30s 1200s bash scripts/python.sh -c \
+          timeout --signal=TERM --kill-after=30s 1800s bash scripts/python.sh -c \
             'import runpy,sys; sys.argv[0]="tests/integration/release_package_http.py"; runpy.run_path(sys.argv[0],run_name="__main__")' \
-            --package "$RUNNER_TEMP/release-package/release" --tools / \
+            --package "$RUNNER_TEMP/package-replay/release" --tools "$RUNNER_TEMP/package-pg18-tools" \
             --durable-base "$RUNNER_TEMP/package-mount" --receipt "$RUNNER_TEMP/release-package/live-proof.json"
       - name: Unmount only the owned disposable state mount
         if: always()
@@ -58,6 +166,8 @@ jobs:
             ${{ runner.temp }}/release-package/build-receipt.json
             ${{ runner.temp }}/release-package/official-checksums.json
             ${{ runner.temp }}/release-package/archive-sha256.txt
+            ${{ runner.temp }}/release-package/archive-portable-sha256.txt
+            ${{ runner.temp }}/release-package/archive-replay.json
             ${{ runner.temp }}/release-package/live-proof.json
-      # The large archive is generated and verified, but new storage spending
-      # has not been approved. Do not add an archive upload without that gate.
+      # Replaying the archive does not establish included artifact-storage headroom.
+      # No large payload upload until no-spend delivery capacity is verified.

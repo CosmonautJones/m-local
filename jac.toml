@@ -24,6 +24,7 @@ enabled = false
 
 [dependencies]
 pillow = "==12.3.0"
+"psycopg[binary]" = "==3.3.6"
 
 # Install Jac's llm capability; website AI calls still require MLOCAL_IMPORT_MODEL.
 [byllm.model]

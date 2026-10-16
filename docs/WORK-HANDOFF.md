@@ -1,5 +1,8 @@
-Current bounded increment: [strict auxiliary DDL admission](AUXILIARY-DDL-ADMISSION.md);
-final qualification and remaining actual-startup/photo-HTTP gate are explicit.
+Current bounded increment: [integrated disposable SQL startup](INTEGRATED-SQL-STARTUP.md),
+built on frozen [PR67](https://github.com/CosmonautJones/m-local/pull/67)
+`3ebacd0538161b986bc62f242d7aed2cd40ed20a`. Its PR and fresh CI receipts record
+the exact tested head and outcomes. Production SQL, native writer fencing,
+changed-store SQL recovery and human hosted acceptance remain open.
 
 # M-Local: ChatGPT Work coordinator handoff
 
