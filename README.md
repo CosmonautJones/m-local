@@ -44,12 +44,20 @@ Source composition is now [informational](docs/RELEASE-SOURCE-POLICY.md);
 those old failures remain recorded. Every later source head needs its own checks.
 The PRs and #33 carry the latest heads and terminal CI results.
 
-Remaining gates include research privacy and retention, provider durability and
-existing-user migration, an approved rollout artifact, current-candidate inbox
-delivery, off-host recovery, monitoring, phones/cameras and human acceptance.
+Remaining gates include research access, retention and historical publication,
+provider durability and existing-user migration, an approved rollout artifact,
+current-candidate inbox delivery, off-host recovery, monitoring, phones/cameras
+and human acceptance.
 Follow the [gate matrix](https://github.com/CosmonautJones/m-local/blob/release/combined-candidate/docs/RELEASE-GATES.md)
 and [acceptance checklist](docs/RELEASE-ACCEPTANCE.md). Local fixtures and a
 reachable homepage do not complete hosted acceptance.
+
+Travis approved private retention of contact research on October 16. This candidate
+removes research payloads from public source after verified preservation and refuses
+them in new release packages. Prior public Git history and existing main remain
+unchanged until separately addressed; older archives containing research must remain
+private. Readers, retention and history handling remain open in
+[privacy decisions](docs/PRIVACY-DECISIONS.md).
 
 ## Candidate behavior
 
@@ -72,10 +80,12 @@ and keep their original expiry and terms. Only an attributed, revision-checked
 reinstatement resumes service; routine business edits cannot clear suspension.
 See the [operator commands](docs/BUSINESS-APPROVAL.md#reversible-suspension-and-reinstatement).
 
-U-M email verification does not establish university enrollment. Businesses check
-any stated eligibility at the counter. Sample offers are fictional and cannot be
-redeemed at a real business. Server sample policy applies across public feed,
-detail and favorite paths while preserving legitimate saved claims.
+M-Local access is available to people who can verify access to their `@umich.edu`
+inbox, including alumni. Verification proves inbox access, not current enrollment
+or official U-M endorsement. Businesses check any stated offer eligibility at the
+counter. Sample offers are fictional and cannot be redeemed at a real business.
+Server sample policy applies across public feed, detail and favorite paths while
+preserving legitimate saved claims.
 
 ## Demo
 

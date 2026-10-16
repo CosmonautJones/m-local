@@ -108,6 +108,12 @@ def private_path(relative):
                for part in parts) or parts[:2] == ("assets", "photos")
 
 
+def research_payload(relative):
+    """Only the public policy note may occupy the research namespace."""
+    parts = Path(relative).parts
+    return tuple(part.casefold() for part in parts[:2]) == ("data", "research") and parts != ("data", "research", "README.md")
+
+
 def git(root, *args):
     result = subprocess.run(["git", "-C", str(root), *args], capture_output=True, check=False)
     if result.returncode:
@@ -185,6 +191,11 @@ def create_source_package(source, destination, *, runtime=None, artifact=None, b
         raise ReleaseError("Package destination already exists; never replace an evidence artifact")
     sha = git(source, "rev-parse", "HEAD").decode().strip()
     tree = git(source, "rev-parse", "HEAD^{tree}").decode().strip()
+    # Inspect the Git tree before export: ignore attributes cannot hide a
+    # tracked research payload from this release policy.
+    tracked = git(source, "ls-tree", "-r", "--name-only", "-z", sha).decode().split("\0")
+    if any(research_payload(name) for name in tracked if name):
+        raise ReleaseError("Research payloads require verified private preservation and removal from public release source")
     archive = git(source, "archive", "--format=tar", sha)
     with tarfile.open(fileobj=io.BytesIO(archive)) as source_tar:
         members = source_tar.getmembers()
@@ -293,6 +304,8 @@ def install_source(package, app, *, dry_run=False):
         if target.is_dir():
             for path in target.rglob("*"):
                 relative = path.relative_to(app)
+                if path.is_file() and research_payload(relative):
+                    raise ReleaseError("Research inside managed source requires verified private preservation and operator migration before source switching")
                 if private_path(relative) and relative.parts[:2] != ("assets", "photos"):
                     raise ReleaseError("Private files inside managed source require operator migration before source switching")
     if dry_run:

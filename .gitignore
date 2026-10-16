@@ -21,3 +21,7 @@ Thumbs.db
 
 # Uploaded business and offer photos are persistent application data.
 /assets/photos/
+
+# Research payloads are privately retained outside public source.
+/data/research/*
+!/data/research/README.md

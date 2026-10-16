@@ -1,5 +1,6 @@
 """Offline release safety checks. All repositories and private state are disposable."""
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -48,6 +49,121 @@ class ReleasePackageTests(unittest.TestCase):
         destination = self.root / "bundle"
         PACKAGE.create_source_package(self.source, destination)
         return destination
+
+    def test_tracked_research_payload_is_refused_before_package_creation(self):
+        research = self.source / "data/research/contacts.json"
+        research.parent.mkdir(parents=True)
+        research.write_text('{"contact":"synthetic@example.invalid"}\n')
+        self.git("add", ".")
+        self.git("commit", "-qm", "synthetic research fixture")
+        with self.assertRaisesRegex(ValueError, "[Rr]esearch") as error:
+            self.bundle()
+        self.assertFalse((self.root / "bundle").exists())
+        self.assertNotIn("synthetic@example.invalid", str(error.exception))
+        self.assertEqual(research.read_text(), '{"contact":"synthetic@example.invalid"}\n')
+
+    def test_ignore_rule_does_not_authorize_tracked_research_export(self):
+        research = self.source / "data/research/contacts.csv"
+        research.parent.mkdir(parents=True)
+        research.write_text("synthetic private research\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "tracked synthetic research")
+        (self.source / ".gitignore").write_text("/data/research/\n")
+        self.git("add", ".gitignore")
+        self.git("commit", "-qm", "ignore future local output")
+        with self.assertRaisesRegex(ValueError, "[Rr]esearch"):
+            self.bundle()
+        self.assertFalse((self.root / "bundle").exists())
+        self.assertEqual(research.read_text(), "synthetic private research\n")
+
+    def test_export_ignore_cannot_hide_tracked_research_from_release_policy(self):
+        research = self.source / "data/research/nested/contacts.json"
+        research.parent.mkdir(parents=True)
+        research.write_text("synthetic private research\n")
+        (self.source / ".gitattributes").write_text("data/research export-ignore\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "export-hidden synthetic research")
+        with self.assertRaisesRegex(ValueError, "[Rr]esearch"):
+            self.bundle()
+        self.assertFalse((self.root / "bundle").exists())
+        self.assertEqual(research.read_text(), "synthetic private research\n")
+
+    def test_public_research_note_and_other_data_package_without_local_payload(self):
+        note = self.source / "data/research/README.md"
+        note.parent.mkdir(parents=True)
+        note.write_text("Research payloads are privately retained outside this repository.\n")
+        public = self.source / "data/public-fixture.json"
+        public.write_text('{"fictional":true}\n')
+        (self.source / ".gitignore").write_text("/data/research/*\n!/data/research/README.md\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "public policy note and fixture")
+        local = self.source / "data/research/local-output.csv"
+        local.write_text("ignored local synthetic research\n")
+        bundle = self.bundle()
+        manifest = PACKAGE.verify_package(bundle)
+        exported = {name[7:] for name in manifest["files"] if name.startswith("source/")}
+        self.assertEqual(exported, set(self.git("ls-files").splitlines()))
+        self.assertEqual((bundle / "source/data/research/README.md").read_bytes(), note.read_bytes())
+        self.assertEqual((bundle / "source/data/public-fixture.json").read_bytes(), public.read_bytes())
+        self.assertNotIn("source/data/research/local-output.csv", manifest["files"])
+        self.assertEqual(local.read_text(), "ignored local synthetic research\n")
+
+    def test_source_switch_preserves_existing_research_before_any_mutation(self):
+        bundle = self.bundle()
+        app = self.root / "canonical"
+        fixtures = {"main.jac": b"original source\n", "data/obsolete.json": b"old generated data\n",
+            "data/research/original.csv": b"synthetic retained research\n",
+            ".jac/release-source.json": b"original marker\n", ".jac/data/jwt_secret": b"original native key",
+            "assets/photos/original.jpg": b"synthetic original photo"}
+        for name, content in fixtures.items():
+            path = app / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+        private = self.root / "private"
+        private.mkdir()
+        for name in ("onboarding.sqlite3", "photo-ownership.sqlite3", "code.key"):
+            (private / name).write_bytes(b"original private fixture")
+        before = {str(path.relative_to(self.root)): path.read_bytes()
+            for base in (app, private) for path in base.rglob("*") if path.is_file()}
+        for dry_run in (True, False):
+            with self.subTest(dry_run=dry_run):
+                with self.assertRaisesRegex(ValueError, "[Rr]esearch"):
+                    PACKAGE.install_source(bundle, app, dry_run=dry_run)
+                after = {str(path.relative_to(self.root)): path.read_bytes()
+                    for base in (app, private) for path in base.rglob("*") if path.is_file()}
+                self.assertEqual(after, before)
+
+    def test_research_namespace_file_is_not_public_source(self):
+        research = self.source / "data/research"
+        research.parent.mkdir()
+        research.write_text("synthetic research stored without a directory\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "synthetic research namespace file")
+        with self.assertRaisesRegex(ValueError, "[Rr]esearch"):
+            self.bundle()
+        self.assertFalse((self.root / "bundle").exists())
+
+    def test_historical_research_package_integrity_can_still_be_inspected(self):
+        bundle = self.bundle()
+        research = self.source / "data/research/legacy.csv"
+        research.parent.mkdir(parents=True)
+        research.write_text("synthetic historical research\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "historical source shape")
+        copied = bundle / "source/data/research/legacy.csv"
+        copied.parent.mkdir(parents=True)
+        shutil.copyfile(research, copied)
+        manifest_path = bundle / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest.update(source_sha=self.git("rev-parse", "HEAD"),
+            source_tree=self.git("rev-parse", "HEAD^{tree}"))
+        manifest["files"] = PACKAGE.inventory(bundle)
+        manifest["files"].pop("manifest.json")
+        manifest["source_files_sha256"] = hashlib.sha256(json.dumps(
+            {name[7:]: value for name, value in manifest["files"].items()
+             if name.startswith("source/")}, sort_keys=True).encode()).hexdigest()
+        manifest_path.write_text(json.dumps(manifest))
+        self.assertEqual(PACKAGE.verify_package(bundle), manifest)
 
     def config(self, app):
         return {"canonical_entry": str(app / "main.jac"), "durable_root": str(self.root / "state"),

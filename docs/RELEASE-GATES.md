@@ -18,7 +18,7 @@ unfinished PRs draft and bind each receipt to its tested source.
 | #38 monitoring | Engineering + human/live | Structured redacted gateway events, bounded readiness and operator runbook; choose accountable recipient, configure external uptime/alert delivery, and exercise an incident without spending or outreach here. |
 | #39 shared mutation coordination | Engineering blocker for multiple writers | Stock runtime competing-writer regression remains reproducible. A serialized singleton is a bounded launch proposal, subject to final application fault/restart proof. Multiple replicas, rolling overlap, direct backend access and concurrent operator writers remain unsupported. |
 | #40 public ingress | Engineering + live | Strict native/admin/graph/docs denial, serialized upstream, body/queue/response bounds, security headers and readiness; verify HTTPS edge, bypass prevention, headers and abuse behavior on the approved public host. |
-| #41 research-data privacy | Human policy + bounded audit | Inventory existing contact-research material before publishing a release. Travis must decide retention/removal; do not silently delete human-owned research or represent public availability as consent. |
+| #41 research-data privacy | Private retention approved; implementation and historical disclosure gates | October 16 policy keeps contact research private. Verified preservation precedes candidate payload removal; only a sanitized README remains, and new packages refuse research payloads. Existing main/public history remain unchanged; older archives containing research stay private. Readers, retention and history handling remain open; no outreach is authorized. |
 | #42 privacy/terms/deletion | Human policy, engineering deferred pending policy | Account deletion spans graph, identity, claims, ownership and retention obligations. Do not implement destructive deletion without approved policy and preservation rules. Public release requires approved policy/text or an explicit launch restriction. |
 | #43 active hold limit | Engineering | Server cap of two live holds across offers; retries preserve the existing claim, and expiry/cancellation/redemption release slots. Verify native concurrency on the final candidate; existing over-limit accounts retain their claims. |
 | #44 merchant verification | Engineering + human operations | Revision-bound approval and host-only reversible suspension/reinstatement require final-head audit/concurrency/preservation proof. Suspension was absent from PR55. Travis approved hiding offers/blocking new claims and publication, retaining existing claims with support guidance and pausing redemption until reinstatement on October 13. A named operator must accept the runbook and verify real submissions. Invite-code approval is a dropped approach. |
@@ -32,6 +32,12 @@ unfinished PRs draft and bind each receipt to its tested source.
 | #52 independent setup | Human independent check | Package clean-clone instructions and pinned runtime; a second teammate reproduces setup and records results independently. |
 | #53 screen-module split | Explicitly deferred | Preserve PR55 design and behavior during release stabilization. A broad screen rewrite is outside this candidate and adds regression risk; reconsider after pilot evidence. |
 | #54 old branches | Engineering inspection + human merge decision | Preserve original branches/WIP and selectively port verified work. Old invite-code and onboarding-only backup approaches remain archived on their branches; no automatic merge or deletion. |
+
+Approved eligibility policy (October 16): access to an exact `@umich.edu` inbox,
+including alumni, is sufficient for M-Local access. Existing uniqname validation
+and account/merchant authority remain unchanged. Inbox verification proves neither
+current enrollment nor official U-M endorsement; merchants check any additional
+offer eligibility condition. This decision does not close #42 or hosted acceptance.
 
 ## Cross-cutting engineering acceptance
 
