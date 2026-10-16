@@ -78,7 +78,7 @@ jobs:
             p="$RUNNER_TEMP/pg18-clients"
             tools="$RUNNER_TEMP/package-pg18-tools"
             mkdir -m 755 "$p" "$tools"
-            mkdir -p "$p"/{etc/apt.conf.d,etc/sources.list.d,etc/trusted.gpg.d,state/lists/partial,cache/archives/partial,log,debs,tmp}
+            mkdir -p "$p"/{etc/apt.conf.d,etc/sources.list.d,etc/trusted.gpg.d,etc/preferences.d,state/lists/partial,cache/archives/partial,log,debs,tmp}
             mkdir -m 700 "$p/gnupg"
             : > "$p/etc/empty.conf"
             : > "$p/etc/trusted.gpg"
@@ -131,10 +131,10 @@ jobs:
             for client in pg_dump pg_restore createdb psql; do
               test -f "$bin/$client" && test -x "$bin/$client"
               LD_LIBRARY_PATH="$lib" ldd "$bin/$client" > "$p/ldd-$client.txt"
-              ! rg -Fq 'not found' "$p/ldd-$client.txt"
-              rg -Fq "libpq.so.5 => $lib/libpq.so.5" "$p/ldd-$client.txt"
+              ! grep -Fq 'not found' "$p/ldd-$client.txt"
+              grep -Fq "libpq.so.5 => $lib/libpq.so.5" "$p/ldd-$client.txt"
               LD_LIBRARY_PATH="$lib" "$bin/$client" --version | tee "$p/version-$client.txt"
-              rg -q "^$client \(PostgreSQL\) 18\.6([[:space:]]|$)" "$p/version-$client.txt"
+              grep -Eq "^$client \(PostgreSQL\) 18\.6([[:space:]]|$)" "$p/version-$client.txt"
               sha256sum "$bin/$client" >> "$p/executable-sha256.txt"
             done
             sha256sum "$p/pgdg.asc" "$lib/libpq.so.5" "$p"/state/lists/*InRelease > "$p/provenance-sha256.txt"
