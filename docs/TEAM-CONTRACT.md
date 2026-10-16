@@ -9,6 +9,12 @@ The supported runtime is one Linux host, one backend and one serialized gateway,
 with no overlapping replacements. Historical checkpoints below retain their
 original scope and are superseded where they conflict with this contract.
 
+Approved eligibility policy (October 16, 2026): M-Local access is open to people
+who can verify access to their exact `@umich.edu` inbox, including alumni. This
+proves inbox access, not current enrollment or official U-M endorsement. Merchants
+check additional offer eligibility conditions at redemption. Existing uniqname
+validation, account roles and identity/ownership authority remain unchanged.
+
 Historical email onboarding increment (2026-09-26): `SessionView` adds the default-false
 `email_verified` field and `business` / `unverified` roles. A verified U-M inbox
 or an explicit demo student root is required for a new claim. Business email

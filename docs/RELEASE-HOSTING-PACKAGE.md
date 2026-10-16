@@ -128,10 +128,17 @@ cat /var/tmp/m-local-rc-build/archive-sha256.txt
 The output includes `package-manifest.json`, `build-receipt.json`,
 `official-checksums.json`, and `offline-package.tar.gz`. These engineering
 artifacts contain no approval, live keys, onboarding database or recovery set.
-The full tracked source also includes existing `data/research` contact material.
-Keep the engineering archive private until #41's retention/publication decision;
-do not publish that archive or include contact contents in public evidence.
-Preserve human-owned research while its owner decides the release policy.
+Travis approved private retention of contact research on October 16. After verified
+preservation, this candidate removes the payloads and keeps only a sanitized
+`data/research/README.md`. Package creation refuses tracked research payloads before
+archiving, including files hidden by `export-ignore`. Existing package verification
+remains unchanged for recovery. Source installation refuses existing app research
+payloads before mutation so an operator can preserve them first.
+Prior public Git history and existing main are unchanged by this candidate.
+Older archives containing research must remain private; preserve their original
+bytes and matching recovery sets. Research readers, retention and history handling
+remain open under #41, and #42 privacy/terms/deletion policy remains unresolved.
+Do not include contact contents or private retention paths in public evidence.
 The lower-level commands below remain available for an already tested build.
 
 ```bash

@@ -52,8 +52,11 @@ retained; unfinished or unavailable evidence remains an open gate.
   profile edits remain self-service. Operator approval/suspension must be authenticated or
   local-only, auditable, and unavailable through client parameters.
   See `BUSINESS-APPROVAL.md` for the submitted-revision check and rollout.
-- Student eligibility policy is pending Travis's answer. U-M inbox ownership
-  must not be described as verified current enrollment.
+- **Confirmed eligibility policy (October 16):** people who can verify access to
+  their exact `@umich.edu` inbox, including alumni, may use M-Local. Inbox access
+  does not establish current enrollment or official U-M endorsement. Existing
+  uniqname validation and account authority remain unchanged; merchants check
+  any additional offer eligibility condition at redemption.
 - Email headroom, failures/bounces, sender configuration, and U-M delivery are
   checked. No SMTP credentials, code values, or QR credentials enter logs.
 - Uptime/error/latency monitoring, alerts, support, privacy/retention/deletion,

@@ -8,11 +8,14 @@ Valid authenticated sessions still restore automatically; the server account's
 role determines the available screens and permissions. App content stays hidden
 until the session is authenticated.
 
-Students/community members enter their uniqname beside a fixed `@umich.edu`.
-The server constructs the address. Business owners enter their full work email.
+U-M inbox holders, including alumni, are eligible for M-Local access. They enter
+their uniqname beside a fixed `@umich.edu`; the server constructs the address.
+Existing uniqname validation and the exact domain remain unchanged. Business
+owners enter their full work email.
 A six-digit email code creates an account or resumes its existing Jac session.
 No university password is collected. Email verification proves inbox access,
 not current enrollment or official U-M endorsement.
+Merchants check any additional eligibility condition stated in an offer.
 
 **Create an account** asks for your name and email. **Sign in**
 switches to returning sign-in, which only needs your email. The server checks
