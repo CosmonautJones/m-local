@@ -641,3 +641,9 @@ os.execvp(sys.argv[2],sys.argv[2:])
         startup_only=True, ongoing_sql_readiness_certified=False, uploads_supported=False,
         cache_reconstructed_after_stop=True, interrupted_cache_construction_certified=True,
         fixture_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
+
+    # A strict negative experiment follows startup proof; it cannot certify recovery.
+    from stopped_writer_recovery_http import run_stopped_writer_recovery_checks
+    run_stopped_writer_recovery_checks(f, dict(launch=launch, stopped=stopped, observe=observe,
+        local=local, launch_args=launch_args, ports=ports, fingerprint=fingerprint,
+        original_paths=original_paths, preserved=preserved, cache=cache, held=held, offer=offer))

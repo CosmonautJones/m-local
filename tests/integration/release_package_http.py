@@ -399,7 +399,7 @@ def main():
             check(all(pkg.digest(path) == keys[name] for name, path in {'code': onboarding / 'code.key', 'jwt': app / '.jac/data/jwt_secret'}.items()),
                 'restored startup never replaces original native and email signing keys')
             run_sql_startup_checks(dict(pkg=pkg, package=args.package, app=app, onboarding=onboarding,
-                workspace=workspace, environment=environment, config=config, config_file=config_file,
+                workspace=workspace, tools=args.tools, environment=environment, config=config, config_file=config_file,
                 evidence_file=evidence_file, start=start, ready=ready, check=check, closed=closed,
                 next_port=next_port, stop_process=stop_process, process_group_alive=process_group_alive,
                 Api=Api, photo=photo, photo_payload=PHOTO_PAYLOAD, fields=fields,
