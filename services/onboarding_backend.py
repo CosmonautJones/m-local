@@ -1,6 +1,6 @@
-"""Explicit authority-only backend selection for the disposable SQL proof.
+"""Explicit authority and photo-reference selection for the disposable SQL proof.
 
-SQLite remains the application default. Native startup and media deliberately
+SQLite remains the application default. Native startup and photo writes/serving
 refuse this proof mode until their separate cutover/recovery contracts are met.
 The optional SQL driver is imported only after explicit selection and admission.
 """
@@ -25,7 +25,7 @@ def require_sqlite_backend():
         raise ValueError('Media requires the SQLite application backend; PostgreSQL authority proof mode does not support photo serving or writes.')
 
 
-def selected_store(store_class, clock):
+def _proof_backend():
     if backend_name() == 'sqlite':
         return None
     if os.environ.get('MLOCAL_ENV', '').strip().lower() == 'production':
@@ -40,7 +40,17 @@ def selected_store(store_class, clock):
     except ImportError:
         raise ValueError(_UNAVAILABLE) from None
     try:
-        backend = PostgresAuxiliary(dsn, schema)
+        return PostgresAuxiliary(dsn, schema)
+    except (psycopg.Error, ValueError):
+        raise ValueError(_UNAVAILABLE) from None
+
+
+def selected_store(store_class, clock):
+    backend = _proof_backend()
+    if backend is None:
+        return None
+    import psycopg
+    try:
         # code_store validates the established schema, audit and both original
         # keys. It bypasses CodeStore postinit and never initializes/imports.
         state = backend.code_store(store_class, os.environ.get('MLOCAL_ONBOARDING_DIR', '.jac/onboarding'), clock)
@@ -59,3 +69,17 @@ def selected_store(store_class, clock):
 
     state.transaction = transaction
     return state
+
+
+def selected_photo_owned(filename, actor):
+    backend = _proof_backend()
+    if backend is None:
+        return None
+    import psycopg
+    try:
+        # Require established original keys as well as schema/audit admission.
+        # A validated absence denies ownership; it never selects SQLite fallback.
+        backend.signing_material()
+        return backend.photo_owned(filename, actor)
+    except (psycopg.Error, ValueError):
+        raise ValueError(_UNAVAILABLE) from None

@@ -23,6 +23,7 @@ builtins.__import__ = no_sql_driver
 from services import onboarding_backend
 assert onboarding_backend.backend_name() == 'sqlite'
 assert onboarding_backend.selected_store(object, lambda: 0) is None
+assert onboarding_backend.selected_photo_owned('0' * 32 + '.jpg', 'fixture-actor') is None
 onboarding_backend.require_sqlite_backend()
 assert 'psycopg' not in sys.modules
 assert 'services.postgres_auxiliary' not in sys.modules

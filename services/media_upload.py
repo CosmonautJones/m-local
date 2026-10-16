@@ -12,7 +12,7 @@ import warnings
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from services.onboarding_backend import require_sqlite_backend
+from services.onboarding_backend import require_sqlite_backend, selected_photo_owned
 
 MAX_BYTES = 1024 * 1024
 
@@ -46,7 +46,13 @@ def owned_photo(value: str, actor: str) -> str:
     require_actor(actor)
     if not re.fullmatch(r'/static/photos/[a-f0-9]{32}\.jpg', value):
         raise ValueError('Choose a photo uploaded by this business, or use a public website photo.')
-    path = photo_directory() / value.rsplit('/', 1)[-1]
+    filename = value.rsplit('/', 1)[-1]
+    selected = selected_photo_owned(filename, actor)
+    if selected is not None:
+        if not selected:
+            raise ValueError('Choose a photo uploaded by this business.')
+        return value
+    path = photo_directory() / filename
     if path.is_symlink() or not path.is_file():
         raise ValueError('That uploaded photo is unavailable. Upload it again.')
     db = photo_registry()
