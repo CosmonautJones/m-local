@@ -1024,5 +1024,166 @@ class PostgresAuxiliaryTests(unittest.TestCase):
                         self.assertRegex(str(caught.exception).lower(), r'backend|authority|proof')
             self.assertEqual(hashes(self.work), before)
 
+
+    def _photo_reference_local(self):
+        directory = self.work / 'stale-photo-reference'
+        shutil.copytree(self.legacy, directory)
+        with sqlite3.connect(directory / 'photo-ownership.sqlite3') as database:
+            database.execute('UPDATE photos SET actor=? WHERE filename=?', (OTHER, PHOTO_A))
+        (directory / 'photos' / PHOTO_A).write_bytes(self.jpeg_b)
+        before = hashes(directory)
+        self.addCleanup(lambda: self.assertEqual(hashes(directory), before,
+                                                 'Photo reference changed preserved local stores/keys/JPEGs'))
+        return directory
+
+    def test_photo_reference_sql_owner_overrides_stale_local_owner_and_bytes(self):
+        from services import media_upload, photo_reference
+        self.import_from()
+        directory = self._photo_reference_local()
+        before = self.snapshot(self.schema)
+        url = '/static/photos/' + PHOTO_A
+        with patch.dict(os.environ, self._authority_environment(directory)):
+            for repeat in range(2):
+                self.assertEqual(media_upload.owned_photo(url, ACTOR), url)
+                self.assertEqual(photo_reference.image_reference(url, ACTOR), url)
+        self.assertEqual(self.snapshot(self.schema), before)
+
+    def test_photo_reference_sql_needs_no_local_file_registry_or_symlink_target(self):
+        from services import media_upload, photo_reference
+        self.import_from()
+        directory = self.work / 'missing-photo-private'
+        app = self.work / 'disposable-photo-app'
+        photos = app / 'assets/photos'
+        photos.mkdir(parents=True)
+        link = photos / PHOTO_A
+        link.symlink_to(self.photos_dir / PHOTO_A)
+        target_before = hashes(self.legacy)
+        link_before = (os.readlink(link), link.lstat().st_mtime_ns)
+        before = self.snapshot(self.schema)
+        with patch.dict(os.environ, self._authority_environment(directory)), \
+                patch.object(media_upload, '__file__', str(app / 'services/media_upload.py')), \
+                patch.object(media_upload, 'photo_directory', side_effect=AssertionError('Unexpected local photo lookup')), \
+                patch.object(media_upload, 'photo_registry', side_effect=AssertionError('Unexpected local registry lookup')), \
+                patch.object(sqlite3, 'connect', side_effect=AssertionError('Unexpected SQLite authority access')):
+            url = '/static/photos/' + PHOTO_A
+            self.assertEqual(media_upload.owned_photo(url, ACTOR), url)
+            self.assertEqual(photo_reference.image_reference(url, ACTOR), url)
+        self.assertFalse(directory.exists())
+        self.assertEqual((os.readlink(link), link.lstat().st_mtime_ns), link_before)
+        self.assertEqual(hashes(self.legacy), target_before)
+        self.assertEqual(self.snapshot(self.schema), before)
+
+    def test_photo_reference_sql_denies_foreign_missing_and_invalid_urls(self):
+        from services import media_upload, photo_reference
+        self.import_from()
+        directory = self._photo_reference_local()
+        before = self.snapshot(self.schema)
+        cases = ((OTHER, '/static/photos/' + PHOTO_A), (STUDENT, '/static/photos/' + PHOTO_A),
+                 (ACTOR, '/static/photos/' + '0' * 32 + '.jpg'),
+                 (ACTOR, '/static/photos/../' + PHOTO_A),
+                 (ACTOR, '/static/photos/' + 'A' * 32 + '.jpg'),
+                 (ACTOR, '/static/photos/' + PHOTO_A + '?owner=' + ACTOR))
+        with patch.dict(os.environ, self._authority_environment(directory)), \
+                patch.object(media_upload, 'photo_directory', side_effect=AssertionError('Unexpected fallback to local files')), \
+                patch.object(media_upload, 'photo_registry', side_effect=AssertionError('Unexpected fallback to SQLite')):
+            for actor, url in cases:
+                with self.subTest(actor=actor, url=url):
+                    with self.assertRaises(ValueError):
+                        media_upload.owned_photo(url, actor)
+                    with self.assertRaises(ValueError):
+                        photo_reference.image_reference(url, actor)
+            with self.assertRaises(ValueError):
+                media_upload.owned_photo('/static/photos/' + PHOTO_A, '')
+        self.assertEqual(self.snapshot(self.schema), before)
+
+    def test_photo_reference_actual_activation_keeps_sql_photo_and_authority(self):
+        from services import email_codes, onboarding_support
+        self.import_from()
+        directory = self._photo_reference_local()
+        preserved = {table: self.rows(table) for table in ('photos', 'signing_material', 'accounts',
+                     'business_approvals', 'business_reviews', 'business_status', 'business_status_events')}
+        url = '/static/photos/' + PHOTO_A
+        raw = {**self.fields, 'image_url': url, 'slug': 'untrusted', 'actor': OTHER, 'status': 'untrusted'}
+        with patch.dict(os.environ, self._authority_environment(directory)):
+            for repeat in range(2):
+                prepared = onboarding_support.prepare_business_activation(ACTOR, raw)
+                self.assertEqual((prepared['slug'], prepared['image_url']), ('business-' + ACTOR, url))
+                finished = onboarding_support.finish_business_activation(ACTOR, prepared)
+                self.assertEqual((finished['image_url'], finished['status']), (url, 'active'))
+                self.assertNotIn('actor', finished)
+                self.assertNotIn('slug', finished)
+                self.assertEqual(email_codes.store().draft(ACTOR)['image_url'], url)
+                self.assertEqual(email_codes.registered_business_owner('business-' + ACTOR), ACTOR)
+                self.assertTrue(email_codes.merchant_operations_allowed(ACTOR))
+        self.assertEqual(self.rows('business_owners', 'actor,slug,active'), [(ACTOR, 'business-' + ACTOR, 1)])
+        for table, rows in preserved.items():
+            self.assertEqual(self.rows(table), rows)
+
+    def test_photo_reference_bad_sql_bytes_keys_audit_or_version_refuse_without_repair(self):
+        from services import media_upload, photo_reference
+        self.import_from()
+        directory = self._photo_reference_local()
+        url = '/static/photos/' + PHOTO_A
+        for index, kind in enumerate(('digest', 'jpeg', 'native_key', 'audit', 'version')):
+            schema = self.schema + '_photo' + str(index)
+            with self.connect() as connection:
+                connection.execute(self.sql.SQL('CREATE SCHEMA {}').format(self.sql.Identifier(schema)))
+            self.schemas.append(schema)
+            backend = self.module.PostgresAuxiliary(self.dsn, schema)
+            backend.initialize()
+            backend.import_legacy(self.legacy / 'onboarding.sqlite3', self.legacy / 'photo-ownership.sqlite3',
+                                  self.photos_dir, self.legacy / 'code.key', self.legacy / 'jwt_secret')
+            with self.connect() as connection:
+                if kind == 'digest':
+                    connection.execute(self.sql.SQL('UPDATE {}.photos SET digest=%s WHERE filename=%s').format(
+                        self.sql.Identifier(schema)), ('0' * 64, PHOTO_A))
+                elif kind == 'jpeg':
+                    data = b'x' * len(self.jpeg_a)
+                    connection.execute(self.sql.SQL('UPDATE {}.photos SET content=%s,digest=%s WHERE filename=%s').format(
+                        self.sql.Identifier(schema)), (data, hashlib.sha256(data).hexdigest(), PHOTO_A))
+                elif kind == 'native_key':
+                    connection.execute(self.sql.SQL("DELETE FROM {}.signing_material WHERE name='native_key'").format(self.sql.Identifier(schema)))
+                elif kind == 'audit':
+                    connection.execute(self.sql.SQL('DELETE FROM {}.business_status_events WHERE revision=1').format(self.sql.Identifier(schema)))
+                else:
+                    connection.execute(self.sql.SQL('UPDATE {}.auxiliary_state SET schema_version=2').format(self.sql.Identifier(schema)))
+            before = self.snapshot(schema)
+            with self.subTest(damaged=kind), patch.dict(os.environ, self._authority_environment(
+                    directory, MLOCAL_AUXILIARY_TEST_SCHEMA=schema)):
+                for invoke in (lambda: media_upload.owned_photo(url, ACTOR),
+                               lambda: photo_reference.image_reference(url, ACTOR)):
+                    with self.assertRaises(ValueError) as caught:
+                        invoke()
+                    self.assertRegex(str(caught.exception).lower(), r'authority|backend|proof')
+                    self.assertNotIn(self.dsn, str(caught.exception))
+            self.assertEqual(self.snapshot(schema), before)
+
+    def test_photo_reference_outage_unknown_and_production_fail_stop(self):
+        from services import media_upload, photo_reference, onboarding_support
+        self.import_from()
+        directory = self._photo_reference_local()
+        before = self.snapshot(self.schema)
+        url = '/static/photos/' + PHOTO_A
+        calls = (lambda: media_upload.owned_photo(url, ACTOR),
+                 lambda: photo_reference.image_reference(url, ACTOR),
+                 lambda: onboarding_support.prepare_business_activation(ACTOR, self.fields),
+                 lambda: onboarding_support.finish_business_activation(ACTOR, self.fields))
+        for changes in ({'MLOCAL_ONBOARDING_BACKEND': 'unknown'}, {'MLOCAL_ONBOARDING_BACKEND': ''},
+                        {'MLOCAL_ENV': 'production'}, {'MLOCAL_AUXILIARY_TEST_SCHEMA': ''}):
+            with self.subTest(settings=tuple(changes)), patch.dict(os.environ, self._authority_environment(directory, **changes)):
+                for invoke in calls:
+                    with self.assertRaises(ValueError) as caught:
+                        invoke()
+                    self.assertNotIn(self.dsn, str(caught.exception))
+        with patch.dict(os.environ, self._authority_environment(directory)), patch.object(
+                self.psycopg, 'connect', side_effect=self.psycopg.OperationalError('fixture-driver-secret ' + self.dsn)):
+            for invoke in calls:
+                with self.assertRaises(ValueError) as caught:
+                    invoke()
+                self.assertNotIn('fixture-driver-secret', str(caught.exception))
+                self.assertNotIn(self.dsn, str(caught.exception))
+        self.assertEqual(self.snapshot(self.schema), before)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

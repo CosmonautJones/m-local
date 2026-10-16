@@ -52,7 +52,7 @@ jobs:
           : > "$evidence/unittest.log"
           export MLOCAL_AUXILIARY_OUTCOMES_FILE="$evidence/named-outcomes.jsonl"
           : > "$MLOCAL_AUXILIARY_OUTCOMES_FILE"
-          pg_bin=/usr/lib/postgresql/16/bin
+          pg_bin=
           port= suite_exit=-1 initialized=0 database_created=0
           cleanup() {
             original_exit=$?
@@ -60,9 +60,15 @@ jobs:
             set +e
             remaining=-1 schema_exit=-1 stop_exit=0 status_exit=-1
             if [[ "$database_created" == 1 ]]; then
-              remaining="$(timeout --signal=TERM --kill-after=2s 15s env PGCONNECT_TIMEOUT=5 PGOPTIONS='-c statement_timeout=5000 -c lock_timeout=5000' "$pg_bin/psql" \
-                -h 127.0.0.1 -p "$port" -U "$(id -un)" -d mlocal_aux_test_ci -Atqc \
-                "SELECT count(*) FROM pg_namespace WHERE left(nspname,16)='mlocal_aux_test_'" 2> "$proof/schema-check.log")"
+              remaining="$(timeout --signal=TERM --kill-after=2s 15s "${JAC_BIN}python" -c '
+          import os, sys
+          sys.path.insert(0, os.environ["MLOCAL_AUXILIARY_DRIVER_SITE"])
+          import psycopg
+          with psycopg.connect(os.environ["MLOCAL_AUXILIARY_TEST_DSN"], connect_timeout=5,
+                              options="-c statement_timeout=5000 -c lock_timeout=5000") as connection:
+              print(connection.execute("SELECT count(*) FROM pg_namespace WHERE starts_with(nspname,%s)",
+                                       ("mlocal_aux_test_",)).fetchone()[0])
+          ' 2> "$proof/schema-check.log")"
               schema_exit=$?
             fi
             if [[ "$initialized" == 1 ]]; then
@@ -91,8 +97,8 @@ jobs:
                                   if isinstance(node, ast.FunctionDef) and node.name.startswith('test_'))
           expected_pairs = {(name, '__main__.PostgresAuxiliaryTests.' + name) for name in expected_names}
           observed_pairs = [(row['name'], row['identity']) for row in named]
-          inventory_matches = (len(expected_names) == len(expected_pairs) == 39
-                               and len(observed_pairs) == len(set(observed_pairs)) == 39
+          inventory_matches = (len(expected_names) == len(expected_pairs) == 45
+                               and len(observed_pairs) == len(set(observed_pairs)) == 45
                                and set(observed_pairs) == expected_pairs)
           counts = {name: summary.get(name, 0) for name in
                     ('run', 'failures', 'errors', 'skipped', 'expected_failures', 'unexpected_successes')}
@@ -121,16 +127,24 @@ jobs:
                      'tests/integration/test_postgres_auxiliary.py', 'tests/integration/postgres-auxiliary-requirements.txt',
                      '.github/workflows/check.yml', '.jac-version', 'scripts/python.sh', 'scripts/runtime.sh')
           versions = json.loads((evidence / 'versions.json').read_text()) if (evidence / 'versions.json').exists() else None
+          distribution = json.loads((evidence / 'pg-distribution.json').read_text()) if (evidence / 'pg-distribution.json').exists() else None
+          pg18 = (versions is not None and versions.get('server_version_num', 0) // 10000 == 18
+                  and versions.get('psycopg') == '3.3.6' and distribution is not None
+                  and distribution.get('requested_major') == 18
+                  and set(distribution.get('tools', {})) == {'postgres', 'initdb', 'pg_ctl'}
+                  and all(tool.get('major') == 18 and len(tool.get('sha256', '')) == 64
+                          for tool in distribution['tools'].values()))
           complete = (suite_exit == '0' and summary.get('successful') is True
-                      and counts['run'] == 39 and counts['passed'] == 39 and inventory_matches
+                      and counts['run'] == 45 and counts['passed'] == 45 and inventory_matches
                       and not any(counts[name] for name in ('failures', 'errors', 'skipped', 'expected_failures', 'unexpected_successes'))
-                      and versions is not None)
+                      and pg18)
           receipt = {
               'source_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
               'source_tree': subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip(),
               'source_sha256': {name: hashlib.sha256(Path(name).read_bytes()).hexdigest() for name in sources},
               'command': (evidence / 'command.txt').read_text().strip() if (evidence / 'command.txt').exists() else None,
-              'versions': versions, 'suite_exit': int(suite_exit) if suite_exit != '-1' else None,
+              'versions': versions, 'pg_distribution': distribution, 'actual_pg18_verified': pg18,
+              'suite_exit': int(suite_exit) if suite_exit != '-1' else None,
               'step_exit_before_cleanup': int(original_exit), 'named_outcomes': named, 'counts': counts,
               'expected_test_count': len(expected_names), 'expected_test_names': expected_names,
               'expected_test_identities': sorted(identity for name, identity in expected_pairs),
@@ -162,17 +176,68 @@ jobs:
             -r tests/integration/postgres-auxiliary-requirements.txt
           unset PGHOSTADDR PGSERVICE PGSERVICEFILE
           export PGPASSFILE=/dev/null NO_COLOR=1 PYTHON_COLORS=0
+          # Fetch the pinned runtime-supported distribution into this owned fixture.
+          # fetch_dist bypasses PATH; its resolver may fall back, so verify every executable and the server.
+          export MLOCAL_AUXILIARY_PROOF_ROOT="$proof"
+          export JAC_CACHE_HOME="$proof/jac-cache"
+          export JAC_TOOLCHAIN_DIR="$proof/jac-cache/toolchains"
+          export TMPDIR="$proof/tmp"
+          mkdir -p -- "$JAC_CACHE_HOME" "$JAC_TOOLCHAIN_DIR"
+          timeout --signal=TERM --kill-after=5s 180s "${JAC_BIN}python" -c '
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+          proof = Path(os.environ["MLOCAL_AUXILIARY_PROOF_ROOT"]).resolve(strict=True)
+          runner = Path(os.environ["RUNNER_TEMP"]).resolve(strict=True)
+          assert proof.is_relative_to(runner)
+          cache = Path(os.environ["JAC_CACHE_HOME"]).resolve(strict=True)
+          assert cache.is_relative_to(proof)
+          assert Path(os.environ["JAC_TOOLCHAIN_DIR"]).resolve().is_relative_to(cache)
+          assert Path(os.environ["TMPDIR"]).resolve().is_relative_to(proof)
+          os.chdir(proof)
+          os.environ.pop("JAC_PG_DIST", None)
+          os.environ["JAC_PG_VERSION"] = "18"
+          from jaclang.project.config import JacConfig, set_config
+          set_config(JacConfig(project_root=proof))
+          from jaclang.cache.registry import bucket
+          from jaclang.data.pgembed import PgRuntime
+          for name in ("pg", "toolchains-downloads"):
+              assert Path(bucket(name).path()).resolve().is_relative_to(cache)
+          runtime = PgRuntime(data_dir=str(proof / "fetch-only-unused"), database="mlocal_aux_test_ci")
+          bin_dir = Path(runtime.fetch_dist()).resolve(strict=True)
+          assert bin_dir.is_relative_to(cache)
+          tools = {}
+          for name in ("postgres", "initdb", "pg_ctl"):
+              executable = bin_dir / name
+              version = subprocess.check_output([str(executable), "--version"], text=True, timeout=10).strip()
+              major = int(version.split()[-1].split(".")[0])
+              assert major == 18
+              with executable.open("rb") as stream:
+                  digest = hashlib.file_digest(stream, "sha256").hexdigest()
+              tools[name] = {"version": version, "major": major, "sha256": digest}
+          (proof / "pg-bin.txt").write_text(str(bin_dir) + "\n")
+          (proof / "pg-distribution.json").write_text(json.dumps({"requested_major": 18,
+              "distribution_root": str(bin_dir.parent), "tools": tools}, indent=2, sort_keys=True) + "\n")
+          '
+          pg_bin="$(cat "$proof/pg-bin.txt")"
+          export JAC_PG_DIST="$(dirname "$pg_bin")" JAC_PG_VERSION=18
+          cp "$proof/pg-distribution.json" "$evidence/pg-distribution.json"
           test -x "$pg_bin/initdb"
           port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
           "$pg_bin/initdb" -D "$proof/postgres" --auth=trust --no-locale --encoding=UTF8
           initialized=1
           "$pg_bin/pg_ctl" -D "$proof/postgres" -l "$proof/postgres.log" \
             -o "-h 127.0.0.1 -p $port -k $proof/socket -c shared_buffers=16MB -c max_connections=24" -w start
-          "$pg_bin/createdb" -h 127.0.0.1 -p "$port" -U "$(id -un)" mlocal_aux_test_ci
-          database_created=1
-          export TMPDIR="$proof/tmp"
           export MLOCAL_AUXILIARY_TEST_DSN="postgresql://$(id -un)@127.0.0.1:$port/mlocal_aux_test_ci"
           export MLOCAL_AUXILIARY_TEST_SCHEMA=mlocal_aux_test_ci
+          timeout --signal=TERM --kill-after=2s 15s "${JAC_BIN}python" -c '
+          import os, sys
+          sys.path.insert(0, os.environ["MLOCAL_AUXILIARY_DRIVER_SITE"])
+          import psycopg
+          with psycopg.connect(os.environ["MLOCAL_AUXILIARY_TEST_DSN"], dbname="postgres", autocommit=True,
+                              connect_timeout=5, options="-c statement_timeout=5000 -c lock_timeout=5000") as connection:
+              connection.execute("CREATE DATABASE mlocal_aux_test_ci")
+          '
+          database_created=1
           bash scripts/python.sh -c '
           import json, os, sys
           from pathlib import Path
@@ -182,7 +247,7 @@ jobs:
               with psycopg.connect(os.environ["MLOCAL_AUXILIARY_TEST_DSN"], connect_timeout=5) as connection:
                   server_version = int(connection.execute("SHOW server_version_num").fetchone()[0])
               versions = {"server_version_num": server_version, "psycopg": psycopg.__version__}
-              if server_version // 10000 != 16 or psycopg.__version__ != "3.3.6":
+              if server_version // 10000 != 18 or psycopg.__version__ != "3.3.6":
                   raise ValueError("Unexpected proof dependency version")
               Path(sys.argv[1]).write_text(json.dumps(versions, sort_keys=True) + "\n")
           except Exception as error:
