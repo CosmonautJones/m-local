@@ -1,7 +1,8 @@
 # Cumulative engineering integration map
 
-Refreshed October 16, 2026, 07:51 UTC. GitHub main is
-`b92b92c8387a12e2c55edbb7638c54dfbed78dc2`; all PR60–66 remain open drafts.
+Refreshed October 16, 2026. The latest read of GitHub main was
+`b92b92c8387a12e2c55edbb7638c54dfbed78dc2`; PR60-67 remain open drafts.
+Re-read main and ownership before subsequent work; these are recorded snapshots.
 This is engineering dependency/evidence ordering, not merge or hosted acceptance.
 Current contracts in RELEASE-ACCEPTANCE, RELEASE-GATES, TEAM-CONTRACT and the
 hosting/runtime/recovery documents govern. Historical issue checkpoints retain
@@ -18,7 +19,8 @@ current branch truth.
 | [PR64 authority parity](https://github.com/CosmonautJones/m-local/pull/64) | PR63 | `454db70d01e84a4cfad73ac177067d1187cb3dd6` |
 | [PR65 SQL photo references](https://github.com/CosmonautJones/m-local/pull/65) | PR64 | `d5bf6548e3d6142179607ff546b7df01db512108` |
 | [PR66 native-key compatibility](https://github.com/CosmonautJones/m-local/pull/66) | PR65 | `746f5444b46d7cb0554b2da29cf8f8a52ff71fef` |
-| strict auxiliary DDL admission ([scope/evidence](AUXILIARY-DDL-ADMISSION.md)), this branch | frozen PR66 | final exact head is recorded in its PR and fresh CI receipts |
+| [PR67 strict auxiliary DDL admission](https://github.com/CosmonautJones/m-local/pull/67) ([scope/evidence](AUXILIARY-DDL-ADMISSION.md)) | frozen PR66 | `3ebacd0538161b986bc62f242d7aed2cd40ed20a` |
+| integrated disposable SQL startup ([scope/acceptance](INTEGRATED-SQL-STARTUP.md)), this branch | frozen PR67 | final exact head and outcomes are recorded in its PR and fresh CI receipts |
 
 Actual cumulative ancestry is b92 →
 `84e300f1d88e1ce603df79eb1f5788e54a5308f3` → 7a0 → 936 → be8 → 454 → d5 → 746.
@@ -28,17 +30,24 @@ with only cherry-pick metadata differences. Original a3/298 are not ancestors of
 PR59/release-finish and the earlier combined integration history; open older PRs
 are not an instruction to duplicate their commits.
 
-746 is the reviewed cumulative baseline, including PR60–66 work once. The current
-`codex/auxiliary-schema-admission-2026-10-16` branch inherits it and is the next
-cumulative candidate. Its final source must receive fresh exact-head checks,
+3eb is the frozen reviewed cumulative baseline, including PR60-67 work once.
+The current `codex/integrated-sql-startup-2026-10-16` branch inherits it and adds
+only the explicitly disposable application startup/photo-cache rehearsal. Its
+final source must receive fresh exact-head checks,
 shared-onboarding, native, browser and package qualification. Earlier receipts
 qualify only their own source/store/artifact; a new branch or green SQL step is
 not a final combined release certificate. Keep every frozen dependency unchanged.
 
-## Next integrated functional gate
+## Current integrated functional gate
 
-After strict DDL admission, prioritize one disposable **actual application startup
-and photo HTTP** candidate. Reuse the existing guarded launcher and native/browser
+The [startup acceptance](INTEGRATED-SQL-STARTUP.md) defines the current disposable
+**actual application startup and photo HTTP** candidate. `postgres-local` requires
+fixture-only evidence, explicit `--disposable-sql`, owned private temporary paths
+and the ordinary installed binary driver. `postgres-proof` stays authority-only;
+production SQL stays blocked. Upload refuses without writes; imported photos use
+a disposable exact cache anchored to the preserved original registry. The actual
+closed-port preflight, HTTP/restart/refusal and interrupted-cache outcomes must be
+read from the exact-head receipts before declaring this bounded gate closed. Reuse the existing guarded launcher and native/browser
 fixtures, with official Jac0.37.23, one owned PG18 database, fixed canonical entry,
 one backend and serialized ingress. Online catalog/key admission belongs after
 singleton ownership and before native spawn. Offline preflight remains static;
