@@ -51,8 +51,8 @@ tree af9d1950c89eb8e40b57dfcf050bc652f1b9278a, received existing hosted
 [checks 38872683023](https://github.com/CosmonautJones/m-local/actions/runs/38872683023).
 Actual PG 18.6/psycopg 3.3.6 ran 55 methods: all 49 prior names and the canonical
 renaming/counter positive control passed; five negative DDL methods produced 399
-AssertionError events, with zero setup errors/skips. All 20 source inputs and raw
-outcome/log hashes match Git. Schema removal, server stop and closed listener/
+AssertionError events, with zero setup errors/skips. All 20 source-input hashes match Git; generated
+outcome/log hashes match their receipt. Schema removal, server stop and closed listener/
 socket cleanup passed. Independent review confirmed clean behavioral RED.
 
 RED ZIP SHA256: a0011bc642de1dce8838a1bd0bd8cbba0345eae7c2eff32dec066cdb60b93938.
@@ -100,7 +100,7 @@ Android checks; consenting pilot/approved offer/support; durable hosting/stores,
 backups/off-host retrieval/RPO/RTO and one serialized backend. @umich.edu inbox
 access includes alumni and is not enrollment/endorsement. JacHammer ephemeral
 files/overlapping backends do not meet the governing contract. No merge, live
-migration/data change, email, credential creation, permission expansion,
+migration/data change, external email, live credential creation, permission expansion,
 deployment or spending is authorized by this increment.
 
 Catalog references: official PostgreSQL 18 [constraints](https://www.postgresql.org/docs/18/catalog-pg-constraint.html),
