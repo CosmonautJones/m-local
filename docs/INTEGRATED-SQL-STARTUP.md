@@ -34,7 +34,11 @@ It closes an application-startup rehearsal gap, not hosted-pilot acceptance.
    Resolve official PG18 tools once and bind server/client versions and hashes.
 3. Before serving, reuse the existing native child process slot to validate
    the selected established SQL catalog, suspension audit, both original keys
-   and photo bytes. Select the original SQL native key before exec of the
+   and photo bytes. Require the preserved original SQLite photo registry as a
+   read-only anchor: every imported filename, owner, digest, byte count and
+   creation time must remain present unchanged in SQL before cache publication;
+   extra valid SQL photos are allowed. Missing or malformed registry refuses.
+   Select the original SQL native key before exec of the
    official Jac binary. Native and auxiliary URLs must exactly identify the
    same owned loopback `mlocal_aux_test_*` database; the schema is owned too.
 4. Preserve synthetic original graph identities, root-backed profiles/merchant
@@ -47,7 +51,8 @@ It closes an application-startup rehearsal gap, not hosted-pilot acceptance.
    prove reconstruction and another authenticated restart.
 6. Missing/wrong config, mismatched native/aux database, missing actual app
    driver, missing/incompatible schema/audit, wrong/missing keys, missing/corrupt
-   photos and startup SQL outage refuse before either serving listener exists.
+   photos, changed imported photo metadata and startup SQL outage refuse before
+   either serving listener exists.
    Preserve SQL, original SQLite stores, keys and photos; never fall back.
 7. Unknown, corrupt or partial nonempty cache refuses unchanged. Cache write
    failure may leave a partial cache but cannot serve; subsequent startup

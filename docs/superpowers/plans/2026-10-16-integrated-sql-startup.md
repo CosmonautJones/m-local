@@ -43,11 +43,11 @@
 
 **Files:** `deploy/release/package.py`, `services/onboarding_backend.py`, `services/production_guard.py`, `services/postgres_auxiliary.py`; focused `tests/tooling` only if needed.
 
-**Interfaces:** `validate_launch_inputs(..., disposable_sql=False)` remains static; `launch(..., disposable_sql=False)` preserves its process ownership. `bootstrap_native(argv)` in onboarding backend validates normal driver, SQL keys/catalog and cache before `os.execve`. `PostgresAuxiliary.validate_photo_cache(cache_dir)` verifies exact existing cache without writes.
+**Interfaces:** `validate_launch_inputs(..., disposable_sql=False)` remains static; `launch(..., disposable_sql=False)` preserves its process ownership. `bootstrap_native(argv)` in onboarding backend validates normal driver, SQL keys/catalog and cache before `os.execve`. `PostgresAuxiliary.validate_photo_cache(cache_dir, preserved_registry=None)` verifies exact existing cache without writes; `materialize_photos(cache_dir, preserved_registry=None)` retains its existing fresh-cache behavior. Actual bootstrap always supplies the preserved original registry and compares all imported metadata before any cache write; optional defaults retain older adapter callers only.
 
 - [ ] Implement CLI admission and full static safeguards for explicit owned disposable context; all other modes retain refusals.
 - [ ] Add in-process original-key bootstrap in the existing native child slot, sanitize injection/redirect settings, then exec official Jac unchanged.
-- [ ] Validate exact nonempty cache or materialize empty cache; refuse invalid/partial state and uploads.
+- [ ] Validate the mandatory original registry and every imported SQL photo metadata row (including owner drift with empty cache); validate exact nonempty cache or materialize empty cache; refuse invalid/partial state and uploads.
 - [ ] Run hosted actual startup/HTTP/restart/refusal proof to GREEN, inspect unchanged originals and cleanup receipts; fix real failures without relaxing assertions.
 - [ ] Commit minimal runtime changes.
 
