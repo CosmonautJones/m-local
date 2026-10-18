@@ -271,7 +271,68 @@ def verify_package(package):
         raise ReleaseError("Unsupported release manifest or runtime")
     if any(private_path(Path(name).relative_to("source")) for name in expected if name.startswith("source/")):
         raise ReleaseError("Source package contains private data")
+    if manifest.get("build"):
+        public_build_identity(package, manifest)
     return manifest
+
+
+def public_build_identity(package, manifest=None):
+    """Allowlisted package provenance, not readiness or live-byte attestation.
+
+    Internal callers may reuse a manifest just returned by verify_package.
+    The launcher separately verifies installed canonical source before use.
+    """
+    package = Path(package)
+    if manifest is None:
+        manifest = verify_package(package)
+    unknown = {"schema": 1, "status": "unknown", "build_id": None, "source_sha": None, "source_tree": None,
+               "artifact_sha256": None, "dependency_archive_sha256": None, "serving_mode": None, "verification": None}
+    if not manifest.get("build"):
+        return unknown
+    try:
+        files, build = manifest["files"], manifest["build"]
+        for name in ("source_sha", "source_tree"):
+            if not isinstance(manifest[name], str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", manifest[name]):
+                raise ValueError
+        artifact = build["artifact"]
+        if not isinstance(artifact, str) or len(Path(artifact).parts) != 2 or Path(artifact).parts[0] != "artifact":
+            raise ValueError
+        artifact_sha = build["sha256"]
+        if not isinstance(artifact_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", artifact_sha) or files.get(artifact) != artifact_sha:
+            raise ValueError
+        receipt = read_json(package / "artifact/build-receipt.json")
+        if receipt != {"source_sha": manifest["source_sha"], "source_tree": manifest["source_tree"], "artifact_sha256": artifact_sha}:
+            raise ValueError
+        source_files = {name[7:]: value for name, value in files.items() if name.startswith("source/")}
+        if manifest.get("source_files_sha256") != hashlib.sha256(json.dumps(source_files, sort_keys=True).encode()).hexdigest():
+            raise ValueError
+        dependencies = {name: files["source/" + name] for name in ("jac.toml", "package-lock.json", "jac.lock") if "source/" + name in files}
+        if build.get("dependency_files") != dependencies:
+            raise ValueError
+        runtime = manifest.get("runtime", {})
+        runtime_files = {name for name in files if name.startswith("runtime/")}
+        if runtime or runtime_files:
+            if not isinstance(runtime, dict) or set(runtime) != {"jac", "jacpython"} or runtime_files != {"runtime/jac", "runtime/jacpython"}:
+                raise ValueError
+            if any(not isinstance(runtime[name], str) or not re.fullmatch(r"[0-9a-f]{64}", runtime[name]) or
+                   runtime[name] != files.get("runtime/" + name) for name in runtime):
+                raise ValueError
+        dependency_sha = None
+        if "dependencies/libraries.tar" in files and not manifest.get("dependencies"):
+            raise ValueError
+        if manifest.get("dependencies"):
+            archive = manifest["dependencies"]
+            dependency_sha = archive["sha256"]
+            if archive.get("archive") != "dependencies/libraries.tar" or not isinstance(dependency_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", dependency_sha) or files.get(archive["archive"]) != dependency_sha:
+                raise ValueError
+        if manifest.get("serving_mode") != "source-at-fixed-canonical-entry":
+            raise ValueError
+        return {"schema": 1, "status": "known", "build_id": digest(package / "manifest.json"),
+                "source_sha": manifest["source_sha"], "source_tree": manifest["source_tree"],
+                "artifact_sha256": artifact_sha, "dependency_archive_sha256": dependency_sha,
+                "serving_mode": manifest["serving_mode"], "verification": "launch-snapshot"}
+    except (OSError, ValueError, TypeError, KeyError):
+        raise ReleaseError("Build identity does not match the sealed package and embedded artifact receipt") from None
 
 
 def install_source(package, app, *, dry_run=False):
@@ -724,6 +785,9 @@ def launch(package, config, evidence):
     signal.signal(signal.SIGINT, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     try:
         require_free_ports(config)
+        # Overwrite inherited labels only after package, installed-source and
+        # rollout admission. Neither runtime Git nor provider env is provenance.
+        environment["MLOCAL_BUILD_IDENTITY"] = json.dumps(public_build_identity(package, manifest), sort_keys=True)
         guard = subprocess.run([str(package / "runtime/jacpython"), "-c",
                                 "import json,os; from pathlib import Path; from services.production_guard import validate_production_config; "
                                 "errors=validate_production_config(os.environ,Path.cwd()); print(json.dumps(errors)); raise SystemExit(78 if errors else 0)"],

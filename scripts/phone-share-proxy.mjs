@@ -1,6 +1,7 @@
 // Public app ingress: compiled assets and the app's exact RPCs only.
 // Never place the development relay or the raw Jac server behind a tunnel.
 import http from 'node:http';
+import {parseBuildIdentity,buildIdentityPage,unknownBuildIdentity} from './build-identity.mjs';
 import {isIP} from 'node:net';
 import {pathToFileURL} from 'node:url';
 import {createOnboardingLimit} from './onboarding-ingress.mjs';
@@ -59,13 +60,14 @@ function createObserver(eventSink) {
 
 function routeLabel(path) {
   if(path==='/healthz')return 'readiness';
+  if(path==='/version.json'||path==='/build')return 'build';
   if(path.startsWith('/function/')&&functions.has(path.slice(10)))return path.slice(10);
   if(path==='/'||path==='/index.html'||path==='/favicon.ico'||path==='/static/client.js'||
       path==='/static/assets/manifest.webmanifest'||/^\/static\/assets\/[\w-]+\.js$/.test(path)||path.startsWith('/assets/')||path.startsWith('/static/assets/brand/')||path.startsWith('/static/photos/'))return 'asset';
   return 'blocked';
 }
 
-function responseHeaders(upstream={},secure=false) {
+function responseHeaders(upstream={},secure=false,build=unknownBuildIdentity) {
   const headers={...upstream};
   // Do not expose runtime versions, and do not accept weaker upstream policy.
   for(const name of ['server','x-powered-by','strict-transport-security'])delete headers[name];
@@ -75,6 +77,7 @@ function responseHeaders(upstream={},secure=false) {
     'referrer-policy':'strict-origin-when-cross-origin',
     'permissions-policy':'camera=(self), microphone=(), geolocation=()',
     'cache-control':'no-store',
+    'x-mlocal-build':build.status==='known'?build.build_id:'unknown',
   });
   if(secure)headers['strict-transport-security']='max-age=31536000';
   return headers;
@@ -83,10 +86,11 @@ function responseHeaders(upstream={},secure=false) {
 export function createShareProxy({upstreamHost='localhost',upstreamPort=8200,
   trustCloudflare=true,trustFunnel=false,healthCheck=false,
   deploymentTopology=process.env.MLOCAL_DEPLOYMENT_TOPOLOGY||'',
-  secureProductionIngress=false,maxQueuedRequests=32,queueWaitMs=10000,maxConnections=96,
+  buildIdentity,secureProductionIngress=false,maxQueuedRequests=32,queueWaitMs=10000,maxConnections=96,
   upstreamDeadlineMs,readinessDeadlineMs=5000,startupCatalogCheck=false,
   eventSink=process.env.MLOCAL_INGRESS_EVENT_LOG==='stderr' ? event=>console.error(JSON.stringify(event)) : undefined,
 }={}) {
+  const build=parseBuildIdentity(buildIdentity);
   if(!['','single-instance-serialized'].includes(deploymentTopology))throw new Error('Invalid deployment topology.');
   if(typeof secureProductionIngress!=='boolean')throw new Error('Invalid secure ingress policy.');
   if(typeof startupCatalogCheck!=='boolean')throw new Error('Invalid startup catalog policy.');
@@ -116,7 +120,7 @@ export function createShareProxy({upstreamHost='localhost',upstreamPort=8200,
     };
     const deadline=setTimeout(()=>stop('DELIVERY_DEADLINE'),deadlineMs);
     res.once('finish',release);res.once('close',release);
-    res.writeHead(response.statusCode,responseHeaders(response.headers,secureProductionIngress));
+    res.writeHead(response.statusCode,responseHeaders(response.headers,secureProductionIngress,build));
     response.on('data',chunk=>{
       if(deliveryStopped||res.destroyed)return;
       if(reserved+chunk.length>maxResponseBytes||deliveryBytes+chunk.length>maxDeliveryBytes) {
@@ -195,16 +199,24 @@ export function createShareProxy({upstreamHost='localhost',upstreamPort=8200,
       ||/^\/static\/assets\/brand\/[\w-]+\.(png|ttf|svg)$/.test(path)
       ||/^\/static\/photos\/[a-f0-9]{32}\.jpg$/.test(path))
       ||req.method==='POST'&&path.startsWith('/function/')&&functions.has(path.slice(10));
-    for(const [name,value] of Object.entries(responseHeaders({},secureProductionIngress)))res.setHeader(name,value);
+    for(const [name,value] of Object.entries(responseHeaders({},secureProductionIngress,build)))res.setHeader(name,value);
     const waiting=new AbortController();
     res.on('close',()=>waiting.abort());
     const fail=(code,status,message)=>{
       observer.fail(code,route,status);
       if(res.destroyed||res.writableEnded)return;
       if(res.headersSent){res.destroy();return;}
-      res.writeHead(status,responseHeaders({'content-type':'text/plain',...(status===503?{'retry-after':'1'}:{})},secureProductionIngress));
+      res.writeHead(status,responseHeaders({'content-type':'text/plain',...(status===503?{'retry-after':'1'}:{})},secureProductionIngress,build));
       res.end(message);
     };
+
+    if(read&&(path==='/version.json'||path==='/build')) {
+      const json=path==='/version.json';
+      const body=json?JSON.stringify(build):buildIdentityPage(build);
+      res.writeHead(200,responseHeaders({'content-type':json?'application/json; charset=utf-8':'text/html; charset=utf-8',
+        'content-length':Buffer.byteLength(body)},secureProductionIngress,build));
+      res.end(req.method==='HEAD'?undefined:body);return;
+    }
 
     if(healthCheck&&read&&path==='/healthz') {
       let finished=false;
@@ -212,7 +224,7 @@ export function createShareProxy({upstreamHost='localhost',upstreamPort=8200,
         if(finished)return;
         finished=true;clearTimeout(deadline);waiting.abort();
         if(!ready)observer.fail('READINESS_FAILED','readiness',503);
-        if(!res.destroyed){res.writeHead(ready?200:503,responseHeaders({'content-type':'application/json'},secureProductionIngress));res.end(JSON.stringify({ready}));}
+        if(!res.destroyed){res.writeHead(ready?200:503,responseHeaders({'content-type':'application/json'},secureProductionIngress,build));res.end(JSON.stringify({ready}));}
       };
       // Expiry cancels queued probes. An active probe still drains through its
       // full response; the lane's deadline latches closed if that never ends.
@@ -243,7 +255,7 @@ export function createShareProxy({upstreamHost='localhost',upstreamPort=8200,
     const retry=limit(client,path);
     if(retry){
       observer.fail('ONBOARDING_RATE_LIMITED',route,429);
-      res.writeHead(429,responseHeaders({'content-type':'application/json','retry-after':String(retry)},secureProductionIngress));
+      res.writeHead(429,responseHeaders({'content-type':'application/json','retry-after':String(retry)},secureProductionIngress,build));
       res.end(JSON.stringify({ok:false,error:{code:'RATE_LIMITED',message:'Too many sign-in attempts. Please wait before retrying.'}}));return;
     }
     const forward=body=>{
