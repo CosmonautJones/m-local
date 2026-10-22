@@ -15,8 +15,10 @@ It closes an application-startup rehearsal gap, not hosted-pilot acceptance.
 - `postgres-proof` remains authority-only and refuses native startup.
   `sqlite` remains the default application backend.
 - New `postgres-local` is explicitly disposable: the package `run`/`preflight`
-  command requires `--disposable-sql`, caller `MLOCAL_ENV=disposable`, fixture-only
-  evidence and an owned private temporary fixture root. A production request
+  command requires `--disposable-sql`, caller `MLOCAL_ENV=disposable`,
+  `MLOCAL_ONBOARDING_BACKEND=postgres-local`, `MLOCAL_DISPOSABLE_SQL=1`, fixture-only
+  evidence and an owned private temporary fixture root (`MLOCAL_DURABLE_ROOT`
+  named `m-local-package-live.*`, mode 0700). A production request
   cannot be silently downgraded. Production SQL rollout stays blocked.
 - All deliberate local files/worktrees/evidence use X:. Keep frozen prior heads,
   Argon WIP and other writers unchanged. Hosted disposable checks use existing

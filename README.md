@@ -4,9 +4,57 @@
 
 # M-Local
 
-M-Local is a team-built prototype connecting Ann Arbor students with time-limited
-local restaurant offers. Students discover an offer, claim saved terms and present
-a QR pass; the merchant previews and confirms one-time redemption.
+M-Local helps Ann Arbor students find and claim time-limited deals at local
+restaurants, and lets those restaurants post offers and redeem them with a QR code.
+
+<p align="center">
+  <img src="docs/assets/readme-hero.png" alt="Illustration: a student holds a phone showing a QR pass while a staff member at a local restaurant counter gets ready to scan it" width="100%">
+</p>
+
+- **Browse first:** students see local offers and filter by price, time and diet before signing in.
+- **Claim with a code:** sign in with an emailed code from a verified `@umich.edu` inbox and get a QR pass with the saved terms and expiry.
+- **Redeem once:** the restaurant previews the QR and confirms a one-time redemption.
+- **Run your offers:** businesses verify an email, submit for manual approval, then manage photos, drafts and offer windows.
+- **See what worked:** businesses review recorded claims, redemptions and sales charts.
+
+## How it works
+
+```mermaid
+flowchart LR
+  S[Student browses offers] --> C[Claims with emailed code]
+  C --> Q[Gets QR pass]
+  Q --> R[Restaurant scans and confirms]
+  R --> D[(Server records one-time redemption)]
+  B[Business posts offer after approval] --> S
+```
+
+The server owns authorization, inventory, expiry and redemption.
+
+## Quick start
+
+Linux, macOS (Apple silicon) or WSL Bash, with Python 3 installed. This installs
+the pinned, checksum-verified Jac 0.37.23 runtime and starts the app at
+`http://localhost:8000`:
+
+```bash
+git clone https://github.com/CosmonautJones/m-local.git
+cd m-local
+bash scripts/setup.sh
+bash scripts/dev.sh
+```
+
+Checks and tests: `bash scripts/check.sh` and `bash scripts/test.sh core`.
+More in [Runtime setup](docs/RUNTIME.md).
+
+**Status:** engineering release candidate on `main`; live rollout is not yet
+approved. See [Release status](#release-status), the
+[gate matrix](docs/RELEASE-GATES.md), the
+[acceptance checklist](docs/RELEASE-ACCEPTANCE.md) and
+[release tracking](https://github.com/CosmonautJones/m-local/issues/33).
+
+---
+
+## Project details
 
 Built by **Travis Jones, Rohan Maxa, Manthan Patil and Adam Jiang**. See
 [team attribution](docs/PORTFOLIO.md#team-and-attribution) and the
@@ -19,43 +67,41 @@ Built by **Travis Jones, Rohan Maxa, Manthan Patil and Adam Jiang**. See
 
 ## Release status
 
-This tree contains the release candidate implementation and source-bound
-functional, native HTTP, browser, concurrency/fault and isolated recovery evidence.
-The integrated revision requires complete tests and independent review before
-its authorized engineering merge. **Live rollout remains unapproved.** Check
-the release tracking record for current main/PR status; an existing hosted app
-must not be assumed to contain the repository's latest changes.
+`main` contains the merged engineering release candidate: the PR #55/#59
+student and merchant release plus the October 15-18 hardening stack
+(PRs #60-#70: exact-package recovery binding, offline preflight parity,
+private research handling, single-PostgreSQL auxiliary proofs, disposable SQL
+startup and immutable build identity). Every workflow passes on `main`.
+**Live rollout remains unapproved.** An existing hosted app must not be assumed
+to contain the repository's latest changes; compare its `/version.json` build
+identity before relying on it. See the
+[release tracking record](https://github.com/CosmonautJones/m-local/issues/33).
 
-| Component | Branch | Review |
-| --- | --- | --- |
-| Manual approval, connected photos and recovery foundation | `codex/release-readiness` | [PR #55](https://github.com/CosmonautJones/m-local/pull/55) |
-| Startup and native identity hardening | `release/native-hardening` | [PR #56](https://github.com/CosmonautJones/m-local/pull/56) |
-| Student discovery and safe claim intent | `release/student-experience` | [PR #57](https://github.com/CosmonautJones/m-local/pull/57) |
+| Component | Review |
+| --- | --- |
+| Manual approval, connected photos and recovery foundation | [PR #55](https://github.com/CosmonautJones/m-local/pull/55) |
+| Native hardening, student experience, header fix and merchant suspension | [PR #59](https://github.com/CosmonautJones/m-local/pull/59) (includes #56-#58) |
+| Recovery binding, preflight parity, private research and build identity | [PR #70](https://github.com/CosmonautJones/m-local/pull/70) (includes #60-#62, #69) |
+| PostgreSQL auxiliary proofs and disposable integrated SQL startup | [PR #68](https://github.com/CosmonautJones/m-local/pull/68) (includes #63-#67) |
 
-The last fully qualified combined application checkpoint is
-`bed4be3d43ec12b949bc2d7799ff14883be3639f`. Its
-[immutable combined handoff](https://github.com/CosmonautJones/m-local/blob/7b5344f62176dc3edf7c6a54720e4274daff6931/docs/review/release-rc-bed4be3/HANDOFF.md)
-records final-head receipts. The current integration adds the selective header
-fix from [PR #58](https://github.com/CosmonautJones/m-local/pull/58) and must pass
-the complete workflows at its new head before merging. The older
-[immutable engineering handoff](https://github.com/CosmonautJones/m-local/blob/789a071a49fd683e46982296d94839ec79f245d3/docs/review/release-rc-2be568a/HANDOFF.md)
-preserves passing functional receipts and historical source-share failures.
-Source composition is now [informational](docs/RELEASE-SOURCE-POLICY.md);
-those old failures remain recorded. Every later source head needs its own checks.
-The PRs and #33 carry the latest heads and terminal CI results.
+Earlier immutable handoffs (for example the
+[combined candidate handoff](https://github.com/CosmonautJones/m-local/blob/7b5344f62176dc3edf7c6a54720e4274daff6931/docs/review/release-rc-bed4be3/HANDOFF.md))
+preserve historical receipts. Source composition is
+[informational](docs/RELEASE-SOURCE-POLICY.md); every later source head needs
+its own checks.
 
 Remaining gates include research access, retention and historical publication,
 provider durability and existing-user migration, an approved rollout artifact,
 current-candidate inbox delivery, off-host recovery, monitoring, phones/cameras
 and human acceptance.
-Follow the [gate matrix](https://github.com/CosmonautJones/m-local/blob/release/combined-candidate/docs/RELEASE-GATES.md)
+Follow the [gate matrix](docs/RELEASE-GATES.md)
 and [acceptance checklist](docs/RELEASE-ACCEPTANCE.md). Local fixtures and a
 reachable homepage do not complete hosted acceptance.
 
-Travis approved private retention of contact research on October 16. This candidate
-removes research payloads from public source after verified preservation and refuses
-them in new release packages. Prior public Git history and existing main remain
-unchanged until separately addressed; older archives containing research must remain
+Travis approved private retention of contact research on October 16. `main` no
+longer tracks research payloads (they were preserved privately first) and new
+release packages refuse them. Prior public Git history still contains them until
+separately addressed; older archives containing research must remain
 private. Readers, retention and history handling remain open in
 [privacy decisions](docs/PRIVACY-DECISIONS.md).
 
@@ -166,10 +212,10 @@ safety evidence, not a multiple-replica or measured-capacity claim.
 
 Graph/identity storage, onboarding SQLite, original signing keys and photo
 ownership/files must be preserved together on durable storage.
-The [hosting package](https://github.com/CosmonautJones/m-local/blob/release/combined-candidate/docs/RELEASE-HOSTING-PACKAGE.md)
+The [hosting package](docs/RELEASE-HOSTING-PACKAGE.md)
 contains secret names, preflight, backup, isolated restore, rollout, smoke checks
-and source rollback. Travis must explicitly approve merging, deployment and live
-data work.
+and source rollback. Travis must explicitly approve deployment and live data
+work.
 
 The existing [JacHammer address](https://mlocal.jachammer.app/) is a historical
 host reference. Its deployed candidate revision, durability and readiness are
@@ -181,7 +227,7 @@ unverified here. Do not invite real account onboarding from this README.
 - [Team contract](docs/TEAM-CONTRACT.md) and [parallel workflow](docs/TEAM-WORKFLOW.md)
 - [QR redemption](docs/QR-REDEMPTION.md)
 - [Business insights](docs/BUSINESS-INSIGHTS.md)
-- [Persistent coordination and independent review](https://github.com/CosmonautJones/m-local/blob/release/combined-candidate/docs/RELEASE-REVIEW-PROTOCOL.md)
+- [Persistent coordination and independent review](docs/RELEASE-REVIEW-PROTOCOL.md)
 
 Payments, POS integration, automatic business approval and native iOS/Android
 packaging remain outside this candidate.
