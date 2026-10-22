@@ -259,7 +259,10 @@ class ReleasePackageTests(unittest.TestCase):
                 (bundle / "manifest.json").write_text(json.dumps(manifest))
                 candidate_evidence = json.loads(json.dumps(evidence))
                 candidate_evidence["runtime_safety"]["jac_sha256"] = manifest["runtime"].get("jac")
-                self.assert_preflight_refused(self.preflight_result(bundle, config, candidate_evidence, env), "complete tested source")
+                # Inconsistent runtime/dependency declarations now fail the
+                # stricter package-integrity gate before launch completeness.
+                expected = "complete tested source" if field == "build" else "Build identity"
+                self.assert_preflight_refused(self.preflight_result(bundle, config, candidate_evidence, env), expected)
         (bundle / "manifest.json").write_text(original)
 
     def test_preflight_refuses_missing_installed_source_marker(self):
@@ -493,6 +496,7 @@ class ReleasePackageTests(unittest.TestCase):
              patch.object(PACKAGE, "require_launch_evidence"), \
              patch.object(PACKAGE, "state_inventory"), \
              patch.object(PACKAGE, "verify_installed_source"), \
+             patch.object(PACKAGE, "public_build_identity", return_value={"status": "unknown"}), \
              patch.object(PACKAGE, "acquire_lock", return_value=99), \
              patch.object(PACKAGE, "require_free_ports"), \
              patch.object(PACKAGE.signal, "signal"), \
@@ -997,6 +1001,155 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertFalse((self.root / "backup").exists())
 
 
+    def identity_fixture(self):
+        artifact = self.root / "fixture.jab"
+        artifact.write_bytes(b"synthetic tested artifact")
+        receipt = self.root / "build.json"
+        receipt.write_text(json.dumps({"source_sha": self.git("rev-parse", "HEAD"),
+            "source_tree": self.git("rev-parse", "HEAD^{tree}"), "artifact_sha256": PACKAGE.digest(artifact)}))
+        package = self.root / "built-package"
+        PACKAGE.create_source_package(self.source, package, artifact=artifact, build_receipt=receipt)
+        return package
+
+    def test_build_identity_rejects_manifest_only_provenance_edits(self):
+        package = self.identity_fixture()
+        path = package / "manifest.json"
+        original = json.loads(path.read_text())
+        for field in ("source_sha", "source_tree"):
+            with self.subTest(field=field):
+                changed = dict(original, **{field: "b" * 40})
+                path.write_text(json.dumps(changed))
+                with self.assertRaisesRegex(PACKAGE.ReleaseError, "[Bb]uild identity"):
+                    PACKAGE.verify_package(package)
+        path.write_text(json.dumps(original))
+        receipt = package / "artifact/build-receipt.json"
+        value = json.loads(receipt.read_text())
+        value["source_sha"] = "b" * 40
+        receipt.write_text(json.dumps(value))
+        original["files"]["artifact/build-receipt.json"] = PACKAGE.digest(receipt)
+        path.write_text(json.dumps(original))
+        with self.assertRaisesRegex(PACKAGE.ReleaseError, "[Bb]uild identity"):
+            PACKAGE.verify_package(package)
+
+    def test_build_identity_missing_artifact_is_unknown_without_checkout_fallback(self):
+        package = self.bundle()
+        with patch.dict(os.environ, {"GITHUB_SHA": "a" * 40, "MLOCAL_BUILD_IDENTITY": "SECRET"}):
+            identity = PACKAGE.public_build_identity(package)
+        self.assertEqual(identity["status"], "unknown")
+        for field in ("build_id", "source_sha", "source_tree", "artifact_sha256", "dependency_archive_sha256"):
+            self.assertIsNone(identity[field])
+        self.assertNotIn("SECRET", json.dumps(identity))
+
+    def test_build_identity_matches_exact_artifact_and_sanitizes_public_fields(self):
+        package = self.identity_fixture()
+        manifest = PACKAGE.verify_package(package)
+        identity = PACKAGE.public_build_identity(package)
+        self.assertEqual(identity, {"schema": 1, "status": "known", "build_id": PACKAGE.digest(package / "manifest.json"),
+            "source_sha": manifest["source_sha"], "source_tree": manifest["source_tree"],
+            "artifact_sha256": PACKAGE.digest(package / manifest["build"]["artifact"]),
+            "dependency_archive_sha256": None, "serving_mode": "source-at-fixed-canonical-entry",
+            "verification": "launch-snapshot"})
+        self.assertNotIn(str(self.root), json.dumps(identity))
+        self.assertNotIn("runtime", identity)
+        app = self.root / "canonical"
+        PACKAGE.install_source(package, app)
+        PACKAGE.verify_installed_source(package, self.config(app), require_marker=True)
+        (app / "main.jac").write_text("uncommitted changed installed source")
+        with self.assertRaisesRegex(PACKAGE.ReleaseError, "Installed source inventory"):
+            PACKAGE.verify_installed_source(package, self.config(app), require_marker=True)
+
+    def test_build_identity_rejects_artifact_and_source_inventory_label_drift(self):
+        package = self.identity_fixture()
+        path = package / "manifest.json"
+        original = json.loads(path.read_text())
+        changes = [dict(original, source_files_sha256="b" * 64),
+                   dict(original, build=dict(original["build"], sha256="b" * 64)),
+                   dict(original, runtime={"jac": "b" * 64}),
+                   dict(original, runtime={"jac": None, "jacpython": None}),
+                   dict(original, dependencies={"archive": "dependencies/absent.tar", "sha256": "b" * 64})]
+        for changed in changes:
+            with self.subTest(changed=changed):
+                path.write_text(json.dumps(changed))
+                with self.assertRaisesRegex(PACKAGE.ReleaseError, "[Bb]uild identity"):
+                    PACKAGE.verify_package(package)
+
+
+    def test_build_identity_launch_overwrites_inherited_snapshot_before_children(self):
+        # Real receipt/source verification; synthetic never-executed runtime and
+        # archive bytes. Rollout policy, private inventory and child OS calls
+        # are mocked: this is identity handoff, not runtime/host qualification.
+        package = self.identity_fixture()
+        app = self.root / "canonical"
+        PACKAGE.install_source(package, app)
+        path = package / "manifest.json"
+        manifest = json.loads(path.read_text())
+        (package / "runtime").mkdir()
+        for name in ("jac", "jacpython"):
+            (package / "runtime" / name).write_bytes(b"synthetic unused runtime")
+        manifest["runtime"] = {name: PACKAGE.digest(package / "runtime" / name) for name in ("jac", "jacpython")}
+        (package / "dependencies").mkdir()
+        archive = package / "dependencies/libraries.tar"
+        archive.write_bytes(b"synthetic unused dependency archive")
+        manifest["dependencies"] = {"archive": "dependencies/libraries.tar", "sha256": PACKAGE.digest(archive)}
+        manifest["files"] = PACKAGE.inventory(package)
+        manifest["files"].pop("manifest.json")
+        path.write_text(json.dumps(manifest))
+        marker = app / ".jac/release-installed.json"
+        installed = json.loads(marker.read_text())
+        installed["package_manifest_sha256"] = PACKAGE.digest(path)
+        marker.write_text(json.dumps(installed))
+        expected = PACKAGE.public_build_identity(package)
+        inherited = dict(expected, build_id="f" * 64, source_sha="f" * 40)
+        with patch.object(PACKAGE, "require_launch_evidence"), patch.object(PACKAGE, "state_inventory"), \
+             patch.object(PACKAGE, "require_canonical_project_entry"), \
+             patch.object(PACKAGE, "acquire_lock", return_value=99), patch.object(PACKAGE, "require_free_ports"), \
+             patch.object(PACKAGE.signal, "signal"), patch.object(PACKAGE.os, "close"), \
+             patch.object(PACKAGE.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as guard, \
+             patch.object(PACKAGE.subprocess, "Popen", side_effect=RuntimeError("CAPTURE_IDENTITY")) as spawn, \
+             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://fixture@localhost/disposable", "MLOCAL_INGRESS": "restricted-edge", "MLOCAL_TRUSTED_HTTPS_EDGE": "1",
+                 "MLOCAL_BUILD_IDENTITY": json.dumps(inherited), "GITHUB_SHA": "f" * 40}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "CAPTURE_IDENTITY"):
+                PACKAGE.launch(package, self.config(app), {})
+            for child in (guard, spawn):
+                self.assertEqual(json.loads(child.call_args.kwargs["env"]["MLOCAL_BUILD_IDENTITY"]), expected)
+            spawn.reset_mock()
+            guard.reset_mock()
+            original = path.read_bytes()
+            manifest["source_sha"] = "f" * 40
+            path.write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(PACKAGE.ReleaseError, "Build identity"):
+                PACKAGE.launch(package, self.config(app), {})
+            spawn.assert_not_called()
+            guard.assert_not_called()
+            path.write_bytes(original)
+            (app / "main.jac").write_text("dirty installed source")
+            with self.assertRaisesRegex(PACKAGE.ReleaseError, "Installed source inventory"):
+                PACKAGE.launch(package, self.config(app), {})
+            spawn.assert_not_called()
+
+    def test_build_identity_rejects_undeclared_packaged_runtime_or_dependencies(self):
+        package = self.identity_fixture()
+        path = package / "manifest.json"
+        manifest = json.loads(path.read_text())
+        (package / "runtime").mkdir()
+        for name in ("jac", "jacpython"):
+            (package / "runtime" / name).write_bytes(b"synthetic never executed runtime")
+        manifest["files"] = PACKAGE.inventory(package)
+        manifest["files"].pop("manifest.json")
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(PACKAGE.ReleaseError, "Build identity"):
+            PACKAGE.verify_package(package)
+        manifest["runtime"] = {name: manifest["files"]["runtime/" + name] for name in ("jac", "jacpython")}
+        path.write_text(json.dumps(manifest))
+        self.assertEqual(PACKAGE.public_build_identity(package)["status"], "known")
+        (package / "dependencies").mkdir()
+        (package / "dependencies/libraries.tar").write_bytes(b"synthetic unused archive")
+        manifest["files"]["dependencies/libraries.tar"] = PACKAGE.digest(package / "dependencies/libraries.tar")
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(PACKAGE.ReleaseError, "Build identity"):
+            PACKAGE.verify_package(package)
+
+
 @unittest.skipUnless(os.environ.get("MLOCAL_RELEASE_PG_TOOLS"), "Native logical recovery drill requires explicit disposable PostgreSQL tools")
 class NativeReleaseRecoveryTests(unittest.TestCase):
     """Actual PostgreSQL logical dump/restore; synthetic identities, never live users.
@@ -1118,6 +1271,8 @@ class NativeReleaseRecoveryTests(unittest.TestCase):
                 command(str(binary / "pg_ctl"), "-D", str(cluster), "-m", "fast", "-w", "stop")
                 with socket.socket() as stopped:
                     self.assertNotEqual(stopped.connect_ex(("127.0.0.1", port)), 0)
+
+
 
 
 if __name__ == "__main__":
