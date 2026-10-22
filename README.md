@@ -4,9 +4,57 @@
 
 # M-Local
 
-M-Local is a team-built prototype connecting Ann Arbor students with time-limited
-local restaurant offers. Students discover an offer, claim saved terms and present
-a QR pass; the merchant previews and confirms one-time redemption.
+M-Local helps Ann Arbor students find and claim time-limited deals at local
+restaurants, and lets those restaurants post offers and redeem them with a QR code.
+
+<p align="center">
+  <img src="docs/assets/readme-hero.png" alt="Illustration: a student holds a phone showing a QR pass while a staff member at a local restaurant counter gets ready to scan it" width="100%">
+</p>
+
+- **Browse first:** students see local offers and filter by price, time and diet before signing in.
+- **Claim with a code:** sign in with an emailed code from a verified `@umich.edu` inbox and get a QR pass with the saved terms and expiry.
+- **Redeem once:** the restaurant previews the QR and confirms a one-time redemption.
+- **Run your offers:** businesses verify an email, submit for manual approval, then manage photos, drafts and offer windows.
+- **See what worked:** businesses review recorded claims, redemptions and sales charts.
+
+## How it works
+
+```mermaid
+flowchart LR
+  S[Student browses offers] --> C[Claims with emailed code]
+  C --> Q[Gets QR pass]
+  Q --> R[Restaurant scans and confirms]
+  R --> D[(Server records one-time redemption)]
+  B[Business posts offer after approval] --> S
+```
+
+The server owns authorization, inventory, expiry and redemption.
+
+## Quick start
+
+Linux, macOS (Apple silicon) or WSL Bash, with Python 3 installed. This installs
+the pinned, checksum-verified Jac 0.37.23 runtime and starts the app at
+`http://localhost:8000`:
+
+```bash
+git clone https://github.com/CosmonautJones/m-local.git
+cd m-local
+bash scripts/setup.sh
+bash scripts/dev.sh
+```
+
+Checks and tests: `bash scripts/check.sh` and `bash scripts/test.sh core`.
+More in [Runtime setup](docs/RUNTIME.md).
+
+**Status:** engineering release candidate on `main`; live rollout is not yet
+approved. See [Release status](#release-status), the
+[gate matrix](docs/RELEASE-GATES.md), the
+[acceptance checklist](docs/RELEASE-ACCEPTANCE.md) and
+[release tracking](https://github.com/CosmonautJones/m-local/issues/33).
+
+---
+
+## Project details
 
 Built by **Travis Jones, Rohan Maxa, Manthan Patil and Adam Jiang**. See
 [team attribution](docs/PORTFOLIO.md#team-and-attribution) and the
