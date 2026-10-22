@@ -19,6 +19,7 @@ if (production && (ingress === 'direct' || process.env.MLOCAL_TRUSTED_HTTPS_EDGE
 // render only after proving its network exposes the gateway exclusively.
 const loopback = ingress === 'funnel' || ingress === 'restricted-edge';
 const proxy = createShareProxy({
+  buildIdentity: process.env.MLOCAL_BUILD_IDENTITY,
   upstreamHost: '127.0.0.1', upstreamPort,
   trustCloudflare: ingress === 'render', trustFunnel: ingress === 'funnel', healthCheck: true,
   deploymentTopology: process.env.MLOCAL_DEPLOYMENT_TOPOLOGY || 'single-instance-serialized',

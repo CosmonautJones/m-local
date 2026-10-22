@@ -108,6 +108,12 @@ def private_path(relative):
                for part in parts) or parts[:2] == ("assets", "photos")
 
 
+def research_payload(relative):
+    """Only the public policy note may occupy the research namespace."""
+    parts = Path(relative).parts
+    return tuple(part.casefold() for part in parts[:2]) == ("data", "research") and parts != ("data", "research", "README.md")
+
+
 def git(root, *args):
     result = subprocess.run(["git", "-C", str(root), *args], capture_output=True, check=False)
     if result.returncode:
@@ -185,6 +191,11 @@ def create_source_package(source, destination, *, runtime=None, artifact=None, b
         raise ReleaseError("Package destination already exists; never replace an evidence artifact")
     sha = git(source, "rev-parse", "HEAD").decode().strip()
     tree = git(source, "rev-parse", "HEAD^{tree}").decode().strip()
+    # Inspect the Git tree before export: ignore attributes cannot hide a
+    # tracked research payload from this release policy.
+    tracked = git(source, "ls-tree", "-r", "--name-only", "-z", sha).decode().split("\0")
+    if any(research_payload(name) for name in tracked if name):
+        raise ReleaseError("Research payloads require verified private preservation and removal from public release source")
     archive = git(source, "archive", "--format=tar", sha)
     with tarfile.open(fileobj=io.BytesIO(archive)) as source_tar:
         members = source_tar.getmembers()
@@ -271,7 +282,68 @@ def verify_package(package):
         raise ReleaseError("Unsupported release manifest or runtime")
     if any(private_path(Path(name).relative_to("source")) for name in expected if name.startswith("source/")):
         raise ReleaseError("Source package contains private data")
+    if manifest.get("build"):
+        public_build_identity(package, manifest)
     return manifest
+
+
+def public_build_identity(package, manifest=None):
+    """Allowlisted package provenance, not readiness or live-byte attestation.
+
+    Internal callers may reuse a manifest just returned by verify_package.
+    The launcher separately verifies installed canonical source before use.
+    """
+    package = Path(package)
+    if manifest is None:
+        manifest = verify_package(package)
+    unknown = {"schema": 1, "status": "unknown", "build_id": None, "source_sha": None, "source_tree": None,
+               "artifact_sha256": None, "dependency_archive_sha256": None, "serving_mode": None, "verification": None}
+    if not manifest.get("build"):
+        return unknown
+    try:
+        files, build = manifest["files"], manifest["build"]
+        for name in ("source_sha", "source_tree"):
+            if not isinstance(manifest[name], str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", manifest[name]):
+                raise ValueError
+        artifact = build["artifact"]
+        if not isinstance(artifact, str) or len(Path(artifact).parts) != 2 or Path(artifact).parts[0] != "artifact":
+            raise ValueError
+        artifact_sha = build["sha256"]
+        if not isinstance(artifact_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", artifact_sha) or files.get(artifact) != artifact_sha:
+            raise ValueError
+        receipt = read_json(package / "artifact/build-receipt.json")
+        if receipt != {"source_sha": manifest["source_sha"], "source_tree": manifest["source_tree"], "artifact_sha256": artifact_sha}:
+            raise ValueError
+        source_files = {name[7:]: value for name, value in files.items() if name.startswith("source/")}
+        if manifest.get("source_files_sha256") != hashlib.sha256(json.dumps(source_files, sort_keys=True).encode()).hexdigest():
+            raise ValueError
+        dependencies = {name: files["source/" + name] for name in ("jac.toml", "package-lock.json", "jac.lock") if "source/" + name in files}
+        if build.get("dependency_files") != dependencies:
+            raise ValueError
+        runtime = manifest.get("runtime", {})
+        runtime_files = {name for name in files if name.startswith("runtime/")}
+        if runtime or runtime_files:
+            if not isinstance(runtime, dict) or set(runtime) != {"jac", "jacpython"} or runtime_files != {"runtime/jac", "runtime/jacpython"}:
+                raise ValueError
+            if any(not isinstance(runtime[name], str) or not re.fullmatch(r"[0-9a-f]{64}", runtime[name]) or
+                   runtime[name] != files.get("runtime/" + name) for name in runtime):
+                raise ValueError
+        dependency_sha = None
+        if "dependencies/libraries.tar" in files and not manifest.get("dependencies"):
+            raise ValueError
+        if manifest.get("dependencies"):
+            archive = manifest["dependencies"]
+            dependency_sha = archive["sha256"]
+            if archive.get("archive") != "dependencies/libraries.tar" or not isinstance(dependency_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", dependency_sha) or files.get(archive["archive"]) != dependency_sha:
+                raise ValueError
+        if manifest.get("serving_mode") != "source-at-fixed-canonical-entry":
+            raise ValueError
+        return {"schema": 1, "status": "known", "build_id": digest(package / "manifest.json"),
+                "source_sha": manifest["source_sha"], "source_tree": manifest["source_tree"],
+                "artifact_sha256": artifact_sha, "dependency_archive_sha256": dependency_sha,
+                "serving_mode": manifest["serving_mode"], "verification": "launch-snapshot"}
+    except (OSError, ValueError, TypeError, KeyError):
+        raise ReleaseError("Build identity does not match the sealed package and embedded artifact receipt") from None
 
 
 def install_source(package, app, *, dry_run=False):
@@ -293,6 +365,8 @@ def install_source(package, app, *, dry_run=False):
         if target.is_dir():
             for path in target.rglob("*"):
                 relative = path.relative_to(app)
+                if path.is_file() and research_payload(relative):
+                    raise ReleaseError("Research inside managed source requires verified private preservation and operator migration before source switching")
                 if private_path(relative) and relative.parts[:2] != ("assets", "photos"):
                     raise ReleaseError("Private files inside managed source require operator migration before source switching")
     if dry_run:
@@ -558,8 +632,10 @@ def coordinated_restore(backup, config, package):
     receipt = verify_recovery_set(backup)
     manifest = verify_package(package)
     if receipt.get("canonical_entry") != config["canonical_entry"] or receipt.get("source_sha") != manifest["source_sha"] or \
+            receipt.get("source_tree") != manifest["source_tree"] or \
+            receipt.get("package_manifest_sha256") != digest(Path(package) / "manifest.json") or \
             receipt.get("runtime") != manifest["runtime"]:
-        raise ReleaseError("Recovery requires the original canonical entry, matching source and official runtime")
+        raise ReleaseError("Recovery requires the original canonical entry, matching source tree, exact package and official runtime")
     # Validate file destinations before any PostgreSQL write. Recovery does not
     # repair collisions or overwrite an existing native account store.
     for name in ("onboarding_dir", "native_signing_file", "photos_dir"):
@@ -691,14 +767,15 @@ def require_canonical_project_entry(app):
         raise ReleaseError("The canonical project entry must be explicitly declared as main in valid jac.toml")
 
 
-def launch(package, config, evidence):
+def validate_launch_inputs(package, config, evidence):
+    """Shared local startup admission; no locks, port binds or network calls."""
     package = Path(package)
     app = validate_config(config)
     manifest = verify_package(package)
     require_launch_evidence(config, manifest, evidence)
     if not manifest.get("dependencies") or not manifest.get("build") or set(manifest.get("runtime", {})) != {"jac", "jacpython"}:
         raise ReleaseError("Launch requires the complete tested source, official runtime, build and dependency package")
-    state_inventory(config)
+    state = state_inventory(config)
     verify_installed_source(package, config, require_marker=True)
     environment = os.environ.copy()
     pg_environment(environment.get("JAC_DB_URL", ""))
@@ -716,21 +793,37 @@ def launch(package, config, evidence):
         raise ReleaseError("JAC_DATA_PATH differs from the recorded original native signing state; preserve the existing path and key")
     # Node/gateway provenance and explicit trusted edge are host capabilities.
     if environment.get("MLOCAL_INGRESS") not in {"render", "funnel", "restricted-edge"}:
-        raise ReleaseError("Select the verified restricted HTTPS edge; production direct ingress is prohibited")
+        raise ReleaseError("MLOCAL_INGRESS must select the verified restricted HTTPS edge; production direct ingress is prohibited")
+    if environment.get("MLOCAL_TRUSTED_HTTPS_EDGE") != "1":
+        raise ReleaseError("MLOCAL_TRUSTED_HTTPS_EDGE must explicitly confirm the verified HTTPS edge before startup")
     require_canonical_project_entry(app)
+    return app, manifest, state, environment
+
+
+def require_production_config(package, app, environment):
+    """Run the existing packaged guard and expose only setting names on refusal."""
+    guard = subprocess.run([str(package / "runtime/jacpython"), "-c",
+                            "import json,os; from pathlib import Path; from services.production_guard import validate_production_config; "
+                            "errors=validate_production_config(os.environ,Path.cwd()); print(json.dumps(errors)); raise SystemExit(78 if errors else 0)"],
+                           cwd=app, env=dict(environment, PYTHONDONTWRITEBYTECODE="1"), timeout=30, capture_output=True)
+    if guard.returncode:
+        names = sorted(set(re.findall(r"\b(?:MLOCAL_|JAC_)[A-Z_]+\b", guard.stdout.decode(errors="replace"))))
+        raise ReleaseError("Production configuration guard refused startup: " + (", ".join(names) or "required setting names unavailable; inspect protected guard check"))
+
+
+def launch(package, config, evidence):
+    package = Path(package)
+    app, manifest, _, environment = validate_launch_inputs(package, config, evidence)
     lock = acquire_lock(config)
     processes = []
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     signal.signal(signal.SIGINT, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     try:
         require_free_ports(config)
-        guard = subprocess.run([str(package / "runtime/jacpython"), "-c",
-                                "import json,os; from pathlib import Path; from services.production_guard import validate_production_config; "
-                                "errors=validate_production_config(os.environ,Path.cwd()); print(json.dumps(errors)); raise SystemExit(78 if errors else 0)"],
-                               cwd=app, env=environment, timeout=30, capture_output=True)
-        if guard.returncode:
-            names = sorted(set(re.findall(r"\b(?:MLOCAL_|JAC_)[A-Z_]+\b", guard.stdout.decode(errors="replace"))))
-            raise ReleaseError("Production configuration guard refused startup: " + (", ".join(names) or "required setting names unavailable; inspect protected guard check"))
+        # Overwrite inherited labels only after package, installed-source and
+        # rollout admission. Neither runtime Git nor provider env is provenance.
+        environment["MLOCAL_BUILD_IDENTITY"] = json.dumps(public_build_identity(package, manifest), sort_keys=True)
+        require_production_config(package, app, environment)
         # Guard is also run by Jac onboarding import. Failure of either process
         # terminates both process groups; no restart while queue outcome is unknown.
         # In official 0.37.23, options following a positional target become
@@ -837,13 +930,11 @@ def main():
         elif args.action == "verify-recovery":
             result = verify_recovery_set(args.backup)
         elif args.action == "preflight":
-            validate_config(config)
-            pg_environment(os.environ.get("JAC_DB_URL", ""))
-            manifest = verify_package(args.package)
-            state = state_inventory(config)
-            require_launch_evidence(config, manifest, read_json(args.evidence) if args.evidence else {})
+            app, manifest, state, environment = validate_launch_inputs(
+                args.package, config, read_json(args.evidence) if args.evidence else {})
+            require_production_config(args.package, app, environment)
             result = {"preflight": "PASS", "source_sha": manifest["source_sha"], "state_inventory": state,
-                      "scope": "local checks; does not certify provider state, inbox, devices, or off-host recovery"}
+                      "scope": "local static startup checks; does not certify provider durability, serving readiness, inbox, devices, or off-host recovery"}
         else:
             launch(args.package, config, read_json(args.evidence))
             result = {"stopped": True}

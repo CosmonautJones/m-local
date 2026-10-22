@@ -1,5 +1,6 @@
 """Offline release safety checks. All repositories and private state are disposable."""
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,7 @@ import time
 import sys
 import getpass
 import shutil
+import shlex
 import unittest
 from unittest.mock import patch
 
@@ -48,12 +50,266 @@ class ReleasePackageTests(unittest.TestCase):
         PACKAGE.create_source_package(self.source, destination)
         return destination
 
+    def test_tracked_research_payload_is_refused_before_package_creation(self):
+        research = self.source / "data/research/contacts.json"
+        research.parent.mkdir(parents=True)
+        research.write_text('{"contact":"synthetic@example.invalid"}\n')
+        self.git("add", ".")
+        self.git("commit", "-qm", "synthetic research fixture")
+        with self.assertRaisesRegex(ValueError, "[Rr]esearch") as error:
+            self.bundle()
+        self.assertFalse((self.root / "bundle").exists())
+        self.assertNotIn("synthetic@example.invalid", str(error.exception))
+        self.assertEqual(research.read_text(), '{"contact":"synthetic@example.invalid"}\n')
+
+    def test_ignore_rule_does_not_authorize_tracked_research_export(self):
+        research = self.source / "data/research/contacts.csv"
+        research.parent.mkdir(parents=True)
+        research.write_text("synthetic private research\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "tracked synthetic research")
+        (self.source / ".gitignore").write_text("/data/research/\n")
+        self.git("add", ".gitignore")
+        self.git("commit", "-qm", "ignore future local output")
+        with self.assertRaisesRegex(ValueError, "[Rr]esearch"):
+            self.bundle()
+        self.assertFalse((self.root / "bundle").exists())
+        self.assertEqual(research.read_text(), "synthetic private research\n")
+
+    def test_export_ignore_cannot_hide_tracked_research_from_release_policy(self):
+        research = self.source / "data/research/nested/contacts.json"
+        research.parent.mkdir(parents=True)
+        research.write_text("synthetic private research\n")
+        (self.source / ".gitattributes").write_text("data/research export-ignore\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "export-hidden synthetic research")
+        with self.assertRaisesRegex(ValueError, "[Rr]esearch"):
+            self.bundle()
+        self.assertFalse((self.root / "bundle").exists())
+        self.assertEqual(research.read_text(), "synthetic private research\n")
+
+    def test_public_research_note_and_other_data_package_without_local_payload(self):
+        note = self.source / "data/research/README.md"
+        note.parent.mkdir(parents=True)
+        note.write_text("Research payloads are privately retained outside this repository.\n")
+        public = self.source / "data/public-fixture.json"
+        public.write_text('{"fictional":true}\n')
+        (self.source / ".gitignore").write_text("/data/research/*\n!/data/research/README.md\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "public policy note and fixture")
+        local = self.source / "data/research/local-output.csv"
+        local.write_text("ignored local synthetic research\n")
+        bundle = self.bundle()
+        manifest = PACKAGE.verify_package(bundle)
+        exported = {name[7:] for name in manifest["files"] if name.startswith("source/")}
+        self.assertEqual(exported, set(self.git("ls-files").splitlines()))
+        self.assertEqual((bundle / "source/data/research/README.md").read_bytes(), note.read_bytes())
+        self.assertEqual((bundle / "source/data/public-fixture.json").read_bytes(), public.read_bytes())
+        self.assertNotIn("source/data/research/local-output.csv", manifest["files"])
+        self.assertEqual(local.read_text(), "ignored local synthetic research\n")
+
+    def test_source_switch_preserves_existing_research_before_any_mutation(self):
+        bundle = self.bundle()
+        app = self.root / "canonical"
+        fixtures = {"main.jac": b"original source\n", "data/obsolete.json": b"old generated data\n",
+            "data/research/original.csv": b"synthetic retained research\n",
+            ".jac/release-source.json": b"original marker\n", ".jac/data/jwt_secret": b"original native key",
+            "assets/photos/original.jpg": b"synthetic original photo"}
+        for name, content in fixtures.items():
+            path = app / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+        private = self.root / "private"
+        private.mkdir()
+        for name in ("onboarding.sqlite3", "photo-ownership.sqlite3", "code.key"):
+            (private / name).write_bytes(b"original private fixture")
+        before = {str(path.relative_to(self.root)): path.read_bytes()
+            for base in (app, private) for path in base.rglob("*") if path.is_file()}
+        for dry_run in (True, False):
+            with self.subTest(dry_run=dry_run):
+                with self.assertRaisesRegex(ValueError, "[Rr]esearch"):
+                    PACKAGE.install_source(bundle, app, dry_run=dry_run)
+                after = {str(path.relative_to(self.root)): path.read_bytes()
+                    for base in (app, private) for path in base.rglob("*") if path.is_file()}
+                self.assertEqual(after, before)
+
+    def test_research_namespace_file_is_not_public_source(self):
+        research = self.source / "data/research"
+        research.parent.mkdir()
+        research.write_text("synthetic research stored without a directory\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "synthetic research namespace file")
+        with self.assertRaisesRegex(ValueError, "[Rr]esearch"):
+            self.bundle()
+        self.assertFalse((self.root / "bundle").exists())
+
+    def test_historical_research_package_integrity_can_still_be_inspected(self):
+        bundle = self.bundle()
+        research = self.source / "data/research/legacy.csv"
+        research.parent.mkdir(parents=True)
+        research.write_text("synthetic historical research\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "historical source shape")
+        copied = bundle / "source/data/research/legacy.csv"
+        copied.parent.mkdir(parents=True)
+        shutil.copyfile(research, copied)
+        manifest_path = bundle / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest.update(source_sha=self.git("rev-parse", "HEAD"),
+            source_tree=self.git("rev-parse", "HEAD^{tree}"))
+        manifest["files"] = PACKAGE.inventory(bundle)
+        manifest["files"].pop("manifest.json")
+        manifest["source_files_sha256"] = hashlib.sha256(json.dumps(
+            {name[7:]: value for name, value in manifest["files"].items()
+             if name.startswith("source/")}, sort_keys=True).encode()).hexdigest()
+        manifest_path.write_text(json.dumps(manifest))
+        self.assertEqual(PACKAGE.verify_package(bundle), manifest)
+
     def config(self, app):
         return {"canonical_entry": str(app / "main.jac"), "durable_root": str(self.root / "state"),
                 "onboarding_dir": str(self.root / "state/onboarding"),
                 "native_signing_file": str(app / ".jac/data/jwt_secret"),
                 "photos_dir": str(app / "assets/photos"), "backend_port": 18200,
                 "gateway_port": 18201, "topology": "single-instance-serialized", "replicas": 1}
+
+    def preflight_fixture(self, entry="main"):
+        # Small synthetic package, never official-runtime/host qualification.
+        (self.source / "jac.toml").write_text('[project]\njac-version="0.37.23"\nentry-point="' + entry + '"\n')
+        shutil.copyfile(ROOT / "services/production_guard.py", self.source / "services/production_guard.py")
+        self.git("add", ".")
+        self.git("commit", "-qm", "disposable preflight source")
+        (self.source / ".git/info/exclude").write_text(".jac/\n")
+        for name in PACKAGE.DEPENDENCY_ROOTS:
+            path = self.source / name
+            if name.endswith(".json"):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('{"dependencies":{}}')
+            else:
+                path.mkdir(parents=True)
+        dependencies = self.root / "libraries.tar"
+        PACKAGE.create_dependencies(self.source, dependencies)
+        runtime = self.root / "fixture-runtime"
+        runtime.mkdir()
+        (runtime / "jac").write_text("#!/bin/sh\nprintf 'jac 0.37.23\\n'\n")
+        (runtime / "jacpython").write_text("#!/bin/sh\nexec " + shlex.quote(sys.executable) + ' "$@"\n')
+        for path in runtime.iterdir():
+            path.chmod(0o755)
+        artifact = self.root / "fixture.jab"
+        artifact.write_bytes(b"disposable artifact, no serving runtime")
+        receipt = self.root / "build.json"
+        receipt.write_text(json.dumps({"source_sha": self.git("rev-parse", "HEAD"),
+            "source_tree": self.git("rev-parse", "HEAD^{tree}"), "artifact_sha256": PACKAGE.digest(artifact),
+            "dependency_archive_sha256": PACKAGE.digest(dependencies)}))
+        bundle = self.root / "bundle"
+        manifest = PACKAGE.create_source_package(self.source, bundle, runtime=runtime, artifact=artifact,
+            build_receipt=receipt, dependency_archive=dependencies,
+            official_checksums={name: PACKAGE.digest(runtime / name) for name in ("jac", "jacpython")})
+        app = self.root / "canonical"
+        PACKAGE.install_source(bundle, app)
+        config = self.config(app)
+        config["durable_root"] = str(self.root)
+        onboarding = Path(config["onboarding_dir"])
+        onboarding.mkdir(parents=True)
+        with sqlite3.connect(onboarding / "onboarding.sqlite3") as db:
+            db.executescript("CREATE TABLE accounts(actor,email,kind,name); CREATE TABLE business_owners(actor,slug,active); CREATE TABLE drafts(actor,body,updated);")
+        with sqlite3.connect(onboarding / "photo-ownership.sqlite3") as db:
+            db.execute("CREATE TABLE photos(filename,actor,digest,bytes,created)")
+        (onboarding / "code.key").write_bytes(b"C" * 32)
+        (app / ".jac/data").mkdir()
+        (app / ".jac/data/jwt_secret").write_bytes(b"J" * 40)
+        (app / "assets/photos").mkdir(parents=True)
+        evidence = {"runtime_safety": {"verdict": "PASS", "jac_version": PACKAGE.PIN,
+            "topology": config["topology"], "source_sha": manifest["source_sha"],
+            "jac_sha256": manifest["runtime"]["jac"], "cases": {name: True for name in PACKAGE.REQUIRED_CASES}},
+            "host_acceptance": {"canonical_entry": config["canonical_entry"], "durable_storage": True,
+                "private_backend": True, "exclusive_ingress": True, "nonoverlapping_rollout": True},
+            "operator_rollout_approved": True}
+        env = {"PATH": os.environ["PATH"], "TMPDIR": str(self.root), "PYTHONDONTWRITEBYTECODE": "1",
+            "JAC_DB_URL": "postgresql://fixture:SECRET_VALUE@localhost/disposable",
+            "MLOCAL_INGRESS": "restricted-edge", "MLOCAL_TRUSTED_HTTPS_EDGE": "1",
+            "MLOCAL_SHOW_SAMPLES": "false", "MLOCAL_DEMO_MODE": "false",
+            "MLOCAL_SMTP_HOST": "fixture.invalid", "MLOCAL_SMTP_FROM": "fixture@example.invalid",
+            "MLOCAL_SMTP_USERNAME": "fixture", "MLOCAL_SMTP_PASSWORD": "SECRET_VALUE"}
+        return bundle, app, config, evidence, env
+
+    def preflight_result(self, bundle, config, evidence, env):
+        config_file, evidence_file = self.root / "config.json", self.root / "evidence.json"
+        config_file.write_text(json.dumps(config))
+        evidence_file.write_text(json.dumps(evidence))
+        return subprocess.run([sys.executable, str(ROOT / "scripts/release-preflight.py"),
+            "--package", str(bundle), "--config", str(config_file), "--evidence", str(evidence_file)],
+            env=env, capture_output=True, text=True, timeout=30)
+
+    def assert_preflight_refused(self, result, message):
+        self.assertNotEqual(result.returncode, 0, "preflight incorrectly reported PASS")
+        self.assertIn(message, result.stderr)
+        self.assertNotIn("SECRET_VALUE", result.stdout + result.stderr)
+        self.assertNotIn(str(self.root), result.stdout + result.stderr)
+
+    def test_preflight_refuses_each_incomplete_launch_component(self):
+        bundle, app, config, evidence, env = self.preflight_fixture()
+        original = (bundle / "manifest.json").read_text()
+        for index, field in enumerate(("dependencies", "build", "jac", "jacpython")):
+            with self.subTest(component_index=index):
+                manifest = json.loads(original)
+                if field in ("jac", "jacpython"):
+                    manifest["runtime"].pop(field)
+                else:
+                    manifest.pop(field)
+                (bundle / "manifest.json").write_text(json.dumps(manifest))
+                candidate_evidence = json.loads(json.dumps(evidence))
+                candidate_evidence["runtime_safety"]["jac_sha256"] = manifest["runtime"].get("jac")
+                # Inconsistent runtime/dependency declarations now fail the
+                # stricter package-integrity gate before launch completeness.
+                expected = "complete tested source" if field == "build" else "Build identity"
+                self.assert_preflight_refused(self.preflight_result(bundle, config, candidate_evidence, env), expected)
+        (bundle / "manifest.json").write_text(original)
+
+    def test_preflight_refuses_missing_installed_source_marker(self):
+        bundle, app, config, evidence, env = self.preflight_fixture()
+        marker = app / ".jac/release-installed.json"
+        marker.unlink()
+        self.assert_preflight_refused(self.preflight_result(bundle, config, evidence, env), "marker is missing")
+
+    def test_preflight_refuses_installed_source_drift(self):
+        bundle, app, config, evidence, env = self.preflight_fixture()
+        (app / "services/example.py").write_text("SECRET_VALUE source drift")
+        self.assert_preflight_refused(self.preflight_result(bundle, config, evidence, env), "Installed source inventory")
+
+    def test_preflight_refuses_incompatible_native_base_and_edge_settings(self):
+        bundle, app, config, evidence, env = self.preflight_fixture()
+        cases = (("JAC_DATA_PATH", str(app / ".jac/data"), "JAC_DATA_PATH"),
+                 ("JAC_DATA_PATH", "relative-SECRET_VALUE", "JAC_DATA_PATH"),
+                 ("JAC_DATA_PATH", " " + str(app), "JAC_DATA_PATH"),
+                 ("MLOCAL_INGRESS", "direct", "restricted HTTPS edge"),
+                 ("MLOCAL_TRUSTED_HTTPS_EDGE", "", "MLOCAL_TRUSTED_HTTPS_EDGE"),
+                 ("MLOCAL_TRUSTED_HTTPS_EDGE", "true", "MLOCAL_TRUSTED_HTTPS_EDGE"))
+        for index, (name, value, message) in enumerate(cases):
+            with self.subTest(setting_index=index):
+                self.assert_preflight_refused(self.preflight_result(bundle, config, evidence, dict(env, **{name: value})), message)
+
+    def test_preflight_refuses_noncanonical_packaged_project_entry(self):
+        bundle, app, config, evidence, env = self.preflight_fixture(entry="other")
+        self.assert_preflight_refused(self.preflight_result(bundle, config, evidence, env), "canonical project entry")
+
+    def test_preflight_runs_actual_guard_with_effective_production_settings(self):
+        bundle, app, config, evidence, env = self.preflight_fixture()
+        before = PACKAGE.state_inventory(config)
+        # Even ambient development must be checked as launch's production env.
+        env["MLOCAL_ENV"] = "development"
+        cases = (("MLOCAL_SMTP_PASSWORD", ""), ("MLOCAL_SHOW_SAMPLES", "true"),
+                 ("MLOCAL_DEMO_MODE", "true"), ("JAC_DEV_SOURCE", "SECRET_VALUE"),
+                 ("JAC_SERVE_AUTH_ALGORITHM", "HS512"))
+        for index, (name, value) in enumerate(cases):
+            with self.subTest(guard_setting_index=index):
+                self.assert_preflight_refused(self.preflight_result(bundle, config, evidence, dict(env, **{name: value})), name)
+        self.assertEqual(PACKAGE.state_inventory(config), before)
+        self.assertFalse((self.root / "deployment.lock").exists())
+        self.assertFalse(list(app.rglob("__pycache__")))
+
+    def test_preflight_default_evidence_remains_blocked(self):
+        bundle, app, config, evidence, env = self.preflight_fixture()
+        self.assert_preflight_refused(self.preflight_result(bundle, config, {}, env), "runtime safety evidence")
 
     def test_git_bound_source_and_tamper_detection(self):
         bundle = self.bundle()
@@ -205,7 +461,7 @@ class ReleasePackageTests(unittest.TestCase):
              patch.object(PACKAGE, "verify_installed_source"), \
              patch.object(PACKAGE, "acquire_lock", side_effect=RuntimeError("PASSED_SIGNING_POLICY")), \
              patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/disposable", "JAC_DATA_PATH": str(base),
-                                    "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
+                                    "MLOCAL_INGRESS": "restricted-edge", "MLOCAL_TRUSTED_HTTPS_EDGE": "1"}, clear=True):
             with self.assertRaisesRegex(RuntimeError, "PASSED_SIGNING_POLICY"):
                 PACKAGE.launch(self.root / "package", config, {})
 
@@ -222,7 +478,7 @@ class ReleasePackageTests(unittest.TestCase):
              patch.object(PACKAGE, "acquire_lock", side_effect=RuntimeError("UNEXPECTED_LOCK")) as lock, \
              patch.object(PACKAGE.subprocess, "Popen") as spawn, \
              patch.dict(os.environ, {"JAC_DB_URL": "postgresql://role:SECRET_VALUE@localhost/db%20other",
-                                    "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
+                                    "MLOCAL_INGRESS": "restricted-edge", "MLOCAL_TRUSTED_HTTPS_EDGE": "1"}, clear=True):
             with self.assertRaisesRegex(ValueError, "ambiguous target refused") as caught:
                 PACKAGE.launch(self.root / "package", self.config(app), {})
             self.assertNotIn("SECRET_VALUE", str(caught.exception))
@@ -240,6 +496,7 @@ class ReleasePackageTests(unittest.TestCase):
              patch.object(PACKAGE, "require_launch_evidence"), \
              patch.object(PACKAGE, "state_inventory"), \
              patch.object(PACKAGE, "verify_installed_source"), \
+             patch.object(PACKAGE, "public_build_identity", return_value={"status": "unknown"}), \
              patch.object(PACKAGE, "acquire_lock", return_value=99), \
              patch.object(PACKAGE, "require_free_ports"), \
              patch.object(PACKAGE.signal, "signal"), \
@@ -247,7 +504,7 @@ class ReleasePackageTests(unittest.TestCase):
              patch.object(PACKAGE.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), \
              patch.object(PACKAGE.subprocess, "Popen", side_effect=RuntimeError("CAPTURE_NATIVE_COMMAND")) as spawn, \
              patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/disposable",
-                                    "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
+                                    "MLOCAL_INGRESS": "restricted-edge", "MLOCAL_TRUSTED_HTTPS_EDGE": "1"}, clear=True):
             with self.assertRaisesRegex(RuntimeError, "CAPTURE_NATIVE_COMMAND"):
                 PACKAGE.launch(self.root / "package", config, {})
             self.assertEqual(spawn.call_args.args[0],
@@ -271,7 +528,7 @@ class ReleasePackageTests(unittest.TestCase):
                      patch.object(PACKAGE, "acquire_lock", side_effect=RuntimeError("UNEXPECTED_LOCK")) as lock, \
                      patch.object(PACKAGE.subprocess, "Popen") as spawn, \
                      patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/disposable",
-                                            "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
+                                            "MLOCAL_INGRESS": "restricted-edge", "MLOCAL_TRUSTED_HTTPS_EDGE": "1"}, clear=True):
                     with self.assertRaisesRegex(ValueError, "canonical project entry") as caught:
                         PACKAGE.launch(self.root / "package", self.config(app), {})
                     self.assertNotIn("SECRET", str(caught.exception))
@@ -291,7 +548,7 @@ class ReleasePackageTests(unittest.TestCase):
              patch.object(PACKAGE, "state_inventory"), \
              patch.object(PACKAGE, "verify_installed_source"), \
              patch.object(PACKAGE, "acquire_lock", side_effect=RuntimeError("UNEXPECTED_LOCK_ATTEMPT")) as lock, \
-             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/disposable", "MLOCAL_INGRESS": "restricted-edge"}, clear=True):
+             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/disposable", "MLOCAL_INGRESS": "restricted-edge", "MLOCAL_TRUSTED_HTTPS_EDGE": "1"}, clear=True):
             for index, supplied in enumerate((str(base / ".jac/data"), " " + str(base), str(base) + " ", "   ")):
                 with self.subTest(supplied_index=index):
                     os.environ["JAC_DATA_PATH"] = supplied
@@ -372,12 +629,98 @@ class ReleasePackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exact source"):
             PACKAGE.create_source_package(self.source, self.root / "bad-artifact", artifact=artifact, build_receipt=receipt)
 
+    def recovery_binding(self, bundle, config):
+        manifest = PACKAGE.verify_package(bundle)
+        return {"schema": 1, "source_sha": manifest["source_sha"], "source_tree": manifest["source_tree"],
+                "runtime": manifest["runtime"], "canonical_entry": config["canonical_entry"],
+                "package_manifest_sha256": PACKAGE.digest(bundle / "manifest.json")}
+
+    def test_restore_refuses_changed_artifact_or_dependencies_before_database_access(self):
+        original = self.bundle()
+        config = self.config(self.root / "canonical")
+        receipt = self.recovery_binding(original, config)
+        artifact = self.root / "different.jab"
+        artifact.write_bytes(b"different build of the same source")
+        build = self.root / "build.json"
+        build.write_text(json.dumps({**receipt, "artifact_sha256": PACKAGE.digest(artifact)}))
+        changed_artifact = self.root / "changed-artifact"
+        PACKAGE.create_source_package(self.source, changed_artifact, artifact=artifact, build_receipt=build)
+        for name in PACKAGE.DEPENDENCY_ROOTS:
+            path = self.source / name
+            if name.endswith(".json"):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('{"dependencies":{}}')
+            else:
+                path.mkdir(parents=True)
+                (path / "library.js").write_text("different installed library")
+        (self.source / ".git/info/exclude").write_text(".jac/\n")
+        dependency = self.root / "libraries.tar"
+        PACKAGE.create_dependencies(self.source, dependency)
+        build.write_text(json.dumps({**receipt, "dependency_archive_sha256": PACKAGE.digest(dependency)}))
+        changed_dependencies = self.root / "changed-dependencies"
+        PACKAGE.create_source_package(self.source, changed_dependencies, dependency_archive=dependency, build_receipt=build)
+        for bundle in (changed_artifact, changed_dependencies):
+            with self.subTest(package=bundle.name):
+                manifest = PACKAGE.verify_package(bundle)
+                self.assertEqual(manifest["source_sha"], receipt["source_sha"])
+                self.assertEqual(manifest["runtime"], receipt["runtime"])
+                self.assertNotEqual(PACKAGE.digest(bundle / "manifest.json"), receipt["package_manifest_sha256"])
+                with patch.object(PACKAGE, "verify_recovery_set", return_value=receipt), \
+                     patch.object(PACKAGE, "pg_environment", wraps=PACKAGE.pg_environment) as environment, \
+                     patch.object(PACKAGE, "pg_command", return_value="0") as command, \
+                     patch.object(PACKAGE, "restore_private_state") as private, \
+                     patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/serving",
+                                             "MLOCAL_RECOVERY_DB_URL": "postgresql://jac@localhost/recovery"}):
+                    with self.assertRaisesRegex(ValueError, "package"):
+                        PACKAGE.coordinated_restore(self.root / "backup", config, bundle)
+                environment.assert_not_called()
+                command.assert_not_called()
+                private.assert_not_called()
+                self.assertFalse(Path(config["onboarding_dir"]).exists())
+
+    def test_restore_refuses_missing_or_mismatched_exact_package_binding(self):
+        bundle = self.bundle()
+        config = self.config(self.root / "canonical")
+        original = self.recovery_binding(bundle, config)
+        for field in ("source_tree", "package_manifest_sha256"):
+            for value in (None, "different"):
+                with self.subTest(field=field, value=value):
+                    receipt = dict(original)
+                    if value is None:
+                        del receipt[field]
+                    else:
+                        receipt[field] = value
+                    with patch.object(PACKAGE, "verify_recovery_set", return_value=receipt), \
+                         patch.object(PACKAGE, "pg_environment", wraps=PACKAGE.pg_environment) as environment, \
+                         patch.object(PACKAGE, "pg_command", return_value="0") as command, \
+                         patch.object(PACKAGE, "restore_private_state") as private, \
+                         patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/serving",
+                                                 "MLOCAL_RECOVERY_DB_URL": "postgresql://jac@localhost/recovery"}):
+                        with self.assertRaisesRegex(ValueError, "package"):
+                            PACKAGE.coordinated_restore(self.root / "backup", config, bundle)
+                    environment.assert_not_called()
+                    command.assert_not_called()
+                    private.assert_not_called()
+                    self.assertFalse(Path(config["onboarding_dir"]).exists())
+
+    def test_restore_accepts_original_package_after_empty_database_check(self):
+        bundle = self.bundle()
+        config = self.config(self.root / "canonical")
+        receipt = self.recovery_binding(bundle, config)
+        with patch.object(PACKAGE, "verify_recovery_set", return_value=receipt), \
+             patch.object(PACKAGE, "pg_command", side_effect=["0", ""]) as command, \
+             patch.object(PACKAGE, "restore_private_state") as private, \
+             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/serving",
+                                     "MLOCAL_RECOVERY_DB_URL": "postgresql://jac@localhost/recovery"}):
+            self.assertEqual(PACKAGE.coordinated_restore(self.root / "backup", config, bundle), receipt)
+        self.assertEqual([call.args[0][0] for call in command.call_args_list], ["psql", "pg_restore"])
+        private.assert_called_once_with(self.root / "backup/private", config)
+
     def test_existing_recovery_database_blocks_before_restore_or_private_mutation(self):
         config = self.config(self.root / "canonical")
-        manifest = {"source_sha": "fixture", "runtime": {}}
-        receipt = {"source_sha": "fixture", "runtime": {}, "canonical_entry": config["canonical_entry"]}
+        bundle = self.bundle()
+        receipt = self.recovery_binding(bundle, config)
         with patch.object(PACKAGE, "verify_recovery_set", return_value=receipt), \
-             patch.object(PACKAGE, "verify_package", return_value=manifest), \
              patch.object(PACKAGE, "pg_command", return_value="17") as command, \
              patch.dict(os.environ, {"JAC_DB_URL": "postgresql://jac@localhost/serving", "MLOCAL_RECOVERY_DB_URL": "postgresql://jac@localhost/recovery"}):
             with self.assertRaisesRegex(ValueError, "application tables"):
@@ -658,6 +1001,155 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertFalse((self.root / "backup").exists())
 
 
+    def identity_fixture(self):
+        artifact = self.root / "fixture.jab"
+        artifact.write_bytes(b"synthetic tested artifact")
+        receipt = self.root / "build.json"
+        receipt.write_text(json.dumps({"source_sha": self.git("rev-parse", "HEAD"),
+            "source_tree": self.git("rev-parse", "HEAD^{tree}"), "artifact_sha256": PACKAGE.digest(artifact)}))
+        package = self.root / "built-package"
+        PACKAGE.create_source_package(self.source, package, artifact=artifact, build_receipt=receipt)
+        return package
+
+    def test_build_identity_rejects_manifest_only_provenance_edits(self):
+        package = self.identity_fixture()
+        path = package / "manifest.json"
+        original = json.loads(path.read_text())
+        for field in ("source_sha", "source_tree"):
+            with self.subTest(field=field):
+                changed = dict(original, **{field: "b" * 40})
+                path.write_text(json.dumps(changed))
+                with self.assertRaisesRegex(PACKAGE.ReleaseError, "[Bb]uild identity"):
+                    PACKAGE.verify_package(package)
+        path.write_text(json.dumps(original))
+        receipt = package / "artifact/build-receipt.json"
+        value = json.loads(receipt.read_text())
+        value["source_sha"] = "b" * 40
+        receipt.write_text(json.dumps(value))
+        original["files"]["artifact/build-receipt.json"] = PACKAGE.digest(receipt)
+        path.write_text(json.dumps(original))
+        with self.assertRaisesRegex(PACKAGE.ReleaseError, "[Bb]uild identity"):
+            PACKAGE.verify_package(package)
+
+    def test_build_identity_missing_artifact_is_unknown_without_checkout_fallback(self):
+        package = self.bundle()
+        with patch.dict(os.environ, {"GITHUB_SHA": "a" * 40, "MLOCAL_BUILD_IDENTITY": "SECRET"}):
+            identity = PACKAGE.public_build_identity(package)
+        self.assertEqual(identity["status"], "unknown")
+        for field in ("build_id", "source_sha", "source_tree", "artifact_sha256", "dependency_archive_sha256"):
+            self.assertIsNone(identity[field])
+        self.assertNotIn("SECRET", json.dumps(identity))
+
+    def test_build_identity_matches_exact_artifact_and_sanitizes_public_fields(self):
+        package = self.identity_fixture()
+        manifest = PACKAGE.verify_package(package)
+        identity = PACKAGE.public_build_identity(package)
+        self.assertEqual(identity, {"schema": 1, "status": "known", "build_id": PACKAGE.digest(package / "manifest.json"),
+            "source_sha": manifest["source_sha"], "source_tree": manifest["source_tree"],
+            "artifact_sha256": PACKAGE.digest(package / manifest["build"]["artifact"]),
+            "dependency_archive_sha256": None, "serving_mode": "source-at-fixed-canonical-entry",
+            "verification": "launch-snapshot"})
+        self.assertNotIn(str(self.root), json.dumps(identity))
+        self.assertNotIn("runtime", identity)
+        app = self.root / "canonical"
+        PACKAGE.install_source(package, app)
+        PACKAGE.verify_installed_source(package, self.config(app), require_marker=True)
+        (app / "main.jac").write_text("uncommitted changed installed source")
+        with self.assertRaisesRegex(PACKAGE.ReleaseError, "Installed source inventory"):
+            PACKAGE.verify_installed_source(package, self.config(app), require_marker=True)
+
+    def test_build_identity_rejects_artifact_and_source_inventory_label_drift(self):
+        package = self.identity_fixture()
+        path = package / "manifest.json"
+        original = json.loads(path.read_text())
+        changes = [dict(original, source_files_sha256="b" * 64),
+                   dict(original, build=dict(original["build"], sha256="b" * 64)),
+                   dict(original, runtime={"jac": "b" * 64}),
+                   dict(original, runtime={"jac": None, "jacpython": None}),
+                   dict(original, dependencies={"archive": "dependencies/absent.tar", "sha256": "b" * 64})]
+        for changed in changes:
+            with self.subTest(changed=changed):
+                path.write_text(json.dumps(changed))
+                with self.assertRaisesRegex(PACKAGE.ReleaseError, "[Bb]uild identity"):
+                    PACKAGE.verify_package(package)
+
+
+    def test_build_identity_launch_overwrites_inherited_snapshot_before_children(self):
+        # Real receipt/source verification; synthetic never-executed runtime and
+        # archive bytes. Rollout policy, private inventory and child OS calls
+        # are mocked: this is identity handoff, not runtime/host qualification.
+        package = self.identity_fixture()
+        app = self.root / "canonical"
+        PACKAGE.install_source(package, app)
+        path = package / "manifest.json"
+        manifest = json.loads(path.read_text())
+        (package / "runtime").mkdir()
+        for name in ("jac", "jacpython"):
+            (package / "runtime" / name).write_bytes(b"synthetic unused runtime")
+        manifest["runtime"] = {name: PACKAGE.digest(package / "runtime" / name) for name in ("jac", "jacpython")}
+        (package / "dependencies").mkdir()
+        archive = package / "dependencies/libraries.tar"
+        archive.write_bytes(b"synthetic unused dependency archive")
+        manifest["dependencies"] = {"archive": "dependencies/libraries.tar", "sha256": PACKAGE.digest(archive)}
+        manifest["files"] = PACKAGE.inventory(package)
+        manifest["files"].pop("manifest.json")
+        path.write_text(json.dumps(manifest))
+        marker = app / ".jac/release-installed.json"
+        installed = json.loads(marker.read_text())
+        installed["package_manifest_sha256"] = PACKAGE.digest(path)
+        marker.write_text(json.dumps(installed))
+        expected = PACKAGE.public_build_identity(package)
+        inherited = dict(expected, build_id="f" * 64, source_sha="f" * 40)
+        with patch.object(PACKAGE, "require_launch_evidence"), patch.object(PACKAGE, "state_inventory"), \
+             patch.object(PACKAGE, "require_canonical_project_entry"), \
+             patch.object(PACKAGE, "acquire_lock", return_value=99), patch.object(PACKAGE, "require_free_ports"), \
+             patch.object(PACKAGE.signal, "signal"), patch.object(PACKAGE.os, "close"), \
+             patch.object(PACKAGE.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as guard, \
+             patch.object(PACKAGE.subprocess, "Popen", side_effect=RuntimeError("CAPTURE_IDENTITY")) as spawn, \
+             patch.dict(os.environ, {"JAC_DB_URL": "postgresql://fixture@localhost/disposable", "MLOCAL_INGRESS": "restricted-edge", "MLOCAL_TRUSTED_HTTPS_EDGE": "1",
+                 "MLOCAL_BUILD_IDENTITY": json.dumps(inherited), "GITHUB_SHA": "f" * 40}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "CAPTURE_IDENTITY"):
+                PACKAGE.launch(package, self.config(app), {})
+            for child in (guard, spawn):
+                self.assertEqual(json.loads(child.call_args.kwargs["env"]["MLOCAL_BUILD_IDENTITY"]), expected)
+            spawn.reset_mock()
+            guard.reset_mock()
+            original = path.read_bytes()
+            manifest["source_sha"] = "f" * 40
+            path.write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(PACKAGE.ReleaseError, "Build identity"):
+                PACKAGE.launch(package, self.config(app), {})
+            spawn.assert_not_called()
+            guard.assert_not_called()
+            path.write_bytes(original)
+            (app / "main.jac").write_text("dirty installed source")
+            with self.assertRaisesRegex(PACKAGE.ReleaseError, "Installed source inventory"):
+                PACKAGE.launch(package, self.config(app), {})
+            spawn.assert_not_called()
+
+    def test_build_identity_rejects_undeclared_packaged_runtime_or_dependencies(self):
+        package = self.identity_fixture()
+        path = package / "manifest.json"
+        manifest = json.loads(path.read_text())
+        (package / "runtime").mkdir()
+        for name in ("jac", "jacpython"):
+            (package / "runtime" / name).write_bytes(b"synthetic never executed runtime")
+        manifest["files"] = PACKAGE.inventory(package)
+        manifest["files"].pop("manifest.json")
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(PACKAGE.ReleaseError, "Build identity"):
+            PACKAGE.verify_package(package)
+        manifest["runtime"] = {name: manifest["files"]["runtime/" + name] for name in ("jac", "jacpython")}
+        path.write_text(json.dumps(manifest))
+        self.assertEqual(PACKAGE.public_build_identity(package)["status"], "known")
+        (package / "dependencies").mkdir()
+        (package / "dependencies/libraries.tar").write_bytes(b"synthetic unused archive")
+        manifest["files"]["dependencies/libraries.tar"] = PACKAGE.digest(package / "dependencies/libraries.tar")
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(PACKAGE.ReleaseError, "Build identity"):
+            PACKAGE.verify_package(package)
+
+
 @unittest.skipUnless(os.environ.get("MLOCAL_RELEASE_PG_TOOLS"), "Native logical recovery drill requires explicit disposable PostgreSQL tools")
 class NativeReleaseRecoveryTests(unittest.TestCase):
     """Actual PostgreSQL logical dump/restore; synthetic identities, never live users.
@@ -779,6 +1271,8 @@ class NativeReleaseRecoveryTests(unittest.TestCase):
                 command(str(binary / "pg_ctl"), "-D", str(cluster), "-m", "fast", "-w", "stop")
                 with socket.socket() as stopped:
                     self.assertNotEqual(stopped.connect_ex(("127.0.0.1", port)), 0)
+
+
 
 
 if __name__ == "__main__":
