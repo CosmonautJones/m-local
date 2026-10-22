@@ -1,7 +1,16 @@
+Current bounded increment: [integrated disposable SQL startup](INTEGRATED-SQL-STARTUP.md),
+built on frozen [PR67](https://github.com/CosmonautJones/m-local/pull/67)
+`3ebacd0538161b986bc62f242d7aed2cd40ed20a`. Its PR and fresh CI receipts record
+the exact tested head and outcomes. Production SQL, native writer fencing,
+changed-store SQL recovery and human hosted acceptance remain open.
+
 # M-Local: ChatGPT Work coordinator handoff
 
 Travis requested this transfer on 2026-09-26 and explicitly chose **ChatGPT Work**.
 He wants an efficient agentic workflow supporting a four-human JacHacks team.
+
+The dated [cumulative integration map](INTEGRATION-MAP.md) records PR60–66
+dependency ordering, the next candidate and its remaining functional gates.
 
 ## Current integration instruction (October 13, 2026)
 

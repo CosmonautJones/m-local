@@ -38,6 +38,288 @@ jobs:
           "$JAC_BIN" install
       - name: Check Jac sources
         run: ./scripts/check.sh
+      - name: Prove PostgreSQL auxiliary preservation and concurrency
+        timeout-minutes: 8
+        shell: bash
+        run: |
+          set -euo pipefail
+          source scripts/runtime.sh
+          proof="$RUNNER_TEMP/auxiliary-proof"
+          test ! -e "$proof"
+          mkdir -m 700 "$proof" "$proof/tmp" "$proof/socket"
+          evidence=.jac/postgres-auxiliary-proof
+          mkdir -p "$evidence"
+          : > "$evidence/unittest.log"
+          export MLOCAL_AUXILIARY_OUTCOMES_FILE="$evidence/named-outcomes.jsonl"
+          : > "$MLOCAL_AUXILIARY_OUTCOMES_FILE"
+          pg_bin=
+          port= suite_exit=-1 initialized=0 database_created=0
+          cleanup() {
+            original_exit=$?
+            trap - EXIT
+            set +e
+            remaining=-1 schema_exit=-1 stop_exit=0 status_exit=-1
+            if [[ "$database_created" == 1 ]]; then
+              remaining="$(timeout --signal=TERM --kill-after=2s 15s "${JAC_BIN}python" -c '
+          import os, sys
+          sys.path.insert(0, os.environ["MLOCAL_AUXILIARY_DRIVER_SITE"])
+          import psycopg
+          with psycopg.connect(os.environ["MLOCAL_AUXILIARY_TEST_DSN"], connect_timeout=5,
+                              options="-c statement_timeout=5000 -c lock_timeout=5000") as connection:
+              print(connection.execute("SELECT count(*) FROM pg_namespace WHERE starts_with(nspname,%s)",
+                                       ("mlocal_aux_test_",)).fetchone()[0])
+          ' 2> "$proof/schema-check.log")"
+              schema_exit=$?
+            fi
+            if [[ "$initialized" == 1 ]]; then
+              "$pg_bin/pg_ctl" -D "$proof/postgres" status > "$proof/status-before.log" 2>&1
+              if [[ $? == 0 || -e "$proof/postgres/postmaster.pid" ]]; then
+                "$pg_bin/pg_ctl" -D "$proof/postgres" -m fast -t 30 -w stop > "$proof/stop.log" 2>&1
+                stop_exit=$?
+              fi
+              "$pg_bin/pg_ctl" -D "$proof/postgres" status > "$proof/status-after.log" 2>&1
+              status_exit=$?
+            fi
+            python3 - "$evidence" "$proof" "$port" "$suite_exit" "$original_exit" \
+              "$remaining" "$schema_exit" "$stop_exit" "$status_exit" "$initialized" "$database_created" <<'PY'
+          import ast, errno, hashlib, json, os, socket, subprocess, sys
+          from pathlib import Path
+          evidence, proof = map(Path, sys.argv[1:3])
+          port, suite_exit, original_exit, remaining, schema_exit, stop_exit, status_exit, initialized, database_created = sys.argv[3:]
+          events = [json.loads(line) for line in (evidence / 'named-outcomes.jsonl').read_text().splitlines() if line]
+          named = [row for row in events if row.get('event') == 'test']
+          summaries = [row for row in events if row.get('event') == 'summary']
+          summary = summaries[0] if len(summaries) == 1 else {}
+          test_source = Path('tests/integration/test_postgres_auxiliary.py')
+          test_class = next(node for node in ast.parse(test_source.read_text()).body
+                            if isinstance(node, ast.ClassDef) and node.name == 'PostgresAuxiliaryTests')
+          expected_names = sorted(node.name for node in test_class.body
+                                  if isinstance(node, ast.FunctionDef) and node.name.startswith('test_'))
+          expected_pairs = {(name, '__main__.PostgresAuxiliaryTests.' + name) for name in expected_names}
+          observed_pairs = [(row['name'], row['identity']) for row in named]
+          inventory_matches = (len(expected_names) == len(expected_pairs) == 55
+                               and len(observed_pairs) == len(set(observed_pairs)) == 55
+                               and set(observed_pairs) == expected_pairs)
+          counts = {name: summary.get(name, 0) for name in
+                    ('run', 'failures', 'errors', 'skipped', 'expected_failures', 'unexpected_successes')}
+          counts['passed'] = sum(row['outcome'] == 'ok' for row in named)
+          listener_closed = None
+          if initialized == '1' and port:
+              with socket.socket() as probe:
+                  probe.settimeout(1)
+                  listener_closed = probe.connect_ex(('127.0.0.1', int(port))) == errno.ECONNREFUSED
+          cleanup = {
+              'owned_schemas_removed': database_created != '1' or (schema_exit == '0' and remaining == '0'),
+              'remaining_owned_schemas': int(remaining) if remaining.isdigit() else None,
+              'schema_check_exit': int(schema_exit), 'stop_exit': int(stop_exit),
+              'postgres_stopped': initialized != '1' or (status_exit == '3' and not (proof / 'postgres/postmaster.pid').exists()),
+              'pg_ctl_status_exit': int(status_exit), 'listener_closed': listener_closed,
+              'socket_removed': not any((proof / 'socket').glob('.s.PGSQL.*')),
+              'server_was_initialized': initialized == '1',
+          }
+          cleanup_ok = (cleanup['owned_schemas_removed'] and cleanup['postgres_stopped']
+                        and cleanup['stop_exit'] == 0 and cleanup['socket_removed']
+                        and (initialized != '1' or listener_closed is True))
+          sources = ('services/postgres_auxiliary.py', 'services/email_codes.jac',
+                      'services/onboarding_backend.py', 'services/qr_auth.jac', 'services/onboarding_support.jac',
+                      'services/production_guard.py', 'services/media_upload.py',
+                      'tests/tooling/test_onboarding_backend.py', 'docs/AUTHORITY-BACKEND-PROOF.md',
+                      'docs/SQL-PHOTO-REFERENCE-PROOF.md', 'docs/NATIVE-KEY-COMPATIBILITY-PROOF.md',
+                      'docs/INTEGRATION-MAP.md', 'docs/WORK-HANDOFF.md',
+                      'docs/AUXILIARY-DDL-ADMISSION.md',
+                     'tests/integration/test_postgres_auxiliary.py', 'tests/integration/native_key_probe.py',
+                     'tests/integration/postgres-auxiliary-requirements.txt',
+                     '.github/workflows/check.yml', '.jac-version', 'scripts/python.sh', 'scripts/runtime.sh')
+          versions = json.loads((evidence / 'versions.json').read_text()) if (evidence / 'versions.json').exists() else None
+          distribution = json.loads((evidence / 'pg-distribution.json').read_text()) if (evidence / 'pg-distribution.json').exists() else None
+          pg18 = (versions is not None and versions.get('server_version_num', 0) // 10000 == 18
+                  and versions.get('psycopg') == '3.3.6' and distribution is not None
+                  and distribution.get('requested_major') == 18
+                  and set(distribution.get('tools', {})) == {'postgres', 'initdb', 'pg_ctl'}
+                  and all(tool.get('major') == 18 and len(tool.get('sha256', '')) == 64
+                          for tool in distribution['tools'].values()))
+          complete = (suite_exit == '0' and summary.get('successful') is True
+                      and counts['run'] == 55 and counts['passed'] == 55 and inventory_matches
+                      and not any(counts[name] for name in ('failures', 'errors', 'skipped', 'expected_failures', 'unexpected_successes'))
+                      and pg18)
+          receipt = {
+              'source_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'source_tree': subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip(),
+              'source_sha256': {name: hashlib.sha256(Path(name).read_bytes()).hexdigest() for name in sources},
+              'command': (evidence / 'command.txt').read_text().strip() if (evidence / 'command.txt').exists() else None,
+              'versions': versions, 'pg_distribution': distribution, 'actual_pg18_verified': pg18,
+              'suite_exit': int(suite_exit) if suite_exit != '-1' else None,
+              'step_exit_before_cleanup': int(original_exit), 'named_outcomes': named, 'counts': counts,
+              'expected_test_count': len(expected_names), 'expected_test_names': expected_names,
+              'expected_test_identities': sorted(identity for name, identity in expected_pairs),
+              'test_inventory_matches': inventory_matches,
+              'exception_classes': [row['exception_class'] for row in named if row.get('exception_class')],
+              'verbose_log_sha256': hashlib.sha256((evidence / 'unittest.log').read_bytes()).hexdigest(),
+              'structured_outcomes_sha256': hashlib.sha256((evidence / 'named-outcomes.jsonl').read_bytes()).hexdigest(),
+              'default_selector_log_sha256': hashlib.sha256((evidence / 'default-selector.log').read_bytes()).hexdigest() if (evidence / 'default-selector.log').exists() else None,
+              'cleanup': cleanup, 'complete_sql_proof': complete, 'cleanup_ok': cleanup_ok,
+              'github_run_id': os.environ.get('GITHUB_RUN_ID'), 'github_run_attempt': os.environ.get('GITHUB_RUN_ATTEMPT'),
+          }
+          (evidence / 'receipt.json').write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
+          print('PostgreSQL auxiliary receipt: tests=%s passed=%s suite_exit=%s cleanup_ok=%s' %
+                (counts['run'], counts['passed'], receipt['suite_exit'], cleanup_ok))
+          sys.exit(0 if complete and cleanup_ok else 1)
+          PY
+            receipt_exit=$?
+            if [[ "$original_exit" != 0 ]]; then exit "$original_exit"; fi
+            exit "$receipt_exit"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          export MLOCAL_AUXILIARY_DRIVER_SITE="$proof/driver"
+          # Install for the pinned Jac interpreter, not the runner's Python ABI.
+          python3 -m pip install --disable-pip-version-check --no-input \
+            --target "$MLOCAL_AUXILIARY_DRIVER_SITE" --only-binary=:all: \
+            --python-version 3.14 --implementation cp --abi cp314 \
+            -r tests/integration/postgres-auxiliary-requirements.txt
+          unset PGHOSTADDR PGSERVICE PGSERVICEFILE
+          export PGPASSFILE=/dev/null NO_COLOR=1 PYTHON_COLORS=0
+          # Fetch the pinned runtime-supported distribution into this owned fixture.
+          # fetch_dist bypasses PATH; its resolver may fall back, so verify every executable and the server.
+          export MLOCAL_AUXILIARY_PROOF_ROOT="$proof"
+          export JAC_CACHE_HOME="$proof/jac-cache"
+          export JAC_TOOLCHAIN_DIR="$proof/jac-cache/toolchains"
+          export TMPDIR="$proof/tmp"
+          mkdir -p -- "$JAC_CACHE_HOME" "$JAC_TOOLCHAIN_DIR"
+          timeout --signal=TERM --kill-after=5s 180s "${JAC_BIN}python" -c '
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+          proof = Path(os.environ["MLOCAL_AUXILIARY_PROOF_ROOT"]).resolve(strict=True)
+          runner = Path(os.environ["RUNNER_TEMP"]).resolve(strict=True)
+          assert proof.is_relative_to(runner)
+          cache = Path(os.environ["JAC_CACHE_HOME"]).resolve(strict=True)
+          assert cache.is_relative_to(proof)
+          assert Path(os.environ["JAC_TOOLCHAIN_DIR"]).resolve().is_relative_to(cache)
+          assert Path(os.environ["TMPDIR"]).resolve().is_relative_to(proof)
+          os.chdir(proof)
+          os.environ.pop("JAC_PG_DIST", None)
+          os.environ["JAC_PG_VERSION"] = "18"
+          from jaclang.project.config import JacConfig, set_config
+          set_config(JacConfig(project_root=proof))
+          from jaclang.cache.registry import bucket
+          from jaclang.data.pgembed import PgRuntime
+          for name in ("pg", "toolchains-downloads"):
+              assert Path(bucket(name).path()).resolve().is_relative_to(cache)
+          runtime = PgRuntime(data_dir=str(proof / "fetch-only-unused"), database="mlocal_aux_test_ci")
+          bin_dir = Path(runtime.fetch_dist()).resolve(strict=True)
+          assert bin_dir.is_relative_to(cache)
+          tools = {}
+          for name in ("postgres", "initdb", "pg_ctl"):
+              executable = bin_dir / name
+              version = subprocess.check_output([str(executable), "--version"], text=True, timeout=10).strip()
+              major = int(version.split()[-1].split(".")[0])
+              assert major == 18
+              with executable.open("rb") as stream:
+                  digest = hashlib.file_digest(stream, "sha256").hexdigest()
+              tools[name] = {"version": version, "major": major, "sha256": digest}
+          (proof / "pg-bin.txt").write_text(str(bin_dir) + "\n")
+          (proof / "pg-distribution.json").write_text(json.dumps({"requested_major": 18,
+              "distribution_root": str(bin_dir.parent), "tools": tools}, indent=2, sort_keys=True) + "\n")
+          '
+          pg_bin="$(cat "$proof/pg-bin.txt")"
+          export JAC_PG_DIST="$(dirname "$pg_bin")" JAC_PG_VERSION=18
+          cp "$proof/pg-distribution.json" "$evidence/pg-distribution.json"
+          test -x "$pg_bin/initdb"
+          port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
+          "$pg_bin/initdb" -D "$proof/postgres" --auth=trust --no-locale --encoding=UTF8
+          initialized=1
+          "$pg_bin/pg_ctl" -D "$proof/postgres" -l "$proof/postgres.log" \
+            -o "-h 127.0.0.1 -p $port -k $proof/socket -c shared_buffers=16MB -c max_connections=24" -w start
+          export MLOCAL_AUXILIARY_TEST_DSN="postgresql://$(id -un)@127.0.0.1:$port/mlocal_aux_test_ci"
+          export MLOCAL_AUXILIARY_TEST_SCHEMA=mlocal_aux_test_ci
+          timeout --signal=TERM --kill-after=2s 15s "${JAC_BIN}python" -c '
+          import os, sys
+          sys.path.insert(0, os.environ["MLOCAL_AUXILIARY_DRIVER_SITE"])
+          import psycopg
+          with psycopg.connect(os.environ["MLOCAL_AUXILIARY_TEST_DSN"], dbname="postgres", autocommit=True,
+                              connect_timeout=5, options="-c statement_timeout=5000 -c lock_timeout=5000") as connection:
+              connection.execute("CREATE DATABASE mlocal_aux_test_ci")
+          '
+          database_created=1
+          bash scripts/python.sh -c '
+          import json, os, sys
+          from pathlib import Path
+          sys.path.insert(0, os.environ["MLOCAL_AUXILIARY_DRIVER_SITE"])
+          try:
+              import psycopg
+              with psycopg.connect(os.environ["MLOCAL_AUXILIARY_TEST_DSN"], connect_timeout=5) as connection:
+                  server_version = int(connection.execute("SHOW server_version_num").fetchone()[0])
+              versions = {"server_version_num": server_version, "psycopg": psycopg.__version__}
+              if server_version // 10000 != 18 or psycopg.__version__ != "3.3.6":
+                  raise ValueError("Unexpected proof dependency version")
+              Path(sys.argv[1]).write_text(json.dumps(versions, sort_keys=True) + "\n")
+          except Exception as error:
+              print(type(error).__name__ + ": version probe failed; connection details withheld")
+              raise SystemExit(1)
+          ' "$evidence/versions.json"
+          # Fresh standard-library interpreter forbids optional SQL imports on defaults.
+          python3 -m unittest discover -s tests/tooling -p test_onboarding_backend.py -v \
+            > "$evidence/default-selector.log" 2>&1
+          # Preserve -v names/statuses, withholding assertion/exception details that can contain rows or keys.
+          program='import json,os,runpy,sys,unittest
+          sys.path.insert(0,os.environ["MLOCAL_AUXILIARY_DRIVER_SITE"])
+          def safe_error(self, error, test):
+              return error[0].__name__ + ": diagnostic details withheld from public evidence\n"
+          unittest.TextTestResult._exc_info_to_string=safe_error
+          class EvidenceResult(unittest.TextTestResult):
+              def canonical_test(self, test):
+                  return getattr(test, "test_case", test)
+              def getDescription(self, test):
+                  return self.canonical_test(test).id()
+              def write_event(self, event):
+                  with open(os.environ["MLOCAL_AUXILIARY_OUTCOMES_FILE"], "a", encoding="utf-8") as stream:
+                      stream.write(json.dumps(event, sort_keys=True) + "\n")
+              def record(self, test, outcome, error=None):
+                  test = self.canonical_test(test)
+                  self.write_event({"event":"test", "name":test.id().rsplit(".",1)[-1],
+                                    "identity":test.id(), "outcome":outcome,
+                                    "exception_class":error[0].__name__ if error else None})
+              def addSuccess(self, test):
+                  super().addSuccess(test)
+                  self.record(test, "ok")
+              def addFailure(self, test, error):
+                  super().addFailure(test, error)
+                  self.record(test, "FAIL", error)
+              def addError(self, test, error):
+                  super().addError(test, error)
+                  self.record(test, "ERROR", error)
+              def addSkip(self, test, reason):
+                  super().addSkip(test, "skip reason withheld from public evidence")
+                  self.record(test, "skipped")
+              def addExpectedFailure(self, test, error):
+                  super().addExpectedFailure(test, error)
+                  self.record(test, "expected_failure", error)
+              def addUnexpectedSuccess(self, test):
+                  super().addUnexpectedSuccess(test)
+                  self.record(test, "unexpected_success")
+              def addSubTest(self, test, subtest, error):
+                  super().addSubTest(test, subtest, error)
+                  if error:
+                      self.record(test, "FAIL" if issubclass(error[0], test.failureException) else "ERROR", error)
+              def stopTestRun(self):
+                  super().stopTestRun()
+                  self.write_event({"event":"summary", "run":self.testsRun, "successful":self.wasSuccessful(),
+                                    "failures":len(self.failures), "errors":len(self.errors), "skipped":len(self.skipped),
+                                    "expected_failures":len(self.expectedFailures), "unexpected_successes":len(self.unexpectedSuccesses)})
+          unittest.TextTestRunner.resultclass=EvidenceResult
+          sys.argv=["tests/integration/test_postgres_auxiliary.py","-v"]
+          runpy.run_path(sys.argv[0],run_name="__main__")'
+          proof_command=(bash scripts/python.sh -c "$program")
+          printf '%q ' "${proof_command[@]}" > "$evidence/command.txt"
+          printf '\n' >> "$evidence/command.txt"
+          set +e
+          "${proof_command[@]}" 2>&1 | tee "$evidence/unittest.log"
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          suite_exit="${statuses[0]}"
+          if [[ "$suite_exit" != 0 ]]; then exit "$suite_exit"; fi
+          exit "${statuses[1]}"
       - name: Run core tests
         run: ./scripts/test.sh core
       - name: Verify named core test inventory
@@ -84,4 +366,5 @@ jobs:
             .jac/release-core-binding.json
             .jac/release-test-inventory.json
             .jac/release-native/monitoring.json
+            .jac/postgres-auxiliary-proof/
             dist/*.jab
