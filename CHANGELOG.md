@@ -3,15 +3,24 @@
 All notable changes to M-Local are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-**Versioning is not decided yet.** `jac.toml` still says `0.0.1` and there are no
-release tags. Sections are dated by when they merged to `main`; Travis decides
-when a version number and tag are cut. Nothing listed here has been deployed or
-accepted on a live host. See the [gate matrix](docs/RELEASE-GATES.md) and
+The project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+`0.1.0` is the first versioned release; earlier work was merged untagged. A
+version number does not mean a host is live: nothing listed here has been
+deployed or accepted on a live host yet. See the
+[gate matrix](docs/RELEASE-GATES.md) and
 [acceptance checklist](docs/RELEASE-ACCEPTANCE.md).
 
 ## [Unreleased]
 
-Merged to `main` on 2026-10-21 (PRs #60-#71).
+## [0.1.0] - 2026-10-21
+
+First versioned release. It contains everything merged to `main` through
+[#72](https://github.com/CosmonautJones/m-local/pull/72): the #60-#71 stack
+below (merged 2026-10-21), the untagged 2026-10-13 student and merchant
+candidate (#55, #59), and the earlier prototype work (#1-#32: Jac runtime and
+trusted QR claims, verified email signup and business onboarding, "For you"
+tastes and favorites, business Insights sales charts, themed Jac UI, and
+laptop/phone demo hosting). Release acceptance is still pending.
 
 ### Added
 - Build identity: the release gateway serves `/build`, `/version.json` and an
@@ -55,7 +64,7 @@ Merged to `main` on 2026-10-21 (PRs #60-#71).
   ([#62](https://github.com/CosmonautJones/m-local/pull/62)). They still exist in
   older Git history.
 
-## 2026-10-13 - Student and merchant release candidate (untagged)
+## 2026-10-13 - Student and merchant release candidate (untagged, included in 0.1.0)
 
 Merged to `main` via [#55](https://github.com/CosmonautJones/m-local/pull/55) and
 [#59](https://github.com/CosmonautJones/m-local/pull/59). Hosted and human
@@ -75,3 +84,6 @@ acceptance of this candidate was not completed.
 
 ### Security
 - Native identity hardening and refusal of unsafe startup configuration (from #56).
+
+[Unreleased]: https://github.com/CosmonautJones/m-local/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/CosmonautJones/m-local/releases/tag/v0.1.0

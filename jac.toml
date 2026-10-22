@@ -1,6 +1,6 @@
 [project]
 name = "m-local"
-version = "0.0.1"
+version = "0.1.0"
 description = "Time-limited Ann Arbor restaurant offers for the U-M community"
 entry-point = "main"
 jac-version = "0.37.23"
