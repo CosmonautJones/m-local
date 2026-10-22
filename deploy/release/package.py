@@ -33,10 +33,12 @@ REQUIRED_CASES = {"all_rpc_serialized", "readiness_serialized", "exclusive_backe
 DEPENDENCY_ROOTS = (".jac/venv/lib", ".jac/client/node_modules", ".jac/client/configs/package.json")
 # Reviewed public trust material from the tested dependency inventory. Exact
 # bytes are required: a filename or PEM label cannot establish public content.
+# Refreshed 2026-10-21 from official PyPI wheels: certifi 2026.10.19,
+# pip 26.2.2 (vendored certifi) and botocore 1.43.117 (byte-identical).
 PUBLIC_DEPENDENCY_PEMS = {
-    ".jac/venv/lib/python3.14/site-packages/certifi/cacert.pem": "9cc2a774b5198dcff14d9be1e66091f538975d867ce029a96bce15a55dfd730f",
-    ".jac/venv/lib/python3.14/site-packages/pip/_vendor/certifi/cacert.pem": "bbc7e9c01d7551bb8a159b5dedd989b8ee3ce105aff522b68eb1b01bf854cab0",
-    ".jac/venv/lib/python3.14/site-packages/botocore/cacert.pem": "ed93d6346236d4f0278f617f5245091f37d001806a49ce42ce0ad5bec858d28e",
+    ".jac/venv/lib/python3.14/site-packages/certifi/cacert.pem": "50f79f98dac192b20dbf73f35c56f0b0c557ab267ff5199d1117cc1180b70785",
+    ".jac/venv/lib/python3.14/site-packages/pip/_vendor/certifi/cacert.pem": "50f79f98dac192b20dbf73f35c56f0b0c557ab267ff5199d1117cc1180b70785",
+    ".jac/venv/lib/python3.14/site-packages/botocore/cacert.pem": "4658f1ddf2d0a9e70c8f760323704c8fb9c0bf2f1f1e7d2dbc5939ca04ea2612",
     ".jac/venv/lib/python3.14/site-packages/litellm/proxy/auth/public_key.pem": "02cd2f76b5167a06c3c2195a22138a18e3c5c5b7fb141dc752d21f240e32c677",
 }
 
