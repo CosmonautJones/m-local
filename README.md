@@ -49,8 +49,8 @@ More in [Runtime setup](docs/RUNTIME.md).
 **Status:** engineering release candidate on `main`; live rollout is not yet
 approved. See [Release status](#release-status), the
 [gate matrix](docs/RELEASE-GATES.md), the
-[acceptance checklist](docs/RELEASE-ACCEPTANCE.md) and
-[release tracking](https://github.com/CosmonautJones/m-local/issues/33).
+[acceptance checklist](docs/RELEASE-ACCEPTANCE.md),
+the [changelog](CHANGELOG.md) and [release tracking](https://github.com/CosmonautJones/m-local/issues/33).
 
 ---
 
