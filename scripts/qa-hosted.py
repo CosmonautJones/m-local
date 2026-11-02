@@ -427,8 +427,9 @@ class Run:
         self.check(s, "feed is personalized for a signed-in student", feed.get("signed_in") is True)
 
     # realistic traffic
-    def soak(self, minutes: float, seed: int):
-        print(f"\n== Mixed real-world traffic for {minutes:g} minutes", flush=True)
+    def soak(self, minutes: float, seed: int, users: int = 0):
+        active = self.students[:users] if users > 0 else self.students
+        print(f"\n== Mixed real-world traffic for {minutes:g} minutes, {len(active)} students", flush=True)
         rng = random.Random(seed)
         stop = time.monotonic() + minutes * 60
         counters = {"browse": 0, "detail": 0, "favorite": 0, "claim_ok": 0, "claim_refused": 0, "cancel": 0,
@@ -442,7 +443,10 @@ class Run:
             while time.monotonic() < stop:
                 try:
                     roll = r.random()
-                    offers = student.call("list_offers", max_price=r.choice(["", "", "5", "10"]), window=r.choice(["any", "now", "today"]))
+                    # The feed screen calls home_feed (and refreshes it every 30 s while open).
+                    feed = student.call("home_feed", price_range=r.choice(["", "", "$", "$$"]),
+                                        window=r.choice(["any", "now", "today"]), diets="")
+                    offers = [item["offer"] for item in feed.get("items", []) if isinstance(item.get("offer"), dict)]
                     with lock: counters["browse"] += 1
                     open_offers = [o for o in offers if o.get("state") == "active"]
                     if open_offers and roll < 0.6:
@@ -452,12 +456,13 @@ class Run:
                         if r.random() < 0.15:
                             student.call("toggle_favorite", offer_id=o["id"])
                             with lock: counters["favorite"] += 1
-                        if r.random() < 0.35 and o.get("restaurant") in names:
+                        if r.random() < 0.35:
                             res = student.call("claim_offer", offer_id=o["id"])
                             with lock:
                                 if res.get("ok"):
                                     counters["claim_ok"] += 1
-                                    if r.random() < 0.8:
+                                    # Only QA-merchant restaurants can scan; other holds expire or are cancelled.
+                                    if o.get("restaurant") in names and r.random() < 0.8:
                                         pending.append((o["restaurant"], res["qr_payload"]))
                                 else:
                                     counters["claim_refused"] += 1
@@ -491,8 +496,8 @@ class Run:
                         counters["errors"] += 1
                     print(f"  soak error: {error}", flush=True)
 
-        with concurrent.futures.ThreadPoolExecutor(len(self.students) + 1) as pool:
-            futures = [pool.submit(student_loop, s, seed + i) for i, s in enumerate(self.students)]
+        with concurrent.futures.ThreadPoolExecutor(len(active) + 1) as pool:
+            futures = [pool.submit(student_loop, s, seed + i) for i, s in enumerate(active)]
             futures.append(pool.submit(merchant_loop))
             for f in futures:
                 f.result()
@@ -510,7 +515,7 @@ def run(args) -> int:
         raise QAError("The QA accounts were created on a different host.")
     qa = Run(base, accounts)
     started = time.time()
-    for title, fn in [
+    for title, fn in [] if args.skip_scenarios else [
         ("Roles: QA accounts resolve to students and merchants", qa.s_roles),
         ("Guest browsing and filters", qa.s_browse),
         ("Claim, merchant preview and one-time redemption", qa.s_claim_redeem),
@@ -521,7 +526,7 @@ def run(args) -> int:
         ("Tastes and favorites", qa.s_tastes),
     ]:
         qa.scenario(title, fn)
-    counters = qa.soak(args.minutes, args.seed) if args.minutes > 0 else {}
+    counters = qa.soak(args.minutes, args.seed, args.users) if args.minutes > 0 else {}
     failures = [r for r in qa.results if not r["ok"]]
     report = {"url": base, "started": started, "finished": time.time(), "checks": len(qa.results),
               "failures": failures, "results": qa.results, "soak": counters, "latency": qa.stats.summary()}
@@ -545,6 +550,8 @@ def main(argv: list[str]) -> int:
     r.add_argument("--url")
     r.add_argument("--minutes", type=float, default=5)
     r.add_argument("--seed", type=int, default=7)
+    r.add_argument("--users", type=int, default=0, help="students in the traffic phase (default: all)")
+    r.add_argument("--skip-scenarios", action="store_true", help="only run the traffic phase")
     r.add_argument("--state", type=Path, default=DEFAULT_STATE)
     r.add_argument("--report", type=Path)
     r.add_argument("--allow-host", action="store_true")
