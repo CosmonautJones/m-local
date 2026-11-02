@@ -94,6 +94,52 @@ merchants scan and redeem) and writes a JSON report with per-call latency next
 to the credentials file. It refuses non-preview hosts unless `--allow-host` is
 given.
 
+### QA results, 2026-11-02 (preview, 8 QA students, 3 QA merchants)
+
+Scenario checks: **60/60 passed** on the hosted preview (roles, browse and
+filters, claim/QR/one-time redemption, wrong-merchant and forged-QR refusal,
+two-hold limit, six-way last-unit race with exactly one winner, duplicate
+publish, pause/resume, access control, tastes and favorites). A phone-size
+browser pass covered the welcome screen, guest feed, taste picker, personalized
+feed, offer detail, claim and QR pass, saved pass after reload, cancel, and the
+merchant offers and Insights screens.
+
+Mixed traffic, no errors in any run:
+
+| Students | Minutes | Feed p50 / p95 | Offer detail p50 / p95 | Feed loads |
+| --- | --- | --- | --- | --- |
+| 4 | 5 | 6.1 s / 9.5 s | 4.2 s / 9.2 s | 80 |
+| 8 | 5 | 12.8 s / 18.7 s | 11.1 s / 17.3 s | 85 |
+
+Findings:
+
+1. **Feed capacity.** `home_feed` costs about 2.6 s of server time with the
+   346-offer sample catalog (a $3-filtered `list_offers` still takes 2.9 s,
+   so it is computation, not payload size). With one request thread, the host
+   completes roughly 17–20 feed loads a minute in total, and the feed screen
+   refreshes every 30 s while open, so about ten people with the feed open
+   saturate it. Everything else (claims, redemptions, merchant actions) is
+   ~0.2 s when it is not queued behind feed loads (#49).
+2. **Sold-out offers rank first.** `services/taste.jac` treats
+   `remaining <= 3` as "Almost gone", which includes 0, so sold-out offers get
+   that badge next to "Sold out" and a ranking boost to the top of the feed.
+3. **Serialization conflicts surface as HTTP 500.** With the default thread
+   pool (local rehearsal), a `toggle_favorite` hit PostgreSQL `40001` and the
+   client received HTTP 500 with the raw database error text. Not seen with the
+   hosted one-thread setting; relevant before raising concurrency (#39).
+4. **"Fictional businesses" label is inaccurate.** The hosted sample catalog
+   (`data/simulation/places.json`) uses real Ann Arbor places, including chains
+   and a U-M dining hall, with invented deals. Offers are tagged "Sample" and
+   offer pages say to confirm real offers with the business, but the feed
+   header says "fictional businesses" (and only for demo accounts).
+5. **Accessibility.** Taste and filter chips show selection by color only; no
+   `aria-pressed`, so screen readers cannot tell what is selected (#48).
+6. **Minor copy.** A cancelled claim still shows "Hold expires …"; multi-day
+   offers show only a clock time ("Until 7:37 AM · 325h left") with no date.
+
+Not covered by automation: email-code delivery, camera scanning on real
+phones, photo upload.
+
 ## What to record
 
 For each run, note the tester, phone and browser, and the result of: guest
