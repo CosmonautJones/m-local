@@ -22,6 +22,20 @@ project's Resend sender.
 | Sample offers | `MLOCAL_SHOW_SAMPLES=1`. Every sample is labeled fictional and cannot be redeemed at a real business. |
 | Email | Existing Resend settings (`MLOCAL_SMTP_*`). |
 
+Verified on 2026-11-02 against the preview deployment:
+
+- JacHammer rendered one app replica, no app autoscaler, and both persistent
+  volumes (`mlocal-state`, `mlocal-photos`) bound to AWS EBS and attached to
+  the app pod; the rollout scaled the old pod down rather than running two.
+- The welcome page, `current_session` and `home_feed` (346 labeled sample
+  offers) respond.
+- A throwaway native test account's sign-in token and graph identity survived
+  a full `jachammer redeploy` (same actor, still authenticated). That account
+  has the `unverified` role and cannot claim.
+- Not yet exercised on this host: real email-code delivery, claim/QR,
+  redemption, photo upload, and onboarding-store survival across a restart.
+  Those are the first things for testers to try.
+
 The repository's `jac.toml` is unchanged. `scripts/jachammer-stage.py` writes
 the JacHammer-specific settings into a staged copy at deploy time; see its
 docstring and `tests/tooling/test_jachammer_stage.py`.
