@@ -67,6 +67,33 @@ the merchant side, attach a tester to one of the fictional sample restaurants:
 Each actor ID can own only one restaurant; give each merchant tester a
 different sample slug.
 
+## QA accounts and simulated usage
+
+`scripts/qa-hosted.py` creates QA accounts on the test host and replays
+realistic use, without email:
+
+```bash
+python3 scripts/qa-hosted.py provision --url https://m-local-preview-prjc0b.jachammer.app
+# set the two printed variables on the host, then `jachammer redeploy`
+python3 scripts/qa-hosted.py run --url https://m-local-preview-prjc0b.jachammer.app --minutes 10
+```
+
+`provision` registers 8 QA students and 3 QA merchants (one per sample
+restaurant) with `example.test` addresses and stores their credentials in
+`~/.mlocal-qa/accounts.json` (mode 0600, outside the repository). QA students
+claim through `MLOCAL_DEMO_STUDENTS`; QA merchants own the sample restaurants
+through `MLOCAL_MERCHANT_OWNERS`. Both are demo settings the production guard
+refuses, so remove them before any production deploy.
+
+`run` checks roles, guest browsing and filters, claim/QR/one-time redemption,
+wrong-merchant and forged-QR refusal, the two-hold limit, a six-way race for a
+one-unit offer, duplicate publish, pause/resume, access control, and tastes and
+favorites. It then runs mixed traffic (every QA student browsing, opening
+offers, favoriting, claiming and cancelling with 2–8 s think time, while the
+merchants scan and redeem) and writes a JSON report with per-call latency next
+to the credentials file. It refuses non-preview hosts unless `--allow-host` is
+given.
+
 ## What to record
 
 For each run, note the tester, phone and browser, and the result of: guest
