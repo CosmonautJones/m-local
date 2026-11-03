@@ -60,7 +60,7 @@ sample restaurants:
    `current_session` request and copy `actor_id` from its response.
 3. The operator maps a sample restaurant to that ID and redeploys:
    `jachammer env add 'MLOCAL_MERCHANT_OWNERS={"arbor-leaf-kitchen":"<actor id>"}' --name M-Local-Main`
-   then `jachammer redeploy`.
+   then `bash scripts/jachammer-deploy.sh`.
 4. The tester now manages that sample restaurant: post an offer, then scan a
    student's QR and confirm the one-time redemption.
 
@@ -74,7 +74,7 @@ realistic use, without email:
 
 ```bash
 python3 scripts/qa-hosted.py provision --url https://m-local-preview-prjc0b.jachammer.app
-# set the two printed variables on the host, then `jachammer redeploy`
+# set the two printed variables on the host, then bash scripts/jachammer-deploy.sh
 python3 scripts/qa-hosted.py run --url https://m-local-preview-prjc0b.jachammer.app --minutes 10
 ```
 
@@ -268,4 +268,8 @@ with the pinned runtime, then deploys. JacHammer's own pre-upload check is
 skipped because it uses whatever `jac` is first on `PATH`.
 
 A deploy takes about 20 minutes. `jachammer env add` changes apply on the next
-deploy or `jachammer redeploy`.
+deploy: run `bash scripts/jachammer-deploy.sh` again. Do not use
+`jachammer redeploy --name M-Local-Main`: on 2026-11-03 that created a second,
+separate preview (`m-local-main-preview-…`, with its own empty database)
+instead of updating the app, because the project name differs from the app
+name `m-local`.

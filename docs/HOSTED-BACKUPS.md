@@ -35,7 +35,7 @@ The host never writes it to disk; it is sent once over HTTPS.
 python3 scripts/hosted-backup.py setup --url https://<app host> \
     --backup-dir "/mnt/c/Users/<you>/M-Local Backups" --show-token
 jachammer env add 'MLOCAL_BACKUP_TOKEN=<printed token>' --name M-Local-Main
-jachammer redeploy
+bash scripts/jachammer-deploy.sh   # applies the new setting
 python3 scripts/hosted-backup.py pull
 ```
 
