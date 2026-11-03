@@ -673,6 +673,63 @@ def merchant_operations_allowed(actor: str) -> bool {
 }
 
 
+"""registered_business_owner for many slugs with one read-only connection.
+Same answers per slug; an unreadable store confers no ownership."""
+def registered_business_owners(slugs: list[str]) -> dict[str, str] {
+    selected = _selected_store();
+    result: dict[str, str] = {s: "" for s in slugs};
+    wanted = [s for s in result if re.fullmatch(r"business-[0-9a-f]{32}", s)];
+    if not wanted { return result; }
+    if selected is not None {
+        for s in wanted { result[s] = selected.business_owner(s); }
+        return result;
+    }
+    try {
+        directory = Path(os.environ.get("MLOCAL_ONBOARDING_DIR", ".jac/onboarding")).resolve();
+        if len((directory / "code.key").read_bytes()) != 32 { return result; }
+        db = sqlite3.connect((directory / "onboarding.sqlite3").as_uri() + "?mode=ro", uri=True, timeout=15);
+        db.row_factory = sqlite3.Row;
+        try {
+            for s in wanted {
+                try { result[s] = _approved_business_owner(db, s); }
+                except (sqlite3.Error, RuntimeError) { result[s] = ""; }
+            }
+        } finally { db.close(); }
+    } except (OSError, sqlite3.Error, RuntimeError) {
+        return {s: "" for s in slugs};
+    }
+    return result;
+}
+
+
+"""merchant_operations_allowed for many actors with one read-only connection.
+Same answers per actor; anything unreadable or malformed pauses operations."""
+def merchant_operations_allowed_many(actors: list[str]) -> dict[str, bool] {
+    result: dict[str, bool] = {a: False for a in actors};
+    if not result { return result; }
+    if _selected_store() is not None {
+        for a in result { result[a] = merchant_operations_allowed(a); }
+        return result;
+    }
+    try {
+        directory = Path(os.environ.get("MLOCAL_ONBOARDING_DIR", ".jac/onboarding")).resolve();
+        if not directory.exists() { return result; }
+        if len((directory / "code.key").read_bytes()) != 32 { return result; }
+        db = sqlite3.connect((directory / "onboarding.sqlite3").as_uri() + "?mode=ro", uri=True, timeout=15);
+        db.row_factory = sqlite3.Row;
+        try {
+            for a in result {
+                try { result[a] = _stored_business_status(db, status_actor(a))["status"] == "active"; }
+                except (sqlite3.Error, RuntimeError, ValueError) { result[a] = False; }
+            }
+        } finally { db.close(); }
+    } except (OSError, sqlite3.Error, RuntimeError, ValueError) {
+        return {a: False for a in actors};
+    }
+    return result;
+}
+
+
 def delivery_ready() -> bool {
     return all([os.environ.get(name, "").strip() for name in ("MLOCAL_SMTP_HOST", "MLOCAL_SMTP_FROM", "MLOCAL_SMTP_USERNAME", "MLOCAL_SMTP_PASSWORD")]);
 }

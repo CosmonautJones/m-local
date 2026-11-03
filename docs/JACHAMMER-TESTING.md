@@ -127,15 +127,18 @@ Findings:
    pool (local rehearsal), a `toggle_favorite` hit PostgreSQL `40001` and the
    client received HTTP 500 with the raw database error text. Not seen with the
    hosted one-thread setting; relevant before raising concurrency (#39).
-4. **"Fictional businesses" label is inaccurate.** The hosted sample catalog
+4. **"Fictional businesses" label is inaccurate** (fixed: the header now says
+   "invented deals, not real promotions"). The hosted sample catalog
    (`data/simulation/places.json`) uses real Ann Arbor places, including chains
    and a U-M dining hall, with invented deals. Offers are tagged "Sample" and
    offer pages say to confirm real offers with the business, but the feed
    header says "fictional businesses" (and only for demo accounts).
-5. **Accessibility.** Taste and filter chips show selection by color only; no
-   `aria-pressed`, so screen readers cannot tell what is selected (#48).
-6. **Minor copy.** A cancelled claim still shows "Hold expires …"; multi-day
-   offers show only a clock time ("Until 7:37 AM · 325h left") with no date.
+5. **Accessibility.** Taste chips showed selection by color only (#48). They
+   are now checkboxes with a checked state; the feed filters were already
+   native radio buttons and checkboxes.
+6. **Minor copy** (fixed). A cancelled claim no longer shows "Hold expires …";
+   offers ending more than 18 hours out name the day, and spans of two days or
+   more read "13d 13h left".
 
 Not covered by automation: email-code delivery, camera scanning on real
 phones, photo upload.
@@ -165,6 +168,32 @@ internal service name. It did not recur in eight immediate retries or the UI
 refresh, and no request failed during the runs. Watch for it in the provider's
 gateway logs before a public launch.
 
+### Capacity of the single backend, 2026-11-03
+
+A read-only probe (guest `home_feed`, gzip, no think time) against the preview
+at `e1cfa37` found the ceiling of the one-thread backend: about 22.5 feeds a
+second. Latency stayed flat up to 4 concurrent callers and queued beyond 8
+(16 callers: p50 0.69 s), with no errors. Profiling the same request showed
+about two thirds of the time spent turning the 298-deal response into JSON,
+and most of the rest in per-place ownership and suspension checks that opened
+the private store several times per place.
+
+Changes after that measurement:
+
+- **Feed paging.** The phone asks for 40 ranked deals and shows "Show more
+  deals"; the caller's live holds are always included. `home_feed` with no
+  `limit` still returns everything (QA tool, tests). Locally the paged feed is
+  8.6 KB compressed instead of 77 KB and takes less than half the time. It also
+  renders 40 cards on a phone instead of 300 (#49).
+- **Views only for returned deals.** Ranking uses the snapshot directly; full
+  offer views are built for the page only.
+- **One private-store read per request** for ownership and suspension across
+  all places (`place_access`, `merchant_owners`), instead of up to three per
+  place. Still read live on every request; nothing about suspension is cached.
+  `current_session` uses the same batch lookup.
+- **Seed check once per process.** Every read path ran the catalog bootstrap
+  query; it now runs once and again after any catalog write.
+
 ## What to record
 
 For each run, note the tester, phone and browser, and the result of: guest
@@ -175,11 +204,16 @@ delivery), #46 (redeemed moment) and #50 (phone QA).
 
 ## Known gaps on this host
 
-- **Native registration is reachable.** Jac's built-in `/user/register` and
-  `/user/login` answer through JacHammer's gateway. An account made that way
-  cannot claim (claims need a verified `@umich.edu` account) or act as a
-  merchant, but it should be closed before a public launch by running the
-  repository's restricted gateway in front of the app (issue #40).
+- **Native registration is throttled, not removed.** JacHammer's gateway
+  cannot refuse a route and Jac always mounts `/user/register` and
+  `/user/login`. The deploy staging sets `[serve.auth]` to require a
+  proof-of-work challenge and allow one registration attempt an hour (behind
+  the gateway that is effectively one an hour in total). M-Local never uses
+  native registration: accounts come from the email-code flow inside the
+  server. An account made natively cannot claim or act as a merchant. Provisioning
+  more QA accounts needs `JACHAMMER_OPEN_REGISTRATION=1 bash
+  scripts/jachammer-deploy.sh` (refused with `--prod`). Running the repository's
+  restricted gateway in front of the app would close it fully (#40).
 - **No self-service business approval** (see above).
 - **Rate limits** use the app's own per-email limits only; the repository's
   per-IP gateway limits are not in front of this host.

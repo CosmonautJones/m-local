@@ -18,10 +18,10 @@ import from datetime { datetime }
 import from zoneinfo { ZoneInfo }
 import from services.models { Restaurant, Location, MenuItem, Offer, Redemption, HasLocation, Serves, Publishes, ClaimedAs, samples_visible }
 import from services.qr_catalog { _ensure_seed }
-import from services.qr_auth { listing_visible, merchant_operations_enabled }
+import from services.qr_auth { listing_visible, merchant_operations_enabled, place_access }
 import from services.session { _actor_id }
 import from services.promo { OfferView, _view, _state, _my_claim, _claim_status, _find_offer, _restaurant_of, _location_of, _lock, _unlock, build_view, _place_context }
-import from services.catalog { catalog_snapshot, actor_claims, best_claim, OfferSrc }
+import from services.catalog { catalog_snapshot, actor_claims, best_claim, remaining_from, OfferSrc, PlaceSrc, ClaimSrc }
 import from services.context_models { AccessContextView }
 import from services.context { get_access_context }
 import from services.importer { import_restaurant }
@@ -112,6 +112,7 @@ obj HomeView {
         favorites: list[FavoritePlace] = [],
         items: list[FeedItem] = [],
         total_deals: int = 0,
+        matching_deals: int = 0,
         show_samples: bool = False,
         note: str = "";
 }
@@ -317,8 +318,10 @@ def _end_of_today(now: float) -> float {
 
 
 """Build the home page for one caller. price_range, window and diets are the
-filters tapped on the page; saved tastes only change the order."""
-def _home(actor: str, price_range: str, window: str, diets: str, now: float) -> HomeView {
+filters tapped on the page; saved tastes only change the order. limit > 0
+returns only the first that many ranked deals (the phone shows more on
+request); the caller's own live holds are always included."""
+def _home(actor: str, price_range: str, window: str, diets: str, now: float, limit: int = 0) -> HomeView {
     p = _profile() if actor else None;
     taste = _taste(p, actor, now);
     wanted = clean_choices(_split(diets), DIETS);
@@ -335,34 +338,29 @@ def _home(actor: str, price_range: str, window: str, diets: str, now: float) -> 
     }
     eod = _end_of_today(now);
     candidates: list[Candidate] = [];
-    views: dict[str, OfferView] = {};
-    labels: dict[str, list[str]] = {};
+    # Views are built only for the deals returned; ranking needs just the
+    # claim status and stock, which come straight from the snapshot.
+    sources: dict[str, tuple[OfferSrc, PlaceSrc, ClaimSrc | None]] = {};
+    held: dict[str, bool] = {};
     total = 0;
     snap = catalog_snapshot();
     mine = actor_claims(actor) if actor else {};
     show_samples = samples_visible();
     hosted = os.environ.get("MLOCAL_HOSTED_DATASET", "") == "1";
+    access = place_access([(p.slug, p.source) for p in snap.places]);
     for place in snap.places {
-        visible = listing_visible(place.slug, place.source);
-        paused: bool | None = None;
-        context: AccessContextView | None = None;
+        visible = access[place.slug][0];
         for o in place.offers {
             if (place.is_demo or o.is_demo) and not show_samples { continue; }
             starter_fixture = hosted and place.source == "demo-seed";
             discoverable = visible and o.status != "paused" and now < o.end_ts and not starter_fixture;
             saved = best_claim(mine.get(o.id, []), now);
-            if not discoverable {
-                if saved is None or _claim_status(saved, now) != "claimed" { continue; }
-            }
-            if paused is None { paused = not merchant_operations_enabled(place.slug); }
-            if context is None { context = _place_context(snap, place, now); }
-            v = build_view(o, place, context, now, saved, paused);
-            if not visible and v.my_status != "claimed" { continue; }
+            live_hold = saved is not None and _claim_status(saved, now) == "claimed";
+            if not discoverable and not live_hold { continue; }
             if discoverable { total += 1; }
             # A live saved QR must remain reachable after offer edits or filter
             # changes. Only its owner bypasses discovery rules, until expiry.
-            if v.my_status != "claimed" {
-                if not discoverable { continue; }
+            if not live_hold {
                 if lo_cents >= 0 {
                     if o.price_cents < lo_cents or o.price_cents > hi_cents { continue; }
                 } elif chosen_range and price_range_of(o.price_cents) != chosen_range {
@@ -378,8 +376,8 @@ def _home(actor: str, price_range: str, window: str, diets: str, now: float) -> 
                     continue;
                 }
             }
-            views[o.id] = v;
-            labels[o.id] = place.labels;
+            sources[o.id] = (o, place, saved);
+            held[o.id] = live_hold;
             candidates.append(Candidate(
                 offer_id=o.id,
                 place=place.slug,
@@ -388,7 +386,7 @@ def _home(actor: str, price_range: str, window: str, diets: str, now: float) -> 
                 dietary=o.dietary,
                 price_cents=o.price_cents,
                 regular_cents=o.regular_price_cents,
-                remaining=v.remaining,
+                remaining=remaining_from(o, now),
                 starts_in_hours=max(o.start_ts - now, 0.0) / 3600,
                 ends_in_hours=max(o.end_ts - now, 0.0) / 3600
             ));
@@ -396,13 +394,18 @@ def _home(actor: str, price_range: str, window: str, diets: str, now: float) -> 
     }
     day = datetime.fromtimestamp(now, ZoneInfo("America/Detroit")).strftime("%Y-%m-%d");
     ranked = build_feed(candidates, taste, (actor or "guest") + ":" + day);
+    contexts: dict[str, AccessContextView] = {};
     items: list[FeedItem] = [];
-    for r in ranked {
+    for (position, r) in enumerate(ranked) {
         oid = r.candidate.offer_id;
+        if limit > 0 and position >= limit and not held[oid] { continue; }
+        (o, place, saved) = sources[oid];
+        if place.slug not in contexts { contexts[place.slug] = _place_context(snap, place, now); }
+        view = build_view(o, place, contexts[place.slug], now, saved, not access[place.slug][1]);
         items.append(FeedItem(
-            offer=views[oid],
+            offer=view,
             place=r.candidate.place,
-            place_labels=labels[oid],
+            place_labels=place.labels,
             categories=r.candidate.categories,
             price_cents=r.candidate.price_cents,
             regular_cents=r.candidate.regular_cents,
@@ -422,6 +425,7 @@ def _home(actor: str, price_range: str, window: str, diets: str, now: float) -> 
         favorites=_favorite_places(taste.favorites, now),
         items=items,
         total_deals=total,
+        matching_deals=len(ranked),
         note="" if items else "No deals match these filters right now."
     );
 }
@@ -517,10 +521,12 @@ def _demo_companies_present -> int {
 
 # ---------------------------------------------------------- endpoints ---
 
-"""The home page: favorites strip plus every live deal, ordered for the caller."""
-def:pub home_feed(price_range: str = "", window: str = "any", diets: str = "") -> HomeView {
+"""The home page: favorites strip plus live deals, ordered for the caller.
+limit > 0 returns the first that many (plus the caller's live holds);
+matching_deals says how many match in total. 0 returns every deal."""
+def:pub home_feed(price_range: str = "", window: str = "any", diets: str = "", limit: int = 0) -> HomeView {
     _ensure_seed();
-    return _home(_actor_id(), price_range, window, diets, time.time());
+    return _home(_actor_id(), price_range, window, diets, time.time(), max(0, limit));
 }
 
 

@@ -449,3 +449,29 @@ test "home retains only the owner's live claim across price diet and time filter
         assert _listed_claim(actor, oid, expires, budget, window, diets) == [];
     }
 }
+
+
+test "a limited feed is a prefix of the full feed and keeps the caller's live hold" {
+    _ensure_seed();
+    _reset();
+    now = time.time();
+    o = _claim_fixture("limited-feed-cafe", now);
+    oid = jid(o);
+    actor = "limited-feed-student";
+    assert _claim(oid, actor, now).ok;
+    full = _home(actor, "", "any", "", now);
+    ids = [i.offer.id for i in full.items];
+    assert full.matching_deals == len(ids) and len(ids) >= 3;
+    held_at = ids.index(oid);
+    for limit in [1, 2, len(ids), len(ids) + 5] {
+        page = _home(actor, "", "any", "", now, limit);
+        got = [i.offer.id for i in page.items];
+        assert page.matching_deals == full.matching_deals and page.total_deals == full.total_deals;
+        expected = [x for (n, x) in enumerate(ids) if n < limit or x == oid];
+        assert got == expected, str(limit);
+    }
+    # A guest page never carries someone else's hold.
+    guest = _home("", "", "any", "", now, 1);
+    assert len(guest.items) == 1 and guest.matching_deals >= 1;
+    assert held_at >= 0;
+}

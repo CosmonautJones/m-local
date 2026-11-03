@@ -14,6 +14,11 @@ so they are written only into a staged copy:
 * One request thread per process, so mutations are not interleaved.
 * Persistent volumes for private onboarding state (MLOCAL_ONBOARDING_DIR lives
   under /srv/m-local) and uploaded photos (assets/photos).
+* Jac's native `/user/register` is throttled to one attempt an hour behind a
+  proof-of-work challenge (`[serve.auth]`). M-Local never uses it: accounts are
+  made by the email-code flow inside the server. JacHammer's gateway cannot
+  refuse the route outright, so this is the closest available closure (#40).
+  `--open-native-registration` leaves it open for QA provisioning only.
 * PyPI pins move to `[dependencies.pypi]`, which JacHammer's staging requires.
   Pinned 0.37.23 ignores that table; Pillow still arrives with the runtime and
   psycopg is only imported by the opt-in SQL modes, which a hosted test never
@@ -69,6 +74,13 @@ APP_BLOCK = [
     'access_mode = "ReadWriteOnce"',
     "",
 ]
+AUTH_BLOCK = [
+    "[serve.auth]",
+    "registration_challenge = true",
+    "registration_attempts_per_hour = 1",
+    "registration_challenges_per_10_minutes = 2",
+    "",
+]
 
 
 class StageError(Exception):
@@ -82,7 +94,7 @@ def _table(line: str) -> str | None:
     return None
 
 
-def transform(text: str) -> str:
+def transform(text: str, open_registration: bool = False) -> str:
     """Return the JacHammer variant of jac.toml, preserving each line's ending."""
     lines = text.splitlines(keepends=True)
     out: list[str] = []
@@ -92,10 +104,10 @@ def transform(text: str) -> str:
         name = _table(line)
         if name is not None:
             section = name
-            if name.startswith("apps.") or name == "dependencies.pypi":
+            if name.startswith("apps.") or name in ("dependencies.pypi", "serve.auth"):
                 raise StageError(f"jac.toml already declares [{name}]; refusing to stage over it.")
             if name == "scale.admin" and not seen["inserted"]:
-                out.extend(entry + "\n" for entry in APP_BLOCK)
+                out.extend(entry + "\n" for entry in APP_BLOCK + ([] if open_registration else AUTH_BLOCK))
                 seen["inserted"] = True
             if name == "dependencies":
                 out.append(line.replace("[dependencies]", "[dependencies.pypi]", 1))
@@ -124,7 +136,7 @@ def tracked_files(source: Path) -> list[str]:
     return [p for p in result.stdout.decode().split("\0") if p]
 
 
-def stage(source: Path, target: Path) -> int:
+def stage(source: Path, target: Path, open_registration: bool = False) -> int:
     if target.exists() and any(target.iterdir()):
         raise StageError(f"{target} is not empty; choose a fresh directory.")
     dirty = subprocess.run(["git", "-C", str(source), "status", "--porcelain", "--untracked-files=no"],
@@ -144,7 +156,7 @@ def stage(source: Path, target: Path) -> int:
         shutil.copy2(src, dest)
         count += 1
     toml = target / "jac.toml"
-    toml.write_bytes(transform(toml.read_bytes().decode("utf-8")).encode("utf-8"))
+    toml.write_bytes(transform(toml.read_bytes().decode("utf-8"), open_registration).encode("utf-8"))
     revision = subprocess.run(["git", "-C", str(source), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
     (target / ".jachammer-source-revision").write_text(revision + "\n")
     return count
@@ -154,9 +166,11 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("target", type=Path, help="new or empty directory for the staged copy")
     parser.add_argument("--source", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--open-native-registration", action="store_true",
+                        help="leave Jac's /user/register unthrottled (QA provisioning on a preview only)")
     args = parser.parse_args(argv)
     try:
-        count = stage(args.source.resolve(), args.target.resolve())
+        count = stage(args.source.resolve(), args.target.resolve(), args.open_native_registration)
     except (StageError, subprocess.CalledProcessError, OSError) as error:
         print(f"jachammer-stage: {error}", file=sys.stderr)
         return 1

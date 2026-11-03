@@ -4,8 +4,8 @@ import from services.models { Restaurant, Serves, Publishes }
 import from services.seed { seed_demo }
 import from services.money { money_to_cents }
 import from services.qr_auth { merchant_owner }
-import from services.hosted_dataset { ensure_hosted_dataset }
-import from services.catalog_events { catalog_changed }
+import from services.hosted_dataset { ensure_hosted_dataset, hosted_dataset_enabled, HostedDatasetLoaded }
+import from services.catalog_events { catalog_changed, seed_verified, mark_seeded }
 
 node CatalogBootstrap {
     has version: int = 1;
@@ -22,8 +22,15 @@ def _ensure_seed {
     # Only cache completion of the migration, never identity or inventory.
     # Current import/write paths populate cents themselves. Bump the version
     # when a future release needs another compatibility migration.
+    # Every read path calls this. Once a request has seen a complete seed, later
+    # requests in this process skip the graph check until the next catalog write.
+    key = jid(root.shared) + ("|hosted" if hosted_dataset_enabled() else "");
+    if seed_verified(key) { return; }
     if [root.shared -->[?:CatalogBootstrap, version == 1]] {
+        complete = not hosted_dataset_enabled() or bool([root.shared -->[?:HostedDatasetLoaded]]);
         ensure_hosted_dataset();
+        # Only a check that wrote nothing is remembered; a write may still roll back.
+        if complete { mark_seeded(key); }
         return;
     }
     if not [root.shared -->[?:Restaurant]] {

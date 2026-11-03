@@ -18,7 +18,7 @@ import time;
 import secrets;
 import hashlib;
 import json;
-import from services.qr_auth { listing_visible, merchant_operations_enabled, MERCHANT_PAUSED_MESSAGE, CLAIM_SUPPORT_MESSAGE }
+import from services.qr_auth { listing_visible, merchant_operations_enabled, place_access, MERCHANT_PAUSED_MESSAGE, CLAIM_SUPPORT_MESSAGE }
 import from datetime { datetime, timedelta }
 import from zoneinfo { ZoneInfo }
 import from services.models {
@@ -255,6 +255,9 @@ def _parse_local(text: str) -> float | None {
 
 def _span(seconds: float) -> str {
     mins = int(max(seconds, 0) // 60);
+    if mins >= 48 * 60 {
+        return f"{mins // 1440}d {(mins % 1440) // 60}h";
+    }
     if mins >= 60 {
         return f"{mins // 60}h {mins % 60}m";
     }
@@ -479,7 +482,9 @@ def build_view(
     if operations_paused { state = "suspended"; }
     (fits, reasons) = _explain(s, state, remaining, budget, window, wanted, now);
     if state == "active" {
-        tlabel = f"Until {_clock(s.end_ts)} · {_span(s.end_ts - now)} left";
+        # Past about a day the bare clock time is ambiguous; name the day too.
+        until = _clock(s.end_ts) if s.end_ts - now < 18 * 3600 else _day_clock(s.end_ts);
+        tlabel = f"Until {until} · {_span(s.end_ts - now)} left";
     } elif state == "scheduled" {
         tlabel = f"Starts {_day_clock(s.start_ts)}";
     } elif state == "expired" {
@@ -897,8 +902,9 @@ def:pub list_offers(
     mine = actor_claims(actor) if actor else {};
     show_samples = samples_visible();
     out: list[OfferView] = [];
+    access = place_access([(q.slug, q.source) for q in snap.places]);
     for p in snap.places {
-        visible = listing_visible(p.slug, p.source);
+        (visible, operations) = access[p.slug];
         paused: bool | None = None;
         context: AccessContextView | None = None;
         for s in p.offers {
@@ -915,7 +921,7 @@ def:pub list_offers(
                 if window == "today" and s.start_ts >= eod { continue; }
                 if wanted and [w for w in wanted if w not in s.dietary] { continue; }
             }
-            if paused is None { paused = not merchant_operations_enabled(p.slug); }
+            if paused is None { paused = not operations; }
             if context is None { context = _place_context(snap, p, now); }
             out.append(build_view(s, p, context, now, claim, paused, budget, window, wanted));
         }

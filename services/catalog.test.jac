@@ -69,3 +69,21 @@ test "best claim prefers live or redeemed QR claims, then the newest" {
     assert claim_status_of(expired, 100.0) == "expired";
     assert _best_id([expired, old], 100.0) == "d";
 }
+
+
+test "the seed check runs once, then again after any catalog write" {
+    with patch.dict(os.environ, _reuse()) {
+        reset_catalog_cache();
+        _ensure_seed();
+        _ensure_seed();
+        assert cache_state["seeded"] != "";
+        catalog_changed();
+        assert cache_state["seeded"] == "";
+        _ensure_seed();
+        _ensure_seed();
+        assert cache_state["seeded"] != "";
+    }
+    with patch.dict(os.environ, {"MLOCAL_CATALOG_CACHE": "off"}) {
+        _ensure_seed();
+    }
+}

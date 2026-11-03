@@ -39,6 +39,15 @@ class TransformTests(unittest.TestCase):
             self.assertEqual(volume["apps"], ["m-local"])
             self.assertEqual(volume["access_mode"], "ReadWriteOnce")
 
+    def test_native_registration_is_throttled_unless_opened_for_qa(self):
+        auth = self.staged["serve"]["auth"]
+        self.assertTrue(auth["registration_challenge"])
+        self.assertEqual(auth["registration_attempts_per_hour"], 1)
+        opened = tomllib.loads(stage_module.transform(self.original, open_registration=True))
+        self.assertNotIn("auth", opened["serve"])
+        with self.assertRaises(stage_module.StageError):
+            stage_module.transform(self.original + "\n[serve.auth]\nregistration_challenge = false\n")
+
     def test_python_pins_move_to_pypi_unchanged(self):
         self.assertEqual(self.staged["dependencies"]["pypi"], {
             k: v for k, v in self.before["dependencies"].items() if isinstance(v, str)})
@@ -46,14 +55,17 @@ class TransformTests(unittest.TestCase):
         self.assertFalse([k for k, v in self.staged["dependencies"].items() if isinstance(v, str)])
 
     def test_everything_else_is_preserved(self):
-        for key in ("serve", "jachammer", "byllm", "jacpack"):
+        for key in ("jachammer", "byllm", "jacpack"):
             self.assertEqual(self.staged.get(key), self.before.get(key))
+        serve = dict(self.staged["serve"])
+        serve.pop("auth")
+        self.assertEqual(serve, self.before["serve"])
         self.assertEqual(self.staged["project"]["jac-version"], self.before["project"]["jac-version"])
         self.assertFalse(self.staged["scale"]["admin"]["enabled"])
 
     def test_only_the_intended_lines_change_and_endings_are_kept(self):
         staged = stage_module.transform(self.original)
-        block = "".join(line + "\n" for line in stage_module.APP_BLOCK)
+        block = "".join(line + "\n" for line in stage_module.APP_BLOCK + stage_module.AUTH_BLOCK)
         self.assertIn(block, staged)
         expected = [line for line in self.original.splitlines(keepends=True)
                     if line.strip().replace(" ", "") not in ('entry-point="main"', 'kind="web-app"')]
