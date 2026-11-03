@@ -44,13 +44,23 @@ python3 scripts/hosted-backup.py pull
 (`~/.mlocal-backup/passphrase`) into a password manager**: the backups cannot be
 read without it.
 
-Then schedule the daily pull with Windows Task Scheduler (runs even when WSL is
-not open):
+Copy the tool somewhere stable (`cp scripts/hosted-backup.py ~/.mlocal-backup/`)
+and schedule the daily pull with Windows Task Scheduler. It runs at 03:37 and,
+if the PC was off or asleep, as soon as it is next available:
 
 ```powershell
-schtasks /Create /TN "M-Local backup" /SC DAILY /ST 04:30 /F `
-  /TR "wsl.exe -d Ubuntu -u <wsl user> -e bash -lc 'cd ~/m-local && python3 scripts/hosted-backup.py pull'"
+Register-ScheduledTask -TaskName 'M-Local daily backup' -Force `
+  -Action (New-ScheduledTaskAction -Execute 'C:\Windows\System32\wsl.exe' `
+    -Argument '-d Ubuntu -u <wsl user> -e bash -lc "python3 ~/.mlocal-backup/hosted-backup.py pull >> ~/.mlocal-backup/task.log 2>&1"') `
+  -Trigger (New-ScheduledTaskTrigger -Daily -At 3:37am) `
+  -Settings (New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 20))
 ```
+
+Point the action at `wsl.exe` directly: a `.cmd` wrapper started by Task
+Scheduler exited with code 1 without running anything on the test PC.
+
+The task runs only while you are signed in to Windows. A missed day is caught
+up at the next sign-in; check `backup.log` weekly.
 
 ## What `pull` does
 
@@ -97,5 +107,9 @@ private directory and the original `JAC_SERVE_AUTH_SECRET`.
   same path. The restored app served the same 397 deals with the same stock, and
   an existing student's sign-in token returned the same account and claims.
 
-Not yet shown: a pull from the hosted preview (needs the token on the host), a
-restore onto another machine, and behavior once photos or tables grow large.
+- Hosted preview, `d49e108`: the first pull took 3 s (10 tables, 8,659 rows,
+  799 KB encrypted, no plaintext emails in the file) and `verify` passed. The
+  scheduled task then ran on its own and saved a second copy.
+
+Not yet shown: a restore of a hosted backup onto another machine, and behavior
+once photos or tables grow large.
