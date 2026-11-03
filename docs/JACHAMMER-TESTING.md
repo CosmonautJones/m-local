@@ -194,6 +194,26 @@ Changes after that measurement:
 - **Seed check once per process.** Every read path ran the catalog bootstrap
   query; it now runs once and again after any catalog write.
 
+Measured on the preview after the change (`777db54`, same probe):
+
+| Callers at once | Feed loads/s, before | p50, before | Feed loads/s, paged | p50, paged |
+| --- | --- | --- | --- | --- |
+| 1 | 5.1 | 176 ms | 7.9 | 113 ms |
+| 4 | 19.7 | 187 ms | 28.4 | 122 ms |
+| 16 | 22.8 (ceiling) | 688 ms | 95.3 (not yet a ceiling) | 154 ms |
+
+The paged feed is 8.6 KB compressed instead of 58 KB. At 16 callers the time
+is mostly network round trip, so the true ceiling was not reached. One request
+in the 8-caller step took 60 s (no error); it did not recur and looks like the
+provider's gateway, which runs its own autoscaler and logged metric errors
+during the deploy.
+
+The QA run on the same build (32 students, 5 minutes, full unpaged feeds as the
+QA tool requests them) passed every scenario check; the access-control check
+now confirms native registration is refused (`CHALLENGE_REQUIRED`). Traffic:
+1,787 feeds (p50 258 ms, p95 412 ms), 1,069 offer pages (p50 125 ms), 403 claim
+attempts (p50 156 ms), 202 cancels, 161 favorites, zero server or network errors.
+
 ## What to record
 
 For each run, note the tester, phone and browser, and the result of: guest
