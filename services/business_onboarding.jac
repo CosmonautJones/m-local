@@ -8,6 +8,7 @@ import from services.promo { _lock, _unlock }
 import from services.session { _actor_id }
 import from services.onboarding { verified_account }
 import from services.qr_auth { merchant_operations_enabled, merchant_owner, MERCHANT_PAUSED_MESSAGE }
+import from services.business_review_link { notify_business_review }
 
 obj BusinessDraftView {
     has ok: bool = False, message: str = "", name: str = "", cuisine: str = "",
@@ -100,6 +101,7 @@ def:protect save_business_draft(name: str, cuisine: str, description: str, addre
             fd = _lock();
             try { raw = persist_draft(_actor_id(), fields); }
             finally { _unlock(fd); }
+            notify_business_review(_actor_id());
             return _draft_view(raw, "Submitted for review. Once approved, you can publish and manage your offers.");
         }
         raw = activate_business_listing(_actor_id(), fields);

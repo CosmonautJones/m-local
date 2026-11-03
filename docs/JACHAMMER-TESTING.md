@@ -49,10 +49,10 @@ docstring and `tests/tooling/test_jachammer_stage.py`.
 3. Claim an offer: enter the U-M email, type the emailed code, and get a QR pass.
 4. Reload or come back later and find the saved pass.
 
-**Merchants.** Self-service business approval needs the host command in
-[BUSINESS-APPROVAL.md](BUSINESS-APPROVAL.md), and JacHammer has no shell into
-the app pod, so new businesses stay at "awaiting approval" on this host. To test
-the merchant side, attach a tester to one of the fictional sample restaurants:
+**Merchants.** A business that signs up is approved from the emailed review
+link (see Known gaps and [BUSINESS-APPROVAL.md](BUSINESS-APPROVAL.md)). To test
+the merchant side without a real business, attach a tester to one of the
+sample restaurants:
 
 1. The tester signs in once as a business with their own email.
 2. They send their account ID. On a computer, open the test site signed in,
@@ -234,11 +234,20 @@ delivery), #46 (redeemed moment) and #50 (phone QA).
   more QA accounts needs `JACHAMMER_OPEN_REGISTRATION=1 bash
   scripts/jachammer-deploy.sh` (refused with `--prod`). Running the repository's
   restricted gateway in front of the app would close it fully (#40).
-- **No self-service business approval** (see above).
+- **Business approval by email.** With `MLOCAL_OPERATOR_EMAIL` and
+  `MLOCAL_PUBLIC_URL` set, each new business submission emails the operator an
+  approve link ([BUSINESS-APPROVAL.md](BUSINESS-APPROVAL.md)). Suspension still
+  needs the host command, which JacHammer cannot run.
+- **Backups are pulled to the operator's PC** once a day
+  ([HOSTED-BACKUPS.md](HOSTED-BACKUPS.md)); JacHammer's own backups remain
+  unconfirmed (#45).
+- **Sign-in email limits.** `MLOCAL_MAIL_DAILY_CAP` / `MLOCAL_MAIL_HOURLY_CAP`
+  (defaults 300 and 60) cap codes for the whole site. Resend's free plan stops at
+  100 emails a day, so the preview sets 90 a day; raise both after upgrading the
+  Resend plan. Sessions last 30 days on this host, so a student needs about one
+  code a month.
 - **Rate limits** use the app's own per-email limits only; the repository's
   per-IP gateway limits are not in front of this host.
-- **Backups** of JacHammer's volumes and PostgreSQL are not yet confirmed with
-  the provider (issue #45). Treat test data as disposable.
 - **Package format.** JacHammer requires PyPI pins under `[dependencies.pypi]`,
   which pinned 0.37.23 does not read. Pillow still installs with the runtime;
   psycopg does not, which only matters for the opt-in SQL proof modes.

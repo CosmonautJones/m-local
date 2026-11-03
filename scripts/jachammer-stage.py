@@ -14,6 +14,7 @@ so they are written only into a staged copy:
 * One request thread per process, so mutations are not interleaved.
 * Persistent volumes for private onboarding state (MLOCAL_ONBOARDING_DIR lives
   under /srv/m-local) and uploaded photos (assets/photos).
+* Sign-in sessions last 30 days instead of Jac's default 7.
 * Jac's native `/user/register` is throttled to one attempt an hour behind a
   proof-of-work challenge (`[serve.auth]`). M-Local never uses it: accounts are
   made by the email-code flow inside the server. JacHammer's gateway cannot
@@ -74,13 +75,16 @@ APP_BLOCK = [
     'access_mode = "ReadWriteOnce"',
     "",
 ]
-AUTH_BLOCK = [
-    "[serve.auth]",
+# Students sign in by email code; a 30-day session means one code a month
+# instead of one a week (log out still ends it at any time).
+SESSION_LINES = ["[serve.auth]", "token_ttl_days = 30"]
+REGISTRATION_LINES = [
     "registration_challenge = true",
     "registration_attempts_per_hour = 1",
     "registration_challenges_per_10_minutes = 2",
-    "",
 ]
+AUTH_BLOCK = SESSION_LINES + REGISTRATION_LINES + [""]
+OPEN_AUTH_BLOCK = SESSION_LINES + [""]
 
 
 class StageError(Exception):
@@ -107,7 +111,7 @@ def transform(text: str, open_registration: bool = False) -> str:
             if name.startswith("apps.") or name in ("dependencies.pypi", "serve.auth"):
                 raise StageError(f"jac.toml already declares [{name}]; refusing to stage over it.")
             if name == "scale.admin" and not seen["inserted"]:
-                out.extend(entry + "\n" for entry in APP_BLOCK + ([] if open_registration else AUTH_BLOCK))
+                out.extend(entry + "\n" for entry in APP_BLOCK + (OPEN_AUTH_BLOCK if open_registration else AUTH_BLOCK))
                 seen["inserted"] = True
             if name == "dependencies":
                 out.append(line.replace("[dependencies]", "[dependencies.pypi]", 1))

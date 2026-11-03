@@ -36,6 +36,9 @@ import from services.foryou {
 }
 import from services.onboarding { request_email_code, verify_email_code }
 import from services.business_onboarding { get_business_draft, import_business_website, save_business_draft }
+import from services.business_review_link { review_link_details, approve_from_review_link }
+# Operator-only, token-authorized; registered here so the server exposes it.
+import from services.operations { download_backup }
 import from services.account_profile { get_account_profile, save_account_profile }
 import from services.analytics { merchant_insights, local_activity }
 import from services.business_profile { get_business_profile }
@@ -68,6 +71,8 @@ import from .client.offer_filters { OfferFilters }
 import from .client.ui { BrandLogo, UiFoundation, ThemeControl, NavIcon, StockBar }
 import from "./client/theme.mjs" { createThemeStore }
 import from .client.business_profile { BusinessProfile }
+import from .client.business_review { BusinessReview }
+import from "./client/review-link.mjs" { takeReviewToken }
 import from "./client/offer-image.jsx" { OfferImage }
 import from "./client/photo-picker.jsx" { PhotoPicker }
 import from services.photos { upload_business_photo, import_business_photo }
@@ -261,7 +266,8 @@ def OfferCard(o: OfferView, onOpen: any) -> JsxElement {
 
 
 def:pub app -> JsxElement {
-    has tab: str = "discover",
+    has reviewToken: str = takeReviewToken(),
+        tab: str = "discover",
         session: SessionView | None = None,
         sessionReady: bool = False,
         audience: str = "",
@@ -1195,6 +1201,13 @@ def:pub app -> JsxElement {
         </Pressable>;
     }
 
+    if reviewToken {
+        return <View style={[styles.screen, {"height": viewport.height}]}><UiFoundation />
+            <ScrollView style={[styles.scroll, {"height": viewport.height}]}>
+                <BusinessReview token={reviewToken} getDetails={review_link_details} approve={approve_from_review_link} onDone={lambda { reviewToken = ""; }} />
+            </ScrollView>
+        </View>;
+    }
     if not sessionReady {
         return <View style={[styles.screen, {"height": viewport.height}]}><UiFoundation /><View style={styles.empty}><Text style={styles.subtitle}>Opening M-Local...</Text></View></View>;
     }
