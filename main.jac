@@ -72,6 +72,8 @@ import from .client.ui { BrandLogo, UiFoundation, ThemeControl, NavIcon, StockBa
 import from "./client/theme.mjs" { createThemeStore }
 import from .client.business_profile { BusinessProfile }
 import from .client.business_review { BusinessReview }
+import from .client.legal { LegalPage }
+import from "./client/legal-route.jsx" { useLegalRoute, leaveLegal }
 import from "./client/review-link.mjs" { takeReviewToken }
 import from "./client/offer-image.jsx" { OfferImage }
 import from "./client/photo-picker.jsx" { PhotoPicker }
@@ -341,6 +343,7 @@ def:pub app -> JsxElement {
         pickRange: str = "";
 
     viewport = useWindowDimensions();
+    legalPage = useLegalRoute();
     useFeedRefresh({
         "enabled": sessionReady and audience == "student" and not authOpen and tab == "discover" and selected == "" and not tastesOpen and not profileOpen,
         "onRefresh": lambda { return refresh(); },
@@ -1201,6 +1204,11 @@ def:pub app -> JsxElement {
         </Pressable>;
     }
 
+    if legalPage {
+        return <View style={[styles.screen, {"height": viewport.height}]}><UiFoundation />
+            <ScrollView style={[styles.scroll, {"height": viewport.height}]}><LegalPage page={legalPage} onBack={lambda { leaveLegal(); }} /></ScrollView>
+        </View>;
+    }
     if reviewToken {
         return <View style={[styles.screen, {"height": viewport.height}]}><UiFoundation />
             <ScrollView style={[styles.scroll, {"height": viewport.height}]}>
