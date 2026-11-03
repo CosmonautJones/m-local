@@ -475,3 +475,10 @@ test "a limited feed is a prefix of the full feed and keeps the caller's live ho
     assert len(guest.items) == 1 and guest.matching_deals >= 1;
     assert held_at >= 0;
 }
+
+test "feed limit from HTTP accepts strings, ints and junk without failing" {
+    assert feed_limit(0) == 0 and feed_limit(40) == 40;
+    assert feed_limit("40") == 40 and feed_limit(" 80 ") == 80;
+    assert feed_limit("") == 0 and feed_limit(None) == 0;
+    assert feed_limit("-5") == 0 and feed_limit("abc") == 0 and feed_limit(-3) == 0;
+}

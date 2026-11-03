@@ -526,7 +526,15 @@ limit > 0 returns the first that many (plus the caller's live holds);
 matching_deals says how many match in total. 0 returns every deal."""
 def:pub home_feed(price_range: str = "", window: str = "any", diets: str = "", limit: int = 0) -> HomeView {
     _ensure_seed();
-    return _home(_actor_id(), price_range, window, diets, time.time(), max(0, limit));
+    return _home(_actor_id(), price_range, window, diets, time.time(), feed_limit(limit));
+}
+
+
+"""HTTP callers can send limit as a string (or omit it); anything that is not a
+positive whole number means "no limit"."""
+def feed_limit(limit: any) -> int {
+    text = str(limit if limit is not None else "").strip();
+    return int(text) if text.isdigit() else 0;
 }
 
 
