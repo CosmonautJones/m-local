@@ -1,11 +1,12 @@
 """Application identity comes only from the authenticated Jac request root."""
 
 import from services.models { Restaurant }
-import from services.qr_auth { merchant_owner, merchant_operations_enabled }
+import from services.qr_auth { merchant_owner, merchant_owners, merchant_operations_enabled }
 import from services.qr_catalog { _ensure_seed }
 import from services.onboarding { verified_account, is_demo_student }
 import from services.onboarding_support { account_name }
 import from services.hosted_dataset { hosted_dataset_enabled }
+import from services.catalog { catalog_snapshot }
 
 obj SessionView {
     has authenticated: bool = False,
@@ -29,9 +30,17 @@ def _merchant_for_actor(actor: str) -> Restaurant | None {
     if not actor {
         return None;
     }
-    for r in [root.shared -->[?:Restaurant]] {
-        if merchant_owner(r.slug) == actor {
-            return r;
+    # Slugs come from the cached public catalog (every restaurant-creating write
+    # runs under the mutation lock and invalidates it). Ownership is still
+    # checked live, and the owned restaurant is returned as its live node.
+    places = catalog_snapshot().places;
+    owners = merchant_owners([p.slug for p in places]);
+    for p in places {
+        if owners[p.slug] == actor {
+            found = jobj(p.id);
+            if isinstance(found, Restaurant) {
+                return found;
+            }
         }
     }
     return None;

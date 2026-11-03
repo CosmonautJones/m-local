@@ -18,7 +18,7 @@ import time;
 import secrets;
 import hashlib;
 import json;
-import from services.qr_auth { listing_visible, merchant_operations_enabled, MERCHANT_PAUSED_MESSAGE, CLAIM_SUPPORT_MESSAGE }
+import from services.qr_auth { listing_visible, merchant_operations_enabled, place_access, MERCHANT_PAUSED_MESSAGE, CLAIM_SUPPORT_MESSAGE }
 import from datetime { datetime, timedelta }
 import from zoneinfo { ZoneInfo }
 import from services.models {
@@ -48,7 +48,22 @@ import from services.onboarding { student_can_claim }
 import from services.email_codes { store, mutation_lock_path }
 import from services.release_events { record_outcome }
 import from services.context_models { AccessContextView }
-import from services.context { get_access_context }
+import from services.context { get_access_context, access_context_from }
+import from services.catalog {
+    OfferSrc,
+    PlaceSrc,
+    ClaimSrc,
+    CatalogSnapshot,
+    catalog_snapshot,
+    actor_claims,
+    best_claim,
+    remaining_from,
+    offer_src,
+    place_src,
+    claim_src
+}
+import from services.catalog_events { catalog_changed, offer_stock_changed, actor_claims_changed }
+import from functools { lru_cache }
 
 glob MAX_ACTIVE_HOLDS: int = 2;
 
@@ -70,7 +85,7 @@ def _lock -> int {
 }
 
 
-def _unlock(fd: int) -> None {
+def _unlock(fd: int, catalog_write: bool = True) -> None {
     try {
         # The runtime aborts and replays cold read-tier writes and conflicts.
         # Never persist the abandoned attempt while its exception unwinds.
@@ -78,6 +93,10 @@ def _unlock(fd: int) -> None {
     } finally {
         fcntl.flock(fd, fcntl.LOCK_UN);
         os.close(fd);
+        # Any locked write may have changed the public catalog: rebuild the read
+        # snapshot. Claim, cancel and redeem pass False and refresh only the
+        # affected offer's stock and the claimant's own claims instead.
+        if catalog_write { catalog_changed(); }
     }
 }
 
@@ -191,16 +210,21 @@ def _local(ts: float) -> datetime {
 }
 
 
+# Labels depend only on the timestamp and the fixed America/Detroit zone, and
+# the same offer times are formatted on every feed read.
+@lru_cache(maxsize=16384)
 def _clock(ts: float) -> str {
     return _local(ts).strftime("%-I:%M %p");
 }
 
 
+@lru_cache(maxsize=16384)
 def _day_clock(ts: float) -> str {
     return _local(ts).strftime("%a %-I:%M %p");
 }
 
 
+@lru_cache(maxsize=16384)
 def _input_fmt(ts: float) -> str {
     return _local(ts).strftime("%Y-%m-%d %H:%M");
 }
@@ -231,6 +255,9 @@ def _parse_local(text: str) -> float | None {
 
 def _span(seconds: float) -> str {
     mins = int(max(seconds, 0) // 60);
+    if mins >= 48 * 60 {
+        return f"{mins // 1440}d {(mins % 1440) // 60}h";
+    }
     if mins >= 60 {
         return f"{mins // 60}h {mins % 60}m";
     }
@@ -264,15 +291,29 @@ def _location_of(r: Restaurant) -> Location | None {
 }
 
 
+# Direct lookup instead of scanning every restaurant's offers. Same result: only
+# an Offer that a shared-catalog restaurant publishes, else None.
 def _find_offer(offer_id: str) -> Offer | None {
-    for r in [root.shared -->[?:Restaurant]] {
-        for o in [r ->:Publishes:->] {
-            if jid(o) == offer_id {
-                return o;
-            }
-        }
+    if re.fullmatch(r"[0-9a-f]{32}", offer_id or "") is None {
+        return None;
     }
-    return None;
+    try {
+        found = jobj(offer_id);
+    } except Exception {
+        return None;
+    }
+    if not isinstance(found, Offer) {
+        return None;
+    }
+    owner = _restaurant_of(found);
+    if owner is None {
+        return None;
+    }
+    wanted_slug = owner.slug;
+    if not [root.shared -->[?:Restaurant, slug == wanted_slug]] {
+        return None;
+    }
+    return found;
 }
 
 
@@ -291,7 +332,7 @@ def _owned_offer(r: Restaurant, offer_id: str) -> Offer | None {
 }
 
 
-def _claim_status(c: Redemption, now: float) -> str {
+def _claim_status(c: Redemption | ClaimSrc, now: float) -> str {
     return "expired" if c.status == "claimed" and now >= c.expires_ts else c.status;
 }
 
@@ -303,11 +344,12 @@ def _used_quantity(o: Offer, now: float) -> int {
 }
 
 
-def _remaining(o: Offer, now: float) -> int {
+def _remaining(o: Offer | OfferSrc, now: float) -> int {
     # Existing pre-QR claims cannot be attributed to authenticated principals.
     # Fail closed instead of reclaiming historical consumed/held stock. The
     # operator must reconcile that legacy offer before enabling it for new QR
     # claims; editing or pausing it never silently discards old redemptions.
+    if isinstance(o, OfferSrc) { return remaining_from(o, now); }
     if not o.qr_ready { return 0; }
     return max(o.quantity - _used_quantity(o, now), 0);
 }
@@ -321,7 +363,7 @@ def _set_claim_status(c: Redemption, status: str, now: float) {
 }
 
 
-def _state(o: Offer, now: float, remaining: int | None = None) -> str {
+def _state(o: Offer | OfferSrc, now: float, remaining: int | None = None) -> str {
     if now >= o.end_ts {
         return "expired";
     }
@@ -377,7 +419,7 @@ def _end_of_today(now: float) -> float {
 
 """Plain-language reasons + whether the offer fits all active filters."""
 def _explain(
-    o: Offer,
+    o: Offer | OfferSrc,
     state: str,
     remaining: int,
     budget: float | None,
@@ -421,6 +463,81 @@ def _explain(
 }
 
 
+"""The one OfferView builder, shared by live graph reads (_view) and cached
+catalog reads. `operations_paused` is the caller's live
+merchant_operations_enabled check; suspension is never cached."""
+def build_view(
+    s: OfferSrc,
+    p: PlaceSrc | None,
+    context: AccessContextView,
+    now: float,
+    claim: ClaimSrc | None,
+    operations_paused: bool,
+    budget: float | None = None,
+    window: str = "any",
+    wanted: list[str] = []
+) -> OfferView {
+    remaining = remaining_from(s, now);
+    state = _state(s, now, remaining);
+    if operations_paused { state = "suspended"; }
+    (fits, reasons) = _explain(s, state, remaining, budget, window, wanted, now);
+    if state == "active" {
+        # Past about a day the bare clock time is ambiguous; name the day too.
+        until = _clock(s.end_ts) if s.end_ts - now < 18 * 3600 else _day_clock(s.end_ts);
+        tlabel = f"Until {until} · {_span(s.end_ts - now)} left";
+    } elif state == "scheduled" {
+        tlabel = f"Starts {_day_clock(s.start_ts)}";
+    } elif state == "expired" {
+        tlabel = f"Ended {_day_clock(s.end_ts)}";
+    } else {
+        tlabel = f"{_day_clock(s.start_ts)} - {_clock(s.end_ts)}";
+    }
+    v = OfferView(
+        id=s.id,
+        title=s.title,
+        description=s.description,
+        restaurant=public_name(p.name) if p is not None else "",
+        image_url=p.image_url if p is not None else "",
+        offer_image_url=s.image_url,
+        cuisine=p.cuisine if p is not None else "",
+        location_id=p.loc_id if p is not None else "",
+        address=p.address if p is not None else "",
+        neighborhood=p.neighborhood if p is not None else "",
+        entrance_note=p.entrance_note if p is not None else "",
+        note_date=p.note_date if p is not None else "",
+        price=s.price_cents / 100,
+        regular_price=s.regular_price_cents / 100,
+        start_input=_input_fmt(s.start_ts),
+        end_input=_input_fmt(s.end_ts),
+        time_label=tlabel,
+        state=state,
+        remaining=remaining,
+        quantity=s.quantity,
+        eligibility=s.eligibility,
+        terms=s.terms,
+        dietary=s.dietary,
+        menu_item=s.menu_item,
+        is_demo=s.is_demo or (p is not None and p.is_demo),
+        access_context=context,
+        fits=fits,
+        reasons=reasons
+    );
+    if claim is not None {
+        v.my_claim_id = claim.id;
+        v.my_status = _claim_status(claim, now);
+        v.my_expires = _clock(claim.expires_ts);
+        v.my_expires_ts = claim.expires_ts;
+        v.my_title = claim.offer_title_snapshot;
+        v.my_price_cents = claim.price_cents_snapshot;
+        v.my_terms = claim.terms_snapshot;
+        v.my_eligibility = claim.eligibility_snapshot;
+        v.my_qr_payload = claim.qr_payload if v.my_status == "claimed" else "";
+        if operations_paused { v.claim_support_message = CLAIM_SUPPORT_MESSAGE; }
+    }
+    return v;
+}
+
+
 def _view(
     o: Offer,
     now: float,
@@ -440,64 +557,12 @@ def _view(
     } else {
         (r, loc, context) = place_context;
     }
-    remaining = _remaining(o, now);
-    state = _state(o, now, remaining);
+    place = place_src(r, loc, []) if r is not None else None;
+    s = offer_src(o, place, [o ->:Reserves:->]);
     operations_paused = r is not None and not merchant_operations_enabled(r.slug);
-    if operations_paused { state = "suspended"; }
-    (fits, reasons) = _explain(o, state, remaining, budget, window, wanted, now);
-    if state == "active" {
-        tlabel = f"Until {_clock(o.end_ts)} · {_span(o.end_ts - now)} left";
-    } elif state == "scheduled" {
-        tlabel = f"Starts {_day_clock(o.start_ts)}";
-    } elif state == "expired" {
-        tlabel = f"Ended {_day_clock(o.end_ts)}";
-    } else {
-        tlabel = f"{_day_clock(o.start_ts)} - {_clock(o.end_ts)}";
-    }
-    v = OfferView(
-        id=jid(o),
-        title=o.title,
-        description=o.description,
-        restaurant=public_name(r.name) if r else "",
-        image_url=r.image_url if r else "",
-        offer_image_url=o.image_url,
-        cuisine=r.cuisine if r else "",
-        location_id=jid(loc) if loc else "",
-        address=loc.address if loc else "",
-        neighborhood=loc.neighborhood if loc else "",
-        entrance_note=loc.entrance_note if loc else "",
-        note_date=loc.note_date if loc else "",
-        price=o.price_cents / 100,
-        regular_price=o.regular_price_cents / 100,
-        start_input=_input_fmt(o.start_ts),
-        end_input=_input_fmt(o.end_ts),
-        time_label=tlabel,
-        state=state,
-        remaining=remaining,
-        quantity=o.quantity,
-        eligibility=o.eligibility,
-        terms=o.terms,
-        dietary=o.dietary,
-        menu_item=o.menu_item,
-        is_demo=o.is_demo or (r is not None and r.is_demo),
-        access_context=context,
-        fits=fits,
-        reasons=reasons
-    );
     c = saved_claim if saved_claim is not None else _my_claim(o, actor_id, now);
-    if c is not None {
-        v.my_claim_id = jid(c);
-        v.my_status = _claim_status(c, now);
-        v.my_expires = _clock(c.expires_ts);
-        v.my_expires_ts = c.expires_ts;
-        v.my_title = c.offer_title_snapshot;
-        v.my_price_cents = c.price_cents_snapshot;
-        v.my_terms = c.terms_snapshot;
-        v.my_eligibility = c.eligibility_snapshot;
-        v.my_qr_payload = c.qr_payload if v.my_status == "claimed" else "";
-        if operations_paused { v.claim_support_message = CLAIM_SUPPORT_MESSAGE; }
-    }
-    return v;
+    return build_view(s, place, context, now, claim_src(c, s.id) if c is not None else None,
+        operations_paused, budget, window, wanted);
 }
 
 
@@ -512,16 +577,12 @@ def _my_claim(o: Offer, actor_id: str, now: float) -> Redemption | None {
 }
 
 
+# Live and authoritative (runs under the mutation lock): the same claims as the
+# old per-offer walk, fetched by one chained query instead of one per offer.
 def _active_hold_count(actor_id: str, now: float) -> int {
     wanted_actor = actor_id;
-    count = 0;
-    for restaurant in [root.shared -->[?:Restaurant]] {
-        for offer in [restaurant ->:Publishes:->] {
-            count += len([claim for claim in [offer ->:ClaimedAs:->[?:Redemption, actor_id == wanted_actor]]
-                if claim.actor_id == actor_id and claim.qr_payload and _claim_status(claim, now) == "claimed"]);
-        }
-    }
-    return count;
+    return len([claim for claim in [root.shared -->[?:Restaurant] ->:Publishes:-> ->:ClaimedAs:->[?:Redemption, actor_id == wanted_actor]]
+        if claim.actor_id == actor_id and claim.qr_payload and _claim_status(claim, now) == "claimed"]);
 }
 
 
@@ -818,8 +879,16 @@ def _portal(r: Restaurant, now: float, message: str = "") -> MerchantView {
 
 # --------------------------------------------------------------- endpoints ---
 
+"""Access context for one cached place, evaluated with the request's clock."""
+def _place_context(snap: CatalogSnapshot, p: PlaceSrc, now: float) -> AccessContextView {
+    if not p.has_location { return AccessContextView(); }
+    return access_context_from(snap.notices_at.get(p.loc_id, []), p.loc_id, now);
+}
+
+
 """Student discovery: filter by budget ($), time window (now|today|any) and
-comma-separated dietary tags. Paused and ended offers are hidden."""
+comma-separated dietary tags. Paused and ended offers are hidden. Reads the
+cached catalog; visibility and suspension stay live per request."""
 def:pub list_offers(
     max_price: str = "", window: str = "any", diets: str = ""
 ) -> list[OfferView] {
@@ -828,25 +897,33 @@ def:pub list_offers(
     budget = _parse_budget(max_price);
     wanted = _parse_diets(diets);
     eod = _end_of_today(now);
+    snap = catalog_snapshot();
+    actor = _actor_id();
+    mine = actor_claims(actor) if actor else {};
+    show_samples = samples_visible();
     out: list[OfferView] = [];
-    for r in [root.shared -->[?:Restaurant]] {
-        visible = listing_visible(r.slug, r.source);
-        for o in [r ->:Publishes:->] {
-            if _sample_offer(o) and not samples_visible() { continue; }
-            v = _view(o, now, _actor_id(), budget, window, wanted);
+    access = place_access([(q.slug, q.source) for q in snap.places]);
+    for p in snap.places {
+        (visible, operations) = access[p.slug];
+        paused: bool | None = None;
+        context: AccessContextView | None = None;
+        for s in p.offers {
+            if (s.is_demo or p.is_demo) and not show_samples { continue; }
+            claim = best_claim(mine.get(s.id, []), now);
             # A saved live QR remains reachable after reload even when the
             # merchant pauses/edits an offer or student changes discovery filters.
-            if v.my_status == "claimed" {
-                out.append(v);
-                continue;
+            held = claim is not None and _claim_status(claim, now) == "claimed";
+            if not held {
+                if not visible { continue; }
+                if s.status == "paused" or now >= s.end_ts { continue; }
+                if budget is not None and s.price_cents / 100 > budget { continue; }
+                if window == "now" and s.start_ts > now { continue; }
+                if window == "today" and s.start_ts >= eod { continue; }
+                if wanted and [w for w in wanted if w not in s.dietary] { continue; }
             }
-            if not visible { continue; }
-            if o.status == "paused" or now >= o.end_ts { continue; }
-            if budget is not None and o.price_cents / 100 > budget { continue; }
-            if window == "now" and o.start_ts > now { continue; }
-            if window == "today" and o.start_ts >= eod { continue; }
-            if wanted and [w for w in wanted if w not in o.dietary] { continue; }
-            out.append(v);
+            if paused is None { paused = not operations; }
+            if context is None { context = _place_context(snap, p, now); }
+            out.append(build_view(s, p, context, now, claim, paused, budget, window, wanted));
         }
     }
     rank = {"active": 0, "scheduled": 1, "sold out": 2};
@@ -862,6 +939,43 @@ def:pub get_offer(
     diets: str = ""
 ) -> OfferView | None {
     _ensure_seed();
+    snap = catalog_snapshot();
+    s = snap.offers.get(offer_id);
+    p = snap.place_of.get(offer_id);
+    if s is None or p is None {
+        return _get_offer_live(offer_id, max_price, window, diets);
+    }
+    if (s.is_demo or p.is_demo) and not samples_visible() {
+        return None;
+    }
+    now = time.time();
+    actor = _actor_id();
+    claim = best_claim(actor_claims(actor).get(offer_id, []), now) if actor else None;
+    paused = not merchant_operations_enabled(p.slug);
+    v = build_view(s, p, _place_context(snap, p, now), now, claim, paused,
+        _parse_budget(max_price), window, _parse_diets(diets));
+    # A live hold stays readable. A redeemed claim does not keep a paused or ended offer public.
+    if v.my_status == "claimed" {
+        return v;
+    }
+    # During suspension the authenticated claimant may reopen their own saved
+    # snapshot/history. No other account bypasses the hidden public listing.
+    if v.my_claim_id and paused { return v; }
+    if not listing_visible(p.slug, p.source) { return None; }
+    if s.status == "paused" or now >= s.end_ts {
+        return None;
+    }
+    return v;
+}
+
+
+"""Live-graph detail read, used only when the snapshot does not hold the offer yet."""
+def _get_offer_live(
+    offer_id: str,
+    max_price: str = "",
+    window: str = "any",
+    diets: str = ""
+) -> OfferView | None {
     o = _find_offer(offer_id);
     if o is None or (_sample_offer(o) and not samples_visible()) {
         return None;
@@ -869,12 +983,9 @@ def:pub get_offer(
     now = time.time();
     v = _view(o, now, _actor_id(), _parse_budget(max_price), window, _parse_diets(diets));
     r = _restaurant_of(o);
-    # A live hold stays readable. A redeemed claim does not keep a paused or ended offer public.
     if v.my_status == "claimed" {
         return v;
     }
-    # During suspension the authenticated claimant may reopen their own saved
-    # snapshot/history. No other account bypasses the hidden public listing.
     if v.my_claim_id and r is not None and not merchant_operations_enabled(r.slug) { return v; }
     if r is None or not listing_visible(r.slug, r.source) { return None; }
     if o.status == "paused" or now >= o.end_ts {
@@ -894,7 +1005,11 @@ def:protect claim_offer(offer_id: str) -> ActionResult {
             result = _claim(offer_id, _actor_id(), time.time());
         }
     } finally {
-        _unlock(fd);
+        _unlock(fd, False);
+    }
+    if result.ok {
+        offer_stock_changed(offer_id);
+        actor_claims_changed(_actor_id());
     }
     record_outcome("claim", result.ok);
     return result;
@@ -906,7 +1021,11 @@ def:protect cancel_claim(offer_id: str) -> ActionResult {
     try {
         result = _cancel(offer_id, _actor_id(), time.time());
     } finally {
-        _unlock(fd);
+        _unlock(fd, False);
+    }
+    if result.ok {
+        offer_stock_changed(offer_id);
+        actor_claims_changed(_actor_id());
     }
     return result;
 }
@@ -1084,10 +1203,30 @@ def:protect redeem_claim(qr_payload: str) -> ActionResult {
             result = _redeem(r, qr_payload, time.time());
         }
     } finally {
-        _unlock(fd);
+        _unlock(fd, False);
     }
+    if result.ok { _note_redeemed(result.claim_id); }
     record_outcome("redeem", result.ok);
     return result;
+}
+
+
+"""Refresh the redeemed offer's public stock and the student's own claim index."""
+def _note_redeemed(claim_id: str) {
+    try {
+        c = jobj(claim_id);
+    } except Exception {
+        catalog_changed();
+        return;
+    }
+    if not isinstance(c, Redemption) {
+        catalog_changed();
+        return;
+    }
+    actor_claims_changed(c.actor_id);
+    for o in [c <-:ClaimedAs:<-] {
+        offer_stock_changed(jid(o));
+    }
 }
 
 

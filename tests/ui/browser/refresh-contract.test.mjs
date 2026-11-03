@@ -73,11 +73,11 @@ test('filter dropdown applies an actual maximum price, time and diet, then clear
   await until(()=>option('Vegan').checked);
   ui.click('Show deals');
   await until(()=>ui.calls.some(c=>c.name==='home_feed'&&c.body.price_range==='0-8'));
-  assert.deepEqual(ui.calls.filter(c=>c.name==='home_feed').at(-1).body,{price_range:'0-8',window:'now',diets:'vegan'});
+  assert.deepEqual(ui.calls.filter(c=>c.name==='home_feed').at(-1).body,{price_range:'0-8',window:'now',diets:'vegan',limit:40});
   assert.equal(ui.document.querySelector('[aria-label="Maximum price"]'),null);
   trigger().click();await until(()=>ui.find('Clear all'));ui.click('Clear all');
   await until(()=>ui.calls.filter(c=>c.name==='home_feed').at(-1).body.price_range==='');
-  assert.deepEqual(ui.calls.filter(c=>c.name==='home_feed').at(-1).body,{price_range:'',window:'any',diets:''});
+  assert.deepEqual(ui.calls.filter(c=>c.name==='home_feed').at(-1).body,{price_range:'',window:'any',diets:'',limit:40});
   assert.deepEqual(ui.errors,[]);
  }finally{ui.close();}
 });

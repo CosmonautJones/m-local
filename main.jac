@@ -76,7 +76,7 @@ import from services.photos { upload_business_photo, import_business_photo }
 glob styles = buildStyles(C);
 
 def Chip(label: str, on: bool, onPress: any) -> JsxElement {
-    return <Pressable accessibilityRole="button" accessibilityState={{"selected": on}} style={[styles.chip, styles.chipOn if on else {}]} onPress={onPress}>
+    return <Pressable accessibilityRole="checkbox" accessibilityState={{"checked": on, "selected": on}} style={[styles.chip, styles.chipOn if on else {}]} onPress={onPress}>
         <Text style={[styles.chipText, styles.chipTextOn if on else {}]}>{label}</Text>
     </Pressable>;
 }
@@ -280,6 +280,7 @@ def:pub app -> JsxElement {
         accountOpen: bool = False,
         sessionEpoch: Ref[int] = Ref(0),
         offerRequest: Ref[int] = Ref(0),
+        feedLimit: Ref[int] = Ref(40),
         detailRequest: Ref[int] = Ref(0),
         busyRef: Ref[bool] = Ref(False),
         authRef: Ref[bool] = Ref(False),
@@ -416,7 +417,7 @@ def:pub app -> JsxElement {
         loading = True;
         loadError = "";
         try {
-            found = validateHomeFeed(await home_feed(price, win, ",".join(ds)));
+            found = validateHomeFeed(await home_feed(price, win, ",".join(ds), feedLimit.current or 40));
             if found and requestId == offerRequest.current and epoch == sessionEpoch.current {
                 if not found.show_samples {
                     found.items = [item for item in found.items if not item.offer.is_demo];
@@ -549,7 +550,13 @@ def:pub app -> JsxElement {
 
     def applyFilters(price: str, win: str, selectedDiets: list[str]) {
         maxPrice = price; timeWin = win; diets = selectedDiets;
+        feedLimit.current = 40;
         loadOffers(price, win, selectedDiets);
+    }
+
+    def showMoreDeals() {
+        feedLimit.current = (feedLimit.current or 40) + 40;
+        refresh();
     }
 
     async def openOffer(oid: str) {
@@ -895,7 +902,7 @@ def:pub app -> JsxElement {
         return <View style={styles.content}>
             <View style={styles.header}>
                 <Text style={styles.title}>Local offers</Text>
-                {(<Text style={styles.small}>Sample offers · fictional businesses</Text>) if session and session.is_demo else <View style={styles.hidden}/>}
+                {(<Text style={styles.small}>Sample offers · invented deals, not real promotions</Text>) if session and session.is_demo else <View style={styles.hidden}/>}
             </View>
             {(<View testID="saved-claims" style={{"gap": 8}}>
                 <Text style={styles.h2}>My claims</Text>
@@ -935,7 +942,8 @@ def:pub app -> JsxElement {
                 </View>
             ) if not offers or not home else <View style={{"gap": 12}}>
                 {[<DealCard key={i.offer.id} item={i} onOpen={lambda { openOffer(i.offer.id); }} onBusiness={lambda { openBusiness(i.place); }} onHeart={lambda { toggleHeart(i); }} canHeart={not signedIn or studentSession} /> for i in home.items]}
-                <Text style={styles.small}>{"Showing " + str(len(home.items)) + (" deal." if len(home.items) == 1 else " deals.") + " Your tastes change the order, never what you can see."}</Text>
+                {(<Pressable accessibilityRole="button" style={styles.btnGhost} disabled={loading} onPress={lambda { showMoreDeals(); }}><Text style={styles.btnGhostText}>{"Show more deals (" + str(home.matching_deals - len(home.items)) + " more)"}</Text></Pressable>) if home.matching_deals > len(home.items) else <View style={styles.hidden} />}
+                <Text style={styles.small}>{"Showing " + str(len(home.items)) + (" deal" if len(home.items) == 1 else " deals") + (" of " + str(home.matching_deals) + "." if home.matching_deals > len(home.items) else ".") + " Your tastes change the order, never what you can see."}</Text>
             </View>}
         </View>;
     }
@@ -1008,7 +1016,7 @@ def:pub app -> JsxElement {
                     <Text style={styles.claimBody}>{o.my_terms or "No additional terms."}</Text>
                     {(<Message text={o.claim_support_message} good={False} />) if o.claim_support_message else <View style={styles.hidden} />}
                     <Text style={styles.claimBody}>{"For: " + o.my_eligibility}</Text>
-                    <Text style={styles.claimBody}>{"Hold expires " + o.my_expires + ". Unused holds release automatically."}</Text>
+                    {(<Text style={styles.claimBody}>{"Hold expires " + o.my_expires + ". Unused holds release automatically."}</Text>) if o.my_status == "claimed" else <View style={styles.hidden} />}
                 </View>
             ) if o.my_claim_id else <View style={styles.hidden} />}
             <Message text={claimMsg} good={claimOk} />

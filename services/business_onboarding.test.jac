@@ -1,10 +1,11 @@
 """Business approval gates public visibility; later saves update one owned restaurant."""
+import json;
 import tempfile;
 import from jaclang { JacRuntime as Jac }
 import from unittest.mock { patch }
 import from services.models { Restaurant, HasLocation }
 import from services.session { _merchant_for_actor }
-import from services.qr_auth { merchant_owner }
+import from services.qr_auth { merchant_owner, merchant_owners, listing_visible, place_access }
 import from services.onboarding_support { prepare_business_activation, finish_business_activation }
 import from services.email_codes { business_revision }
 import from services.promo { update_profile }
@@ -390,3 +391,65 @@ test "model facts have no image field and cannot overwrite the imported logo" {
         }
     }
 }
+
+
+def _approved_listing(actor: str, name: str) {
+    store().remember_account(actor, name.lower().replace(" ", "") + "@fixture.test", "business", "Owner");
+    store().save_draft(actor, {"name": name, "address": "123 Test St"});
+    store().approve_business(actor, "Fixture reviewer", "Verified fixture business authority", business_revision(store().draft(actor)));
+    _ = finish_business_activation(actor, prepare_business_activation(actor, {"name": name, "address": "123 Test St"}));
+}
+
+
+def _access_matches(places: list[tuple[str, str]]) {
+    batched = place_access(places);
+    owners = merchant_owners([p[0] for p in places]);
+    for p in places {
+        (slug, source) = p;
+        assert owners[slug] == merchant_owner(slug), slug;
+        assert batched[slug] == (listing_visible(slug, source), merchant_operations_enabled(slug)), slug;
+    }
+}
+
+
+test "batched place access gives the same answers as the per-place checks" {
+    active = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
+    suspended = "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2";
+    provisioned = "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3";
+    overridden = "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4";
+    places = [
+        ("business-" + active, "business_signup"),
+        ("business-" + suspended, "business_signup"),
+        ("business-" + overridden, "business_signup"),
+        ("business-" + "e5" * 16, "business_signup"),
+        ("provisioned-cafe", "seed"),
+        ("suspended-provisioned", "seed"),
+        ("plain-sample", "seed"),
+        ("plain-sample-signup", "business_signup")
+    ];
+    with tempfile.TemporaryDirectory() as directory {
+        owners_env = {"provisioned-cafe": provisioned, "suspended-provisioned": "f6" * 16, "business-" + overridden: "a7" * 16};
+        with patch.dict(os.environ, {"MLOCAL_ONBOARDING_DIR": directory, "MLOCAL_MERCHANT_OWNERS": json.dumps(owners_env)}) {
+            for actor in [active, suspended, overridden] { _approved_listing(actor, "Cafe " + actor[:4]); }
+            store().change_business_status(suspended, "suspended", "Fixture operator", "Fixture complaint", 0, "1" * 32);
+            store().change_business_status("f6" * 16, "suspended", "Fixture operator", "Fixture complaint", 0, "2" * 32);
+            _access_matches(places);
+            access = place_access(places);
+            assert access["business-" + active] == (True, True);
+            assert access["business-" + suspended] == (False, False);
+            assert access["suspended-provisioned"] == (False, False);
+            assert access["plain-sample"] == (True, True);
+            assert access["plain-sample-signup"] == (False, True);
+            # Suspension is read live: reinstating shows on the very next call.
+            store().change_business_status(suspended, "active", "Fixture operator", "Resolved", 1, "3" * 32);
+            assert place_access(places)["business-" + suspended] == (True, True);
+            _access_matches(places);
+        }
+        # An unreadable private store confers no ownership and pauses owned places.
+        with patch.dict(os.environ, {"MLOCAL_ONBOARDING_DIR": directory + "/missing", "MLOCAL_MERCHANT_OWNERS": json.dumps(owners_env)}) {
+            _access_matches(places);
+            assert place_access(places)["provisioned-cafe"] == (False, False);
+        }
+    }
+}
+

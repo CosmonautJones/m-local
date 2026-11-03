@@ -37,6 +37,10 @@ cd -- "$test_root"
 # Isolated workspaces need the declared Python dependencies too.
 "$JAC_BIN" install --no-npm
 export JAC_TEST_STRICT=1
+# In-process suites write the graph directly (no mutation lock), so never reuse
+# a cached catalog snapshot between steps. services/catalog.test.jac turns
+# reuse back on to cover invalidation.
+export MLOCAL_CATALOG_CACHE=off
 core_paths=(services/promo.test.jac services/qr.test.jac services/session.test.jac services/business_onboarding.test.jac
     services/taste.test.jac services/taste_sandbox.test.jac services/foryou.test.jac
     services/nearby.test.jac services/business_profile.test.jac services/hosted_dataset.test.jac services/dataset_activity.test.jac)

@@ -175,6 +175,15 @@ test "urgent deals say so" {
 }
 
 
+test "sold-out deals get no urgency label or boost" {
+    gone = score(_deal("a", "p", ["pizza"], remaining=0), Taste());
+    gone_soon = score(_deal("b", "p", ["pizza"], hours=1.0, remaining=0), Taste());
+    calm = score(_deal("c", "p", ["pizza"]), Taste());
+    assert "Almost gone" not in gone.reasons and "Ending soon" not in gone_soon.reasons;
+    assert gone.score == calm.score and gone_soon.score == calm.score;
+}
+
+
 test "when matches run out, the rest follows by fit, not by chance" {
     taste = Taste(categories=["sushi"], diets=["vegetarian"], price_range="under5");
     menu = [
@@ -192,4 +201,103 @@ test "when matches run out, the rest follows by fit, not by chance" {
     assert [r.slot for r in long][3] == "explore" and [r.slot for r in long][7] == "explore";
     assert long[3].candidate.offer_id == "fit-none";
     assert len(set(_ids(long))) == len(many);
+}
+# The pre-optimization ordering loop, kept verbatim as a reference.
+def _legacy_build_feed(
+    candidates: list[Candidate], taste: Taste, salt: str, explore_every: int
+) -> list[Ranked] {
+    if salt {
+        for c in candidates {
+            c.rotation = rotation_for(salt, c.offer_id);
+        }
+    }
+    ranked = [score(c, taste) for c in candidates];
+    if not has_preferences(taste) {
+        return _by_band(ranked);
+    }
+    matches = _by_score([r for r in ranked if r.matched]);
+    others = _by_exposure([r for r in ranked if not r.matched]);
+    if not matches and not [r for r in ranked if r.candidate.place in taste.favorites] {
+        return _by_band(ranked);
+    }
+    feed: list[Ranked] = [];
+    pinned_places: list[str] = [];
+    for r in _by_score(ranked) {
+        place = r.candidate.place;
+        if len(pinned_places) < PINNED_FAVORITES and place in taste.favorites and place not in pinned_places {
+            pinned_places.append(place);
+            r.slot = "favorite";
+            feed.append(r);
+        }
+    }
+    matches = [r for r in matches if r.slot != "favorite"];
+    others = [r for r in others if r.slot != "favorite"];
+    # Two orders over the same leftovers: least-shown first for the exploration
+    # slots, best fit first for everything else once the matches run out.
+    by_fit = _by_band(others);
+    used: list[str] = [];
+    while matches or len(used) < len(others) {
+        position = len(feed) + 1;
+        explore_turn = explore_every > 0 and position % explore_every == 0;
+        left = [r for r in others if r.candidate.offer_id not in used];
+        if left and explore_turn {
+            pick = left[0];
+            pick.slot = "explore";
+            pick.reasons = ["Something different"] + pick.reasons;
+            used.append(pick.candidate.offer_id);
+            feed.append(pick);
+        } elif matches {
+            pick = matches.pop(0);
+            pick.slot = "match";
+            feed.append(pick);
+        } else {
+            pick = [r for r in by_fit if r.candidate.offer_id not in used][0];
+            pick.slot = "more";
+            used.append(pick.candidate.offer_id);
+            feed.append(pick);
+        }
+    }
+    return feed;
+}
+
+
+def _fingerprint(feed: list[Ranked]) -> list[tuple[str, str, list[str]]] {
+    return [(r.candidate.offer_id, r.slot, list(r.reasons)) for r in feed];
+}
+
+
+test "linear feed ordering picks exactly what the original loop picked" {
+    import random;
+    cats = ["pizza", "coffee", "sushi", "bowls", "tacos", "dessert"];
+    diets = ["vegetarian", "vegan", "gluten-free", "halal"];
+    for seed in range(300) {
+        rng = random.Random(seed);
+        n = rng.randint(0, 60);
+        def make() -> list[Candidate] {
+            r2 = random.Random(seed * 7919);
+            out: list[Candidate] = [];
+            for i in range(n) {
+                out.append(Candidate(
+                    offer_id=f"o{i}", place=f"p{r2.randint(0, 12)}", title=f"t{i}",
+                    categories=r2.sample(cats, r2.randint(0, 2)),
+                    dietary=r2.sample(diets, r2.randint(0, 2)),
+                    price_cents=r2.randint(200, 1600), regular_cents=r2.randint(900, 2000),
+                    remaining=r2.randint(0, 30), starts_in_hours=r2.choice([0.0, 0.0, 3.0]),
+                    ends_in_hours=r2.choice([0.5, 1.5, 6.0, 48.0])
+                ));
+            }
+            return out;
+        }
+        taste = Taste(
+            categories=rng.sample(cats, rng.randint(0, 2)),
+            diets=rng.sample(diets, rng.randint(0, 1)),
+            price_range=rng.choice(["", "under5", "5to8"]),
+            favorites=[f"p{rng.randint(0, 12)}" for _ in range(rng.randint(0, 3))],
+            history=[Signal(category=rng.choice(cats), action=rng.choice(["claim", "redeem"]), age_days=rng.random() * 40)
+                for _ in range(rng.randint(0, 4))]
+        );
+        every = rng.choice([EXPLORE_EVERY, 0, 1, 2, 3]);
+        salt = f"viewer-{seed}";
+        assert _fingerprint(build_feed(make(), taste, salt, every)) == _fingerprint(_legacy_build_feed(make(), taste, salt, every)), seed;
+    }
 }
