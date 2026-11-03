@@ -113,14 +113,14 @@ Mixed traffic, no errors in any run:
 
 Findings:
 
-1. **Feed capacity.** `home_feed` costs about 2.6 s of server time with the
+1. **Feed capacity** (addressed in `233f238`, see below). `home_feed` cost about 2.6 s of server time with the
    346-offer sample catalog (a $3-filtered `list_offers` still takes 2.9 s,
    so it is computation, not payload size). With one request thread, the host
    completes roughly 17–20 feed loads a minute in total, and the feed screen
    refreshes every 30 s while open, so about ten people with the feed open
    saturate it. Everything else (claims, redemptions, merchant actions) is
    ~0.2 s when it is not queued behind feed loads (#49).
-2. **Sold-out offers rank first.** `services/taste.jac` treats
+2. **Sold-out offers rank first** (fixed in `233f238`). `services/taste.jac` treated
    `remaining <= 3` as "Almost gone", which includes 0, so sold-out offers get
    that badge next to "Sold out" and a ranking boost to the top of the feed.
 3. **Serialization conflicts surface as HTTP 500.** With the default thread
@@ -139,6 +139,31 @@ Findings:
 
 Not covered by automation: email-code delivery, camera scanning on real
 phones, photo upload.
+
+### Performance after the catalog snapshot, 2026-11-03 (preview, `233f238`)
+
+Same hosted preview, same 346-offer sample catalog, same QA tool and traffic
+model (each simulated student acts every 2–8 s, much busier than a real user,
+who loads the feed every 30 s while it is open). Compression was also turned on
+(`JAC_SERVE_COMPRESSION=true`), taking the feed from 552 KB to 58 KB on the wire.
+
+| Students | Feed p50 / p95 | Detail p50 / p95 | Claim p50 | Feed loads in 5 min | Errors |
+| --- | --- | --- | --- | --- | --- |
+| 8, before | 12.8 s / 18.7 s | 11.1 s / 17.3 s | 7.7 s | 85 | 0 |
+| 8, after | 0.25 s / 0.41 s | 0.12 s / 0.19 s | 0.16 s | 450 | 0 |
+| 32, after | 0.27 s / 0.66 s | 0.14 s / 0.36 s | 0.17 s | 1,763 | 0 |
+
+Scenario checks: 84/84 passed (the four extra role checks are the added QA
+students). The 32-student run completed about 3,550 requests in five minutes
+(about 12 per second) on the single serialized backend. Latency now comes from
+the network and the stress pattern, not the catalog walk; single feed loads
+from a home connection take 85–150 ms.
+
+One browser load right after the 32-student run got HTTP 500 from JacHammer's
+gateway with a DNS lookup error (`Name or service not known`) for the app's
+internal service name. It did not recur in eight immediate retries or the UI
+refresh, and no request failed during the runs. Watch for it in the provider's
+gateway logs before a public launch.
 
 ## What to record
 
