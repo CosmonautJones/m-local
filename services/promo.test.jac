@@ -850,3 +850,132 @@ test "suspension retains saved claims and stock while denying new claims publica
         }
     }
 }
+
+
+# ------------------------------------------------- cached catalog reads ---
+
+import os;
+import from services.catalog { reset_catalog_cache, claim_status_of }
+
+
+def _catalog_on -> dict[str, str] {
+    return {"MLOCAL_CATALOG_CACHE": "on", "MLOCAL_SHOW_SAMPLES": "1"};
+}
+
+
+def _first_open_offer(snap: CatalogSnapshot, now: float) -> OfferSrc {
+    for p in snap.places {
+        for s in p.offers {
+            if s.status == "active" and s.start_ts <= now < s.end_ts and remaining_from(s, now) > 1 {
+                return s;
+            }
+        }
+    }
+    raise Exception("no open offer in the seeded catalog");
+}
+
+
+test "cached views match live graph views for every seeded offer" {
+    _ensure_seed();
+    with patch.dict(os.environ, _catalog_on()) {
+        reset_catalog_cache();
+        now = time.time();
+        snap = catalog_snapshot();
+        assert snap.offers;
+        for p in snap.places {
+            for s in p.offers {
+                cached = build_view(s, p, _place_context(snap, p, now), now, None, False);
+                o = _find_offer(s.id);
+                assert o is not None, s.id;
+                live = _view(o, now);
+                for field in ["id", "title", "description", "restaurant", "image_url", "offer_image_url",
+                        "cuisine", "location_id", "address", "neighborhood", "entrance_note", "note_date",
+                        "price", "regular_price", "start_input", "end_input", "time_label", "state",
+                        "remaining", "quantity", "eligibility", "terms", "dietary", "menu_item", "is_demo",
+                        "fits", "reasons"] {
+                    assert getattr(cached, field) == getattr(live, field), field + " differs for " + s.title;
+                }
+                assert cached.access_context.state == live.access_context.state;
+                assert len(cached.access_context.notices) == len(live.access_context.notices);
+            }
+        }
+    }
+}
+
+
+test "a claim refreshes the cached offer's stock without a rebuild" {
+    _ensure_seed();
+    with patch.dict(os.environ, _catalog_on()) {
+        reset_catalog_cache();
+        now = time.time();
+        snap = catalog_snapshot();
+        s = _first_open_offer(snap, now);
+        before = remaining_from(s, now);
+        result = _claim(s.id, "catalog-test-student-1", now);
+        assert result.ok, result.message;
+        # Without notification the reused snapshot still shows the old count...
+        assert remaining_from(catalog_snapshot().offers[s.id], now) == before;
+        offer_stock_changed(s.id);
+        again = catalog_snapshot();
+        assert again is snap;
+        assert remaining_from(again.offers[s.id], now) == before - 1;
+        _cancel(s.id, "catalog-test-student-1", now);
+        offer_stock_changed(s.id);
+        assert remaining_from(catalog_snapshot().offers[s.id], now) == before;
+    }
+}
+
+
+test "an account's claim index sees its own claims and refreshes on change" {
+    _ensure_seed();
+    with patch.dict(os.environ, _catalog_on()) {
+        reset_catalog_cache();
+        now = time.time();
+        me = jid(root);
+        s = _first_open_offer(catalog_snapshot(), now);
+        assert s.id not in actor_claims(me);
+        assert _claim(s.id, me, now).ok;
+        # Cached until told otherwise.
+        assert s.id not in actor_claims(me);
+        actor_claims_changed(me);
+        mine = actor_claims(me);
+        best = best_claim(mine.get(s.id, []), now);
+        assert best is not None and claim_status_of(best, now) == "claimed" and best.qr_payload;
+        _cancel(s.id, me, now);
+        actor_claims_changed(me);
+        best = best_claim(actor_claims(me).get(s.id, []), now);
+        assert best is not None and claim_status_of(best, now) == "cancelled";
+        assert actor_claims("") == {};
+    }
+}
+
+
+test "the chained hold count matches a per-offer walk" {
+    _ensure_seed();
+    now = time.time();
+    me = "catalog-test-student-2";
+    s = _first_open_offer(catalog_snapshot(), now);
+    assert _claim(s.id, me, now).ok;
+    walked = 0;
+    for r in [root.shared -->[?:Restaurant]] {
+        for o in [r ->:Publishes:->] {
+            walked += len([c for c in [o ->:ClaimedAs:->] if c.actor_id == me and c.qr_payload and _claim_status(c, now) == "claimed"]);
+        }
+    }
+    assert _active_hold_count(me, now) == walked;
+    assert walked >= 1;
+    _cancel(s.id, me, now);
+}
+
+
+test "direct offer lookup accepts only published offer ids" {
+    _ensure_seed();
+    s = _first_open_offer(catalog_snapshot(), time.time());
+    found = _find_offer(s.id);
+    assert found is not None and jid(found) == s.id;
+    p = catalog_snapshot().place_of[s.id];
+    assert _find_offer(p.id) is None;
+    for bad in ["", "nope", "0" * 32, s.id.upper(), s.id + "0", "../" + s.id] {
+        assert _find_offer(bad) is None, bad;
+    }
+}

@@ -6,6 +6,7 @@ import from services.qr_catalog { _ensure_seed }
 import from services.onboarding { verified_account, is_demo_student }
 import from services.onboarding_support { account_name }
 import from services.hosted_dataset { hosted_dataset_enabled }
+import from services.catalog { catalog_snapshot }
 
 obj SessionView {
     has authenticated: bool = False,
@@ -29,9 +30,15 @@ def _merchant_for_actor(actor: str) -> Restaurant | None {
     if not actor {
         return None;
     }
-    for r in [root.shared -->[?:Restaurant]] {
-        if merchant_owner(r.slug) == actor {
-            return r;
+    # Slugs come from the cached public catalog (every restaurant-creating write
+    # runs under the mutation lock and invalidates it). Ownership is still
+    # checked live, and the owned restaurant is returned as its live node.
+    for p in catalog_snapshot().places {
+        if merchant_owner(p.slug) == actor {
+            found = jobj(p.id);
+            if isinstance(found, Restaurant) {
+                return found;
+            }
         }
     }
     return None;

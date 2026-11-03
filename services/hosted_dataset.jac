@@ -4,6 +4,7 @@ import os;
 import time;
 import from services.places { Place, import_places, LocatedAt }
 import from services.models { Restaurant, Location, Offer, HasLocation, Publishes }
+import from services.catalog_events { catalog_changed }
 
 node HostedDatasetLoaded {
     has count: int, anchor_ts: float = 0.0;
@@ -81,4 +82,5 @@ def ensure_hosted_dataset {
     }
     _add_hosted_dataset(records);
     root.shared ++> HostedDatasetLoaded(count=len(records), anchor_ts=time.time());
+    catalog_changed();
 }

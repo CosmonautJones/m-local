@@ -30,6 +30,21 @@ edge Affects: ContextNotice --> Location {
 }
 
 
+"""Plain, request-independent copy of a ContextNotice for cached catalog reads."""
+obj NoticeSrc {
+    has id: str = "",
+        location_ids: list[str] = [],
+        summary: str = "",
+        publisher: str = "",
+        source_url: str = "",
+        checked_at: float = 0.0,
+        valid_from: float = 0.0,
+        valid_until: float = 0.0,
+        is_demo: bool = False,
+        entrance_instruction: str = "";
+}
+
+
 obj AccessNoticeView {
     has id: str = "",
         summary: str = "",

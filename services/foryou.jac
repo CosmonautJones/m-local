@@ -18,9 +18,10 @@ import from datetime { datetime }
 import from zoneinfo { ZoneInfo }
 import from services.models { Restaurant, Location, MenuItem, Offer, Redemption, HasLocation, Serves, Publishes, ClaimedAs, samples_visible }
 import from services.qr_catalog { _ensure_seed }
-import from services.qr_auth { listing_visible }
+import from services.qr_auth { listing_visible, merchant_operations_enabled }
 import from services.session { _actor_id }
-import from services.promo { OfferView, _view, _state, _my_claim, _claim_status, _find_offer, _restaurant_of, _location_of, _lock, _unlock }
+import from services.promo { OfferView, _view, _state, _my_claim, _claim_status, _find_offer, _restaurant_of, _location_of, _lock, _unlock, build_view, _place_context }
+import from services.catalog { catalog_snapshot, actor_claims, best_claim, OfferSrc }
 import from services.context_models { AccessContextView }
 import from services.context { get_access_context }
 import from services.importer { import_restaurant }
@@ -242,20 +243,23 @@ def _history(actor: str, now: float) -> list[Signal] {
     if not actor {
         return out;
     }
-    for r in [root.shared -->[?:Restaurant]] {
-        for o in [r ->:Publishes:->] {
-            for c in [o ->:ClaimedAs:->[?:Redemption, actor_id == actor]] {
-                if c.actor_id != actor or c.status not in ["claimed", "redeemed"] {
-                    continue;
-                }
-                when = c.redeemed_ts if c.status == "redeemed" else c.claimed_ts;
-                for k in _categories(r, o) {
-                    out.append(Signal(
-                        category=k,
-                        action="redeem" if c.status == "redeemed" else "claim",
-                        age_days=max(now - when, 0.0) / 86400
-                    ));
-                }
+    snap = catalog_snapshot();
+    for (offer_id, claims) in actor_claims(actor).items() {
+        offer = snap.offers.get(offer_id);
+        if offer is None {
+            continue;
+        }
+        for c in claims {
+            if c.status not in ["claimed", "redeemed"] {
+                continue;
+            }
+            when = c.redeemed_ts if c.status == "redeemed" else c.claimed_ts;
+            for k in offer.categories {
+                out.append(Signal(
+                    category=k,
+                    action="redeem" if c.status == "redeemed" else "claim",
+                    age_days=max(now - when, 0.0) / 86400
+                ));
             }
         }
     }
@@ -276,25 +280,29 @@ def _taste(p: TasteProfile | None, actor: str, now: float) -> Taste {
 
 def _favorite_places(slugs: list[str], now: float) -> list[FavoritePlace] {
     out: list[FavoritePlace] = [];
+    if not slugs {
+        return out;
+    }
+    snap = catalog_snapshot();
+    show_samples = samples_visible();
     for slug in slugs {
-        for r in [root.shared -->[?:Restaurant]] {
-            if r.slug != slug or (r.is_demo and not samples_visible()) or not listing_visible(r.slug, r.source) {
+        for p in snap.places {
+            if p.slug != slug or (p.is_demo and not show_samples) or not listing_visible(p.slug, p.source) {
                 continue;
             }
-            locs = [r ->:HasLocation:->];
-            live = [o for o in [r ->:Publishes:->] if _state(o, now) == "active" and (samples_visible() or not o.is_demo)];
-            live.sort(key=lambda (o: Offer) -> int { return o.price_cents; });
+            live = [o for o in p.offers if _state(o, now) == "active" and (show_samples or not o.is_demo)];
+            live.sort(key=lambda (o: OfferSrc) -> int { return o.price_cents; });
             out.append(FavoritePlace(
-                slug=r.slug,
-                name=r.name.replace(" (Demo)", ""),
-                cuisine=r.cuisine,
-                neighborhood=locs[0].neighborhood if locs else "",
-                labels=_place_labels(r),
+                slug=p.slug,
+                name=p.name.replace(" (Demo)", ""),
+                cuisine=p.cuisine,
+                neighborhood=p.neighborhood,
+                labels=p.labels,
                 live_offers=len(live),
-                best_offer_id=jid(live[0]) if live else "",
+                best_offer_id=live[0].id if live else "",
                 best_offer_title=live[0].title if live else "",
                 best_price_cents=live[0].price_cents if live else 0,
-                is_demo=r.is_demo
+                is_demo=p.is_demo
             ));
         }
     }
@@ -330,26 +338,25 @@ def _home(actor: str, price_range: str, window: str, diets: str, now: float) -> 
     views: dict[str, OfferView] = {};
     labels: dict[str, list[str]] = {};
     total = 0;
-    for r in [root.shared -->[?:Restaurant]] {
-        visible = listing_visible(r.slug, r.source);
-        place_context: tuple[Restaurant, Location | None, AccessContextView] | None = None;
-        restaurant_labels: list[str] | None = None;
-        restaurant_categories: list[str] | None = None;
-        for o in [r ->:Publishes:->] {
-            if (r.is_demo or o.is_demo) and not samples_visible() { continue; }
-            starter_fixture = os.environ.get("MLOCAL_HOSTED_DATASET", "") == "1" and r.source == "demo-seed";
+    snap = catalog_snapshot();
+    mine = actor_claims(actor) if actor else {};
+    show_samples = samples_visible();
+    hosted = os.environ.get("MLOCAL_HOSTED_DATASET", "") == "1";
+    for place in snap.places {
+        visible = listing_visible(place.slug, place.source);
+        paused: bool | None = None;
+        context: AccessContextView | None = None;
+        for o in place.offers {
+            if (place.is_demo or o.is_demo) and not show_samples { continue; }
+            starter_fixture = hosted and place.source == "demo-seed";
             discoverable = visible and o.status != "paused" and now < o.end_ts and not starter_fixture;
-            saved: Redemption | None = None;
+            saved = best_claim(mine.get(o.id, []), now);
             if not discoverable {
-                saved = _my_claim(o, actor, now);
                 if saved is None or _claim_status(saved, now) != "claimed" { continue; }
             }
-            if place_context is None {
-                loc = _location_of(r);
-                context = get_access_context(jid(loc), now) if loc else AccessContextView();
-                place_context = (r, loc, context);
-            }
-            v = _view(o, now, actor, saved_claim=saved, place_context=place_context);
+            if paused is None { paused = not merchant_operations_enabled(place.slug); }
+            if context is None { context = _place_context(snap, place, now); }
+            v = build_view(o, place, context, now, saved, paused);
             if not visible and v.my_status != "claimed" { continue; }
             if discoverable { total += 1; }
             # A live saved QR must remain reachable after offer edits or filter
@@ -371,20 +378,13 @@ def _home(actor: str, price_range: str, window: str, diets: str, now: float) -> 
                     continue;
                 }
             }
-            oid = jid(o);
-            views[oid] = v;
-            if restaurant_labels is None { restaurant_labels = _place_labels(r); }
-            labels[oid] = restaurant_labels;
-            categories = categories_for(o.title, o.menu_item);
-            if not categories {
-                if restaurant_categories is None { restaurant_categories = _categories(r); }
-                categories = restaurant_categories;
-            }
+            views[o.id] = v;
+            labels[o.id] = place.labels;
             candidates.append(Candidate(
-                offer_id=oid,
-                place=r.slug,
+                offer_id=o.id,
+                place=place.slug,
                 title=o.title,
-                categories=categories,
+                categories=o.categories,
                 dietary=o.dietary,
                 price_cents=o.price_cents,
                 regular_cents=o.regular_price_cents,

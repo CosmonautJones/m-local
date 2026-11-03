@@ -5,6 +5,7 @@ import from services.seed { seed_demo }
 import from services.money { money_to_cents }
 import from services.qr_auth { merchant_owner }
 import from services.hosted_dataset { ensure_hosted_dataset }
+import from services.catalog_events { catalog_changed }
 
 node CatalogBootstrap {
     has version: int = 1;
@@ -56,4 +57,6 @@ def _ensure_seed {
         }
     }
     root.shared ++> CatalogBootstrap();
+    # Seeding writes outside the mutation lock; rebuild the read snapshot.
+    catalog_changed();
 }

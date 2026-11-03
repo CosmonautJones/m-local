@@ -150,6 +150,14 @@ def provision(args) -> int:
         password = secrets.token_urlsafe(24)
         data = Client(base, stats).register_and_login(email, password)
         accounts["merchants"].append({"email": email, "password": password, "root_id": UUID(data["root_id"]).hex, "slug": slug})
+    if args.merge_into:
+        base_accounts = json.loads(args.merge_into.read_text())
+        if base_accounts["url"] != base:
+            raise QAError("--merge-into was created for a different host.")
+        if accounts["merchants"]:
+            raise QAError("--merge-into adds students only; pass --merchants 0.")
+        accounts = {"url": base, "students": base_accounts["students"] + accounts["students"],
+                    "merchants": base_accounts["merchants"]}
     state_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = os.open(state_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w") as stream:
@@ -543,7 +551,8 @@ def main(argv: list[str]) -> int:
     p = sub.add_parser("provision", help="create QA accounts on the test host")
     p.add_argument("--url", required=True)
     p.add_argument("--students", type=int, default=8)
-    p.add_argument("--merchants", type=int, default=3, choices=range(1, len(SAMPLE_RESTAURANTS) + 1))
+    p.add_argument("--merchants", type=int, default=3, choices=range(0, len(SAMPLE_RESTAURANTS) + 1))
+    p.add_argument("--merge-into", type=Path, help="existing accounts file to extend with the new students")
     p.add_argument("--state", type=Path, default=DEFAULT_STATE)
     p.add_argument("--allow-host", action="store_true")
     r = sub.add_parser("run", help="run QA scenarios and mixed traffic")

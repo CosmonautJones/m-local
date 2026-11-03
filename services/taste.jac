@@ -242,7 +242,9 @@ def score(c: Candidate, taste: Taste) -> Ranked {
     if c.starts_in_hours > 0 {
         total -= 1.5;
         reasons.append("Starts later");
-    } elif c.ends_in_hours <= 2.0 or c.remaining <= 3 {
+    } elif c.remaining > 0 and (c.ends_in_hours <= 2.0 or c.remaining <= 3) {
+        # Urgency only for deals a student can still claim: a sold-out deal is
+        # neither "almost gone" nor worth moving up the feed.
         total += 0.5;
         reasons.append("Ending soon" if c.ends_in_hours <= 2.0 else "Almost gone");
     }
@@ -316,25 +318,35 @@ def build_feed(
     # Two orders over the same leftovers: least-shown first for the exploration
     # slots, best fit first for everything else once the matches run out.
     by_fit = _by_band(others);
-    used: list[str] = [];
+    # `used` only grows, so the first unused entry of each order only moves
+    # forward: two cursors give the same picks as rescanning both lists every
+    # turn, in linear rather than cubic time.
+    used: set[str] = set();
+    next_explore = 0;
+    next_fit = 0;
     while matches or len(used) < len(others) {
         position = len(feed) + 1;
         explore_turn = explore_every > 0 and position % explore_every == 0;
-        left = [r for r in others if r.candidate.offer_id not in used];
-        if left and explore_turn {
-            pick = left[0];
+        while next_explore < len(others) and others[next_explore].candidate.offer_id in used {
+            next_explore += 1;
+        }
+        if next_explore < len(others) and explore_turn {
+            pick = others[next_explore];
             pick.slot = "explore";
             pick.reasons = ["Something different"] + pick.reasons;
-            used.append(pick.candidate.offer_id);
+            used.add(pick.candidate.offer_id);
             feed.append(pick);
         } elif matches {
             pick = matches.pop(0);
             pick.slot = "match";
             feed.append(pick);
         } else {
-            pick = [r for r in by_fit if r.candidate.offer_id not in used][0];
+            while next_fit < len(by_fit) and by_fit[next_fit].candidate.offer_id in used {
+                next_fit += 1;
+            }
+            pick = by_fit[next_fit];
             pick.slot = "more";
-            used.append(pick.candidate.offer_id);
+            used.add(pick.candidate.offer_id);
             feed.append(pick);
         }
     }
