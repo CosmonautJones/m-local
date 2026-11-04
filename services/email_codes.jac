@@ -20,7 +20,7 @@ import ssl;
 import tempfile;
 import time;
 import from uuid { UUID }
-import from services.release_events { record_mail_failure, record_mail_quota }
+import from services.release_events { record_mail_failure, record_mail_quota, mail_caps }
 import from services.onboarding_backend { selected_store }
 
 def mutation_lock_path() -> str {
@@ -245,7 +245,8 @@ obj CodeStore {
             }
             hourly = db.execute("SELECT COUNT(*) FROM sends WHERE at>?", (now - 3600,)).fetchone()[0];
             daily = db.execute("SELECT COUNT(*) FROM sends").fetchone()[0];
-            if hourly >= 60 or daily >= 300 {
+            (hourly_cap, daily_cap) = mail_caps();
+            if hourly >= hourly_cap or daily >= daily_cap {
                 record_mail_quota(hourly, daily);
                 raise ValueError("Email sign-in is busy. Please try again later.");
             }
@@ -744,6 +745,15 @@ def send_code(email: str, code: str) -> None {
     message["To"] = email;
     message["Subject"] = f"{code} is your M-Local verification code";
     message.set_content(f"Your M-Local code is: {code}\n\nIt expires in 10 minutes and works once.\nIf you did not request this code, ignore this email.\nM-Local will never ask for your university password.");
+    deliver(message);
+}
+
+
+"""Send one message through the configured SMTP sender."""
+def deliver(message: EmailMessage) -> None {
+    if not delivery_ready() {
+        raise ValueError("Email is not enabled yet. The host needs to configure an email sender.");
+    }
     port = int(os.environ.get("MLOCAL_SMTP_PORT", "587"));
     context = ssl.create_default_context();
     smtp: any = None;

@@ -1,6 +1,7 @@
 """Editable account name; email and access remain owned by sign-in services."""
 import from "react" { useEffect }
 import from .ui { formStack, formInput, formSecondary, formHint }
+import from .legal { LegalLinks }
 import type from ..services.account_profile { AccountProfileView }
 
 glob stack = formStack, inputStyle = formInput, button = formSecondary, hint = formHint;
@@ -109,5 +110,6 @@ def:pub AccountProfile(
             </form>
         ) if profile else <button style={button} type="button" onClick={load}>Retry account</button>}
         {(<p role={"alert" if failed else "status"} aria-live="polite" style={{**hint, "color": "var(--ml-bad)" if failed else "var(--ml-accent)"}}>{message}</p>) if message else None}
+        <p style={hint}><LegalLinks /> · Delete your account or get a copy of your data by emailing the address in the Privacy Policy.</p>
     </section>;
 }

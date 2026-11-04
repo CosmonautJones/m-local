@@ -90,6 +90,26 @@ class ReleaseEventTests(unittest.TestCase):
         self.assertEqual(events[0]['hourly_attempts'], 60)
         self.assertEqual(events[0]['daily_attempts'], 300)
 
+    def test_daily_cap_follows_the_configured_provider_headroom(self):
+        with patch.dict(os.environ, {'MLOCAL_MAIL_DAILY_CAP': '90'}):
+            self.seed_attempts(0, 89)
+            output = io.StringIO()
+            with redirect_stderr(output):
+                self.assertTrue(self.store.request('firstfixture', 'student', 'PRIVATE NAME', lambda email, code: None)['ok'])
+            events = self.events(output)
+            self.assertEqual(events[-1]['code'], 'MAIL_QUOTA_REACHED')
+            self.assertEqual((events[-1]['daily_attempts'], events[-1]['daily_limit']), (90, 90))
+            with redirect_stderr(io.StringIO()), self.assertRaisesRegex(ValueError, 'busy'):
+                self.store.request('secondfixture', 'student', 'PRIVATE NAME', lambda email, code: self.fail('cap allowed a send'))
+
+    def test_invalid_cap_settings_keep_the_defaults(self):
+        observer = self.observer()
+        for value in ('', '0', '-5', 'many', '2000000'):
+            with patch.dict(os.environ, {'MLOCAL_MAIL_HOURLY_CAP': value, 'MLOCAL_MAIL_DAILY_CAP': value}):
+                self.assertEqual(observer.mail_caps(), (60, 300), value)
+        with patch.dict(os.environ, {'MLOCAL_MAIL_HOURLY_CAP': '25', 'MLOCAL_MAIL_DAILY_CAP': '90'}):
+            self.assertEqual(observer.mail_caps(), (25, 90))
+
     def test_operation_failures_are_fixed_categories_and_success_is_silent(self):
         observer = self.observer()
         output = io.StringIO()

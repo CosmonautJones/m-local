@@ -43,7 +43,8 @@ export JAC_TEST_STRICT=1
 export MLOCAL_CATALOG_CACHE=off
 core_paths=(services/promo.test.jac services/qr.test.jac services/session.test.jac services/business_onboarding.test.jac
     services/taste.test.jac services/taste_sandbox.test.jac services/foryou.test.jac
-    services/nearby.test.jac services/business_profile.test.jac services/hosted_dataset.test.jac services/dataset_activity.test.jac)
+    services/nearby.test.jac services/business_profile.test.jac services/hosted_dataset.test.jac services/dataset_activity.test.jac
+    services/operations.test.jac)
 if [[ "$suite" == core || "$suite" == all ]]; then
     binding="$PROJECT_ROOT/.jac/release-core-binding.json"
     binding_log="$PROJECT_ROOT/.jac/release-core-outcomes.log"

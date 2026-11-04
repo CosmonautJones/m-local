@@ -49,10 +49,10 @@ docstring and `tests/tooling/test_jachammer_stage.py`.
 3. Claim an offer: enter the U-M email, type the emailed code, and get a QR pass.
 4. Reload or come back later and find the saved pass.
 
-**Merchants.** Self-service business approval needs the host command in
-[BUSINESS-APPROVAL.md](BUSINESS-APPROVAL.md), and JacHammer has no shell into
-the app pod, so new businesses stay at "awaiting approval" on this host. To test
-the merchant side, attach a tester to one of the fictional sample restaurants:
+**Merchants.** A business that signs up is approved from the emailed review
+link (see Known gaps and [BUSINESS-APPROVAL.md](BUSINESS-APPROVAL.md)). To test
+the merchant side without a real business, attach a tester to one of the
+sample restaurants:
 
 1. The tester signs in once as a business with their own email.
 2. They send their account ID. On a computer, open the test site signed in,
@@ -60,7 +60,7 @@ the merchant side, attach a tester to one of the fictional sample restaurants:
    `current_session` request and copy `actor_id` from its response.
 3. The operator maps a sample restaurant to that ID and redeploys:
    `jachammer env add 'MLOCAL_MERCHANT_OWNERS={"arbor-leaf-kitchen":"<actor id>"}' --name M-Local-Main`
-   then `jachammer redeploy`.
+   then `bash scripts/jachammer-deploy.sh`.
 4. The tester now manages that sample restaurant: post an offer, then scan a
    student's QR and confirm the one-time redemption.
 
@@ -74,7 +74,7 @@ realistic use, without email:
 
 ```bash
 python3 scripts/qa-hosted.py provision --url https://m-local-preview-prjc0b.jachammer.app
-# set the two printed variables on the host, then `jachammer redeploy`
+# set the two printed variables on the host, then bash scripts/jachammer-deploy.sh
 python3 scripts/qa-hosted.py run --url https://m-local-preview-prjc0b.jachammer.app --minutes 10
 ```
 
@@ -194,6 +194,26 @@ Changes after that measurement:
 - **Seed check once per process.** Every read path ran the catalog bootstrap
   query; it now runs once and again after any catalog write.
 
+Measured on the preview after the change (`777db54`, same probe):
+
+| Callers at once | Feed loads/s, before | p50, before | Feed loads/s, paged | p50, paged |
+| --- | --- | --- | --- | --- |
+| 1 | 5.1 | 176 ms | 7.9 | 113 ms |
+| 4 | 19.7 | 187 ms | 28.4 | 122 ms |
+| 16 | 22.8 (ceiling) | 688 ms | 95.3 (not yet a ceiling) | 154 ms |
+
+The paged feed is 8.6 KB compressed instead of 58 KB. At 16 callers the time
+is mostly network round trip, so the true ceiling was not reached. One request
+in the 8-caller step took 60 s (no error); it did not recur and looks like the
+provider's gateway, which runs its own autoscaler and logged metric errors
+during the deploy.
+
+The QA run on the same build (32 students, 5 minutes, full unpaged feeds as the
+QA tool requests them) passed every scenario check; the access-control check
+now confirms native registration is refused (`CHALLENGE_REQUIRED`). Traffic:
+1,787 feeds (p50 258 ms, p95 412 ms), 1,069 offer pages (p50 125 ms), 403 claim
+attempts (p50 156 ms), 202 cancels, 161 favorites, zero server or network errors.
+
 ## What to record
 
 For each run, note the tester, phone and browser, and the result of: guest
@@ -214,11 +234,20 @@ delivery), #46 (redeemed moment) and #50 (phone QA).
   more QA accounts needs `JACHAMMER_OPEN_REGISTRATION=1 bash
   scripts/jachammer-deploy.sh` (refused with `--prod`). Running the repository's
   restricted gateway in front of the app would close it fully (#40).
-- **No self-service business approval** (see above).
+- **Business approval by email.** With `MLOCAL_OPERATOR_EMAIL` and
+  `MLOCAL_PUBLIC_URL` set, each new business submission emails the operator an
+  approve link ([BUSINESS-APPROVAL.md](BUSINESS-APPROVAL.md)). Suspension still
+  needs the host command, which JacHammer cannot run.
+- **Backups are pulled to the operator's PC** once a day
+  ([HOSTED-BACKUPS.md](HOSTED-BACKUPS.md)); JacHammer's own backups remain
+  unconfirmed (#45).
+- **Sign-in email limits.** `MLOCAL_MAIL_DAILY_CAP` / `MLOCAL_MAIL_HOURLY_CAP`
+  (defaults 300 and 60) cap codes for the whole site. Resend's free plan stops at
+  100 emails a day, so the preview sets 90 a day; raise both after upgrading the
+  Resend plan. Sessions last 30 days on this host, so a student needs about one
+  code a month.
 - **Rate limits** use the app's own per-email limits only; the repository's
   per-IP gateway limits are not in front of this host.
-- **Backups** of JacHammer's volumes and PostgreSQL are not yet confirmed with
-  the provider (issue #45). Treat test data as disposable.
 - **Package format.** JacHammer requires PyPI pins under `[dependencies.pypi]`,
   which pinned 0.37.23 does not read. Pillow still installs with the runtime;
   psycopg does not, which only matters for the opt-in SQL proof modes.
@@ -239,4 +268,8 @@ with the pinned runtime, then deploys. JacHammer's own pre-upload check is
 skipped because it uses whatever `jac` is first on `PATH`.
 
 A deploy takes about 20 minutes. `jachammer env add` changes apply on the next
-deploy or `jachammer redeploy`.
+deploy: run `bash scripts/jachammer-deploy.sh` again. Do not use
+`jachammer redeploy --name M-Local-Main`: on 2026-11-03 that created a second,
+separate preview (`m-local-main-preview-…`, with its own empty database)
+instead of updating the app, because the project name differs from the app
+name `m-local`.

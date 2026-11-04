@@ -43,8 +43,9 @@ class TransformTests(unittest.TestCase):
         auth = self.staged["serve"]["auth"]
         self.assertTrue(auth["registration_challenge"])
         self.assertEqual(auth["registration_attempts_per_hour"], 1)
+        self.assertEqual(auth["token_ttl_days"], 30)
         opened = tomllib.loads(stage_module.transform(self.original, open_registration=True))
-        self.assertNotIn("auth", opened["serve"])
+        self.assertEqual(opened["serve"]["auth"], {"token_ttl_days": 30})
         with self.assertRaises(stage_module.StageError):
             stage_module.transform(self.original + "\n[serve.auth]\nregistration_challenge = false\n")
 

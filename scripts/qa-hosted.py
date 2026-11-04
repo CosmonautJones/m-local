@@ -409,7 +409,18 @@ class Run:
         self.check(s, "a student cannot publish", publish[0] != 200 or not (publish[1].get("data", {}).get("result") or {}).get("ok"))
         fresh = Client(self.base, self.stats)
         email = f"mlocal-qa-unlisted-{secrets.token_hex(4)}@example.test"
-        fresh.register_and_login(email, secrets.token_urlsafe(24))
+        password = secrets.token_urlsafe(24)
+        status, payload = fresh._post("/user/register", {
+            "identities": [{"type": "email", "value": email}],
+            "credential": {"type": "password", "password": password}})
+        code = (payload.get("error") or {}).get("code", "") if isinstance(payload, dict) else ""
+        if status in (400, 429) and code in ("CHALLENGE_REQUIRED", "RATE_LIMITED"):
+            # Deploy staging throttles native registration (docs/JACHAMMER-TESTING.md).
+            self.check(s, "native registration is throttled", True, code)
+            return
+        if status not in (200, 201) or not payload.get("ok"):
+            raise QAError(f"register: HTTP {status} {code}")
+        fresh.login(email, password)
         role = fresh.call("current_session").get("role")
         self.check(s, "a native account outside the QA list is unverified", role == "unverified", str(role))
         offers = self.claimable_offers()

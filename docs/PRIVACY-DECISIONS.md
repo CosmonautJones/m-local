@@ -8,6 +8,27 @@ Issues
 [#41](https://github.com/CosmonautJones/m-local/issues/41) and
 [#42](https://github.com/CosmonautJones/m-local/issues/42) stay open.
 
+## Published policy text, November 3, 2026
+
+At Travis's request the app now shows a Privacy Policy (`/#privacy`) and Terms
+of Use (`/#terms`) from `client/legal.jac`. They are linked from the welcome
+screen, next to the sign-in button ("By continuing you agree..."), from the
+business confirmation checkbox and from the account screen. The text describes
+this build: what is collected, the two service providers (JacHammer hosting,
+Resend email), retention (codes 10 minutes, send records 24 hours, account data
+while the account exists, encrypted backups 14 days, deletion within 30 days of
+a request except a redeemed-claim record kept up to 12 months for disputes),
+and a contact address (`LEGAL_CONTACT`). The operator is Travis Jones, Ann
+Arbor; governing law Michigan, Washtenaw County courts. Business terms forbid
+age-restricted offers.
+
+The text was drafted from the code, not by a lawyer. Account deletion and data
+export are manual operator tasks answered by email; no deletion tool exists yet,
+so build one before the first request arrives. Acceptance is shown at sign-in
+(sign-in-wrap) and is not yet recorded per account with a version. Update the
+text and `LEGAL_UPDATED` whenever data collection, recipients or retention
+change.
+
 | Decision | Required human answer | Engineering boundary until answered |
 | --- | --- | --- |
 | Contact research and repository history | Private retention is approved; permitted readers, retention periods and prior public Git history handling remain open | Original tracked inputs and working copies were verified before candidate payload removal. Only a sanitized `data/research/README.md` remains public in this candidate; packaging refuses research payloads, and source switching refuses existing research payloads before mutation. No outreach or history rewrite is authorized. |

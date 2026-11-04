@@ -3,6 +3,7 @@ import from "react" { Fragment, useEffect }
 import from "./photo-picker.jsx" { PhotoPicker }
 import from ..services.photos { upload_business_photo, import_business_photo }
 import from .ui { BrandLogo, ThemeControl, uiFont, formStack, formInput, formButton, formSecondary, formHint }
+import from .legal { LegalLinks }
 import type from ..services.session { SessionView }
 import type from ..services.onboarding { EmailCodeResult }
 import type from ..services.business_onboarding { BusinessDraftView }
@@ -48,6 +49,7 @@ def:pub AudienceWelcome(onChoose: Callable[[str], None]) -> JsxElement {
                     <span style={{**stack, "gap": 8, "color": "inherit"}}><span style={{"fontSize": 21, "fontWeight": 750}}>List my business</span><span style={{"fontSize": 14, "lineHeight": 1.5, "fontWeight": 400}}>Create your business profile.<br/>Connect with the U-M community.</span></span><span aria-hidden="true" style={{"fontSize": 26}}>→</span>
                 </button>
             </div>
+            <p style={{**hint, "textAlign": "center", "fontSize": 13}}><LegalLinks /></p>
         </div>
     </main>;
 }
@@ -173,6 +175,7 @@ def:pub EmailOnboarding(
             </label>) if kind == "student" else <label style={label}>Work email<input ref={inputRef or emailRef} style={inputStyle} placeholder="you@business.com" type="email" autoComplete="email" maxLength={254} value={value} onChange={lambda (e: ChangeEvent) { value = e.target.value; }} required={True} disabled={busy}/></label>}
             <Notice>{message}</Notice>
             <button type="submit" style={button} disabled={busy}>{"Sending..." if busy else "Send verification code"}</button>
+            <p style={{**hint, "fontSize": 13, "textAlign": "center"}}>By continuing you agree to the <a href="/#terms" target="_blank" rel="noopener" style={{"color": "inherit"}}>Terms of Use</a> and acknowledge the <a href="/#privacy" target="_blank" rel="noopener" style={{"color": "inherit"}}>Privacy Policy</a>.</p>
             <p style={{**hint, "textAlign": "center"}}>{"Already registered? " if mode == "signup" else "New here? "}<button style={quiet} type="button" disabled={busy} onClick={switchMode}>{"Sign in" if mode == "signup" else "Create an account"}</button></p>
         </Fragment>) if not challenge else <Fragment>
             <p style={hint}>{"Enter the 6-digit code sent to "}<strong>{challenge.email}</strong>.</p>
@@ -348,7 +351,7 @@ def:pub BusinessOnboarding(
                     <InputField title="Menu link" placeholder="https://your-business.com/menu" inputType="url" maxLength={2048} value={draft.menu_url} onChange={lambda (e: ChangeEvent) { field("menu_url", e.target.value); }} disabled={busy or photoBusy or not ready}/>
                 </div>
             </details>
-            <label style={{**hint, "display": "flex", "gap": 10, "alignItems": "flex-start", "minHeight": 44}}><input type="checkbox" checked={confirmed} onChange={lambda (e: ChangeEvent) { confirmed = e.target.checked; }} disabled={busy or photoBusy or not ready} style={{"width": 20, "height": 20, "flexShrink": 0}}/>I can represent this business and have permission to use the details and selected image.</label>
+            <label style={{**hint, "display": "flex", "gap": 10, "alignItems": "flex-start", "minHeight": 44}}><input type="checkbox" checked={confirmed} onChange={lambda (e: ChangeEvent) { confirmed = e.target.checked; }} disabled={busy or photoBusy or not ready} style={{"width": 20, "height": 20, "flexShrink": 0}}/><span>I can represent this business, have permission to use the details and selected image, and agree to the <a href="/#terms" target="_blank" rel="noopener" style={{"color": "inherit"}}>business terms</a>.</span></label>
             <button style={button} disabled={busy or photoBusy or not ready or not confirmed}>{"Saving..." if busy else "Save business profile" if draft.status == "active" else "Update submission" if draft.status == "pending_review" else "Submit for review"}</button>
             <p style={hint}>We review your business name and address before publication. Later name or address changes need review; offers, photos and other details are yours to manage.</p>
         </form>

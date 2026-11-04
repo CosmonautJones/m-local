@@ -10,6 +10,28 @@ its status. After approval, **Continue to offers** publishes through the owner's
 authenticated app request. The host command records approval in private state;
 it does not start the app or mutate a separate CLI graph.
 
+## Approving from an emailed link
+
+Hosts without a shell (JacHammer) use an emailed link instead of the command
+below. Set `MLOCAL_OPERATOR_EMAIL` (the reviewer's private inbox) and
+`MLOCAL_PUBLIC_URL` (the app's https origin). When a business submits a new
+name or address, M-Local emails that inbox the submission and a link to
+`<public url>/#approve=<token>`, once per submission.
+
+The token is signed with a key derived from the private onboarding key and
+names one account and one exact submission hash, for seven days. Opening it
+shows the submission; only tapping **Approve this business** approves it,
+through the same revision-bound `approve_business` the command uses, recorded
+with reviewer "Operator (emailed review link)" and the optional note. An edited
+submission invalidates older links and sends a new email; approving twice
+changes nothing. The token stays in the URL fragment (never sent to a server)
+and leaves the address bar as soon as the page reads it. The owner gets a short
+"you're approved" email.
+
+Anyone holding the email can approve, so keep that inbox private and do not
+forward review emails. Without both settings no email is sent and only the
+command below approves. Suspension and reinstatement still need the command.
+
 ## Review command
 
 Run in the exact app workspace, with its private onboarding directory and
