@@ -33,6 +33,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -61,10 +62,31 @@ def _config():
         raise BackupError(f'No backup configuration at {CONFIG}; run setup first.') from None
 
 
+def _origin(url):
+    message = 'Pass an HTTPS origin or an HTTP origin at 127.0.0.1.'
+    if not isinstance(url, str) or any(char.isspace() or ord(char) < 32 or 127 <= ord(char) < 160 for char in url):
+        raise BackupError(message)
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        host = parsed.hostname
+        _ = parsed.port
+    except ValueError:
+        raise BackupError(message) from None
+    if (not host or parsed.username is not None or parsed.password is not None
+            or parsed.path not in ('', '/') or '?' in url or '#' in url
+            or (parsed.scheme != 'https' and not (parsed.scheme == 'http' and host == '127.0.0.1'))
+            or any(not (char.isalnum() or char in '.-:') for char in host)):
+        raise BackupError(message)
+    authority = f'[{host}]' if ':' in host else host
+    suffix = parsed.netloc[len(authority):]
+    if (not parsed.netloc.lower().startswith(authority.lower())
+            or (suffix and (not suffix.startswith(':') or not suffix[1:].isascii() or not suffix[1:].isdigit()))):
+        raise BackupError(message)
+    return url.removesuffix('/')
+
+
 def setup(args):
-    url = args.url.rstrip('/')
-    if not url.startswith('https://') and not url.startswith('http://127.0.0.1'):
-        raise BackupError('Pass the https origin of the deployment.')
+    url = _origin(args.url)
     folder = Path(args.backup_dir).expanduser() if args.backup_dir else HOME / 'backups'
     folder.mkdir(mode=0o700, parents=True, exist_ok=True)
     _write_secret(CONFIG, json.dumps({'url': url, 'backup_dir': str(folder), 'keep_days': args.keep_days}, indent=2))
@@ -132,8 +154,9 @@ def decrypt(path):
 
 def pull(args):
     config = _config()
+    url = _origin(config.get('url'))
     token = TOKEN.read_text().strip()
-    request = urllib.request.Request(config['url'] + '/function/download_backup', json.dumps({'token': token}).encode(),
+    request = urllib.request.Request(url + '/function/download_backup', json.dumps({'token': token}).encode(),
                                      {'Content-Type': 'application/json', 'Accept-Encoding': 'identity'}, method='POST')
     try:
         with urllib.request.urlopen(request, timeout=600) as response:
