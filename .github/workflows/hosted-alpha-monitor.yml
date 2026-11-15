@@ -1,0 +1,44 @@
+name: Hosted alpha monitor
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: HTTPS origin to check
+        required: true
+        type: string
+      revision:
+        description: Expected deployed source commit (40 characters)
+        required: true
+        type: string
+      allow_samples:
+        description: Preview acceptance only; never for a real alpha
+        default: false
+        type: boolean
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-alpha-monitor
+  cancel-in-progress: false
+
+jobs:
+  public-acceptance:
+    if: github.event_name == 'workflow_dispatch' || (vars.MLOCAL_ALPHA_URL != '' && vars.MLOCAL_ALPHA_REVISION != '')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      ALPHA_URL: ${{ inputs.url || vars.MLOCAL_ALPHA_URL }}
+      ALPHA_REVISION: ${{ inputs.revision || vars.MLOCAL_ALPHA_REVISION }}
+      ALLOW_SAMPLES: ${{ inputs.allow_samples }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify public service and release protections
+        shell: bash
+        run: |
+          args=(--url "$ALPHA_URL" --expected-revision "$ALPHA_REVISION")
+          if [[ "$ALLOW_SAMPLES" == true ]]; then args+=(--allow-samples); fi
+          python3 scripts/check-hosted-alpha.py "${args[@]}"

@@ -94,7 +94,11 @@ def check(outer):
         if len(table['rows']) != table['row_count'] or hashlib.sha256('\n'.join(table['rows']).encode()).hexdigest() != table['sha256']:
             raise BackupError(f'Table {table["schema"]}.{table["table"]} failed its checksum.')
     for item in body['private'] + body['photos']:
-        if hashlib.sha256(base64.b64decode(item['base64'])).hexdigest() != item['sha256']:
+        try:
+            data = base64.b64decode(item['base64'], validate=True)
+        except ValueError:
+            raise BackupError(f'File {item["name"]} has invalid encoded data.') from None
+        if len(data) != item['bytes'] or hashlib.sha256(data).hexdigest() != item['sha256']:
             raise BackupError(f'File {item["name"]} failed its checksum.')
     if not any(f['name'] == 'code.key' and f['bytes'] == 32 for f in body['private']):
         raise BackupError('The onboarding key is missing from this backup.')
@@ -224,12 +228,26 @@ def restore_sql(body):
     return '\n'.join(out) + '\n'
 
 
-def _write_files(items, directory, mode):
-    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+def _check_destination(items, directory):
+    absolute = directory.absolute()
+    if any(path.is_symlink() for path in (absolute, *absolute.parents)):
+        raise BackupError(f'{directory} contains a symbolic link.')
+    if directory.exists() and (not directory.is_dir() or any(directory.iterdir())):
+        raise BackupError(f'{directory} is not an empty directory.')
+    names = set()
     for item in items:
         name = Path(item['name']).name
-        if name != item['name'] or name.startswith('.'):
+        if (not name or name != item['name'] or name.startswith('.') or name in names
+                or any(ord(char) < 32 or ord(char) == 127 for char in name)):
             raise BackupError(f'Refusing an unexpected file name {item["name"]!r}.')
+        names.add(name)
+
+
+def _write_files(items, directory, mode):
+    _check_destination(items, directory)
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    for item in items:
+        name = item['name']
         target = directory / name
         if target.exists():
             raise BackupError(f'{target} already exists; restore into an empty directory.')
@@ -240,6 +258,13 @@ def _write_files(items, directory, mode):
 
 def restore(args):
     body = check(json.loads(decrypt(Path(args.file))))
+    destinations = [(body['private'], args.private_dir), (body['photos'], args.photos_dir)]
+    paths = [Path(directory).resolve() for _, directory in destinations if directory]
+    if len(paths) == 2 and (paths[0] == paths[1] or paths[0] in paths[1].parents or paths[1] in paths[0].parents):
+        raise BackupError('Private files and photos need separate, non-overlapping directories.')
+    for items, directory in destinations:
+        if directory:
+            _check_destination(items, Path(directory))
     if args.psql:
         with tempfile.NamedTemporaryFile('w', suffix='.sql', delete=False) as script:
             script.write(restore_sql(body))

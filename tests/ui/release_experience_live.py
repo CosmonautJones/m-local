@@ -52,7 +52,7 @@ def port(number):
 
 def scanner_chunk(url):
     path = urlsplit(url).path
-    return path.startswith(("/assets/", "/static/assets/")) and bool(re.search(r"/assets/(?:assets/)?index-[A-Za-z0-9_-]+\.js$", path))
+    return bool(re.fullmatch(r"/(?:static/)?assets/(?:assets/)?(?:index|esm)-[A-Za-z0-9_-]+\.js", path))
 
 
 def readiness_diagnostic_summary(workspace, attempts, post_failure):

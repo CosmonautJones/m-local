@@ -1,5 +1,15 @@
 # M-Local hosting
 
+## November 15 alpha preparation
+
+The current working deployment is the preview documented in
+[JacHammer testing](JACHAMMER-TESTING.md); the older short public domain below
+returned 404 during the November 15 review. The preview's guest and synthetic
+student/merchant flows work, but real alpha acceptance remains open. Use
+[alpha readiness](ALPHA-READINESS.md) for the current public check, source stamp,
+monitoring setup and remaining human/operator requirements. Historical hosting
+observations below are retained with their original dates.
+
 ## Shared hosting status
 
 October 6, 2026 read-only check: [mlocal.jachammer.app](https://mlocal.jachammer.app/)

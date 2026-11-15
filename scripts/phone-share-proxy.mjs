@@ -13,7 +13,8 @@ const functions=new Set(['list_offers','get_offer','claim_offer','merchant_porta
   'cancel_claim','offer_defaults','current_session','request_email_code','verify_email_code',
   'get_business_draft','import_business_website','upload_business_photo','import_business_photo','save_business_draft','get_business_profile',
   'get_account_profile','save_account_profile','merchant_insights','local_activity','list_places','nearby_places',
-  'home_feed','taste_choices','save_taste','toggle_favorite','nearby_after']);
+  'home_feed','taste_choices','save_taste','toggle_favorite','nearby_after',
+  'review_link_details','approve_from_review_link','download_backup']);
 
 // Jac's compiled HTML bootstraps an inline script; React Native Web uses inline
 // styles. Uploaded photos are local; website-picker previews may use HTTPS,
@@ -60,9 +61,9 @@ function createObserver(eventSink) {
 
 function routeLabel(path) {
   if(path==='/healthz')return 'readiness';
-  if(path==='/version.json'||path==='/build')return 'build';
+  if(path==='/version.json'||path==='/build'||path==='/static/assets/mlocal-build.json')return 'build';
   if(path.startsWith('/function/')&&functions.has(path.slice(10)))return path.slice(10);
-  if(path==='/'||path==='/index.html'||path==='/favicon.ico'||path==='/static/client.js'||
+  if(path==='/'||path==='/index.html'||path==='/favicon.ico'||path==='/static/client.js'||/^\/client\.[\w-]+\.js$/.test(path)||
       path==='/static/assets/manifest.webmanifest'||/^\/static\/assets\/[\w-]+\.js$/.test(path)||path.startsWith('/assets/')||path.startsWith('/static/assets/brand/')||path.startsWith('/static/photos/'))return 'asset';
   return 'blocked';
 }
@@ -193,6 +194,7 @@ export function createShareProxy({upstreamHost='localhost',upstreamPort=8200,
     const path=req.url.split('?')[0],route=routeLabel(path);
     const read=['GET','HEAD'].includes(req.method);
     const allowed=read&&(path==='/'||path==='/index.html'||path==='/favicon.ico'||path==='/static/client.js'
+      ||/^\/client\.[\w-]+\.js$/.test(path)||path==='/static/assets/mlocal-build.json'
       ||/^\/assets\/[\w-]+\.(js|css|png|svg|ico|webp|woff2?)$/.test(path)
       ||path==='/static/assets/manifest.webmanifest'
       ||/^\/static\/assets\/[\w-]+\.js$/.test(path)

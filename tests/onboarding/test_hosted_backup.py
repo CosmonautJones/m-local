@@ -149,5 +149,92 @@ class TokenTests(unittest.TestCase):
             self.assertFalse(hosted_backup.token_accepted(None))
 
 
+class RestorePreflightTests(unittest.TestCase):
+    def document(self, private=None, photos=None):
+        body = {'format': tool.FORMAT, 'created_at': 1.0,
+                'graph': {'schemas': [], 'extensions': [], 'sequences': [], 'tables': []},
+                'private': private if private is not None else [hosted_backup._file('code.key', b'k' * 32)],
+                'photos': photos or []}
+        text = json.dumps(body, separators=(',', ':'), sort_keys=True)
+        return {'sha256': hashlib.sha256(text.encode()).hexdigest(), 'backup': body}
+
+    def test_misreported_file_length_is_refused(self):
+        key = hosted_backup._file('code.key', b'k')
+        key['bytes'] = 32
+        with self.assertRaises(tool.BackupError):
+            tool.check(self.document(private=[key]))
+
+    def test_occupied_photo_destination_refuses_before_database_or_private_writes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            private, photos = Path(tmp) / 'private', Path(tmp) / 'photos'
+            photos.mkdir()
+            (photos / 'existing.jpg').write_bytes(b'keep')
+            args = type('Args', (), {'file': 'unused.gpg', 'psql': 'psql -d empty',
+                                     'private_dir': str(private), 'photos_dir': str(photos)})()
+            with patch.object(tool, 'decrypt', return_value=json.dumps(self.document()).encode()), \
+                 patch.object(tool.subprocess, 'run') as run:
+                run.return_value.returncode = 0
+                with self.assertRaises(tool.BackupError):
+                    tool.restore(args)
+                run.assert_not_called()
+            self.assertFalse(private.exists())
+            self.assertEqual((photos / 'existing.jpg').read_bytes(), b'keep')
+
+    def test_invalid_later_filename_refuses_before_any_file_write(self):
+        for name in ('../bad', 'code.key'):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                files = [hosted_backup._file('code.key', b'k' * 32), hosted_backup._file(name, b'x')]
+                private = Path(tmp) / 'private'
+                args = type('Args', (), {'file': 'unused.gpg', 'psql': None,
+                                         'private_dir': str(private), 'photos_dir': None})()
+                with patch.object(tool, 'decrypt', return_value=json.dumps(self.document(private=files)).encode()):
+                    with self.assertRaises(tool.BackupError):
+                        tool.restore(args)
+                self.assertFalse(private.exists())
+
+    def test_overlapping_destinations_refuse_before_database_writes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            private = Path(tmp) / 'private'
+            args = type('Args', (), {'file': 'unused.gpg', 'psql': 'psql -d empty',
+                                     'private_dir': str(private), 'photos_dir': str(private / 'photos')})()
+            with patch.object(tool, 'decrypt', return_value=json.dumps(self.document()).encode()), \
+                 patch.object(tool.subprocess, 'run') as run:
+                with self.assertRaises(tool.BackupError):
+                    tool.restore(args)
+                run.assert_not_called()
+            self.assertFalse(private.exists())
+
+    def test_control_filename_refuses_before_database_or_file_writes(self):
+        for name in ('bad\x00name', 'bad\nname', 'bad\x7fname'):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                private = Path(tmp) / 'private'
+                files = [hosted_backup._file('code.key', b'k' * 32), hosted_backup._file(name, b'x')]
+                args = type('Args', (), {'file': 'unused.gpg', 'psql': 'psql -d empty',
+                                         'private_dir': str(private), 'photos_dir': None})()
+                with patch.object(tool, 'decrypt', return_value=json.dumps(self.document(private=files)).encode()), \
+                     patch.object(tool.subprocess, 'run') as run:
+                    run.return_value.returncode = 0
+                    with self.assertRaises(tool.BackupError):
+                        tool.restore(args)
+                    run.assert_not_called()
+                self.assertFalse(private.exists())
+
+    def test_symlinked_parent_refuses_before_database_or_file_writes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            real, link = Path(tmp) / 'real', Path(tmp) / 'link'
+            real.mkdir()
+            link.symlink_to(real, target_is_directory=True)
+            private = link / 'missing' / 'private'
+            args = type('Args', (), {'file': 'unused.gpg', 'psql': 'psql -d empty',
+                                     'private_dir': str(private), 'photos_dir': None})()
+            with patch.object(tool, 'decrypt', return_value=json.dumps(self.document()).encode()), \
+                 patch.object(tool.subprocess, 'run') as run:
+                run.return_value.returncode = 0
+                with self.assertRaises(tool.BackupError):
+                    tool.restore(args)
+                run.assert_not_called()
+            self.assertEqual(list(real.iterdir()), [])
+
+
 if __name__ == '__main__':
     unittest.main()
