@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import subprocess
 import tempfile
 import tomllib
@@ -106,8 +107,15 @@ class StageTests(unittest.TestCase):
             target = Path(tmp) / "out"
             stage_module.stage(repo, target)
             staged = sorted(str(p.relative_to(target)) for p in target.rglob("*") if p.is_file())
-            self.assertEqual(staged, [".jachammer-source-revision", "jac.toml", "main.jac", "services/a.jac"])
+            self.assertEqual(staged, [".jachammer-source-revision", "assets/mlocal-build.json", "jac.toml", "main.jac", "services/a.jac"])
             self.assertIn("apps", tomllib.loads((target / "jac.toml").read_text()))
+            identity = json.loads((target / "assets" / "mlocal-build.json").read_text())
+            revision = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+            self.assertEqual(identity, {
+                "source_revision": revision,
+                "runtime_version": "0.37.23",
+                "project_version": tomllib.loads((repo / "jac.toml").read_text())["project"]["version"],
+            })
 
     def test_refuses_uncommitted_tracked_changes(self):
         with tempfile.TemporaryDirectory() as tmp:

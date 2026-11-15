@@ -32,10 +32,12 @@ The staged copy contains only files tracked at HEAD, so local stores, keys and
 other ignored private state are never uploaded.
 """
 import argparse
+import json
 import os
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 APP = "m-local"
@@ -163,6 +165,14 @@ def stage(source: Path, target: Path, open_registration: bool = False) -> int:
     toml.write_bytes(transform(toml.read_bytes().decode("utf-8"), open_registration).encode("utf-8"))
     revision = subprocess.run(["git", "-C", str(source), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
     (target / ".jachammer-source-revision").write_text(revision + "\n")
+    project = tomllib.loads((source / "jac.toml").read_text())["project"]
+    identity = target / "assets" / "mlocal-build.json"
+    identity.parent.mkdir(parents=True, exist_ok=True)
+    identity.write_text(json.dumps({
+        "source_revision": revision,
+        "runtime_version": project["jac-version"],
+        "project_version": project["version"],
+    }, indent=2) + "\n")
     return count
 
 
