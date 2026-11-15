@@ -26,6 +26,21 @@ source stamp, not a cryptographic certificate of every installed runtime file.
 It contains no host settings or credentials. The existing sealed package
 `/version.json` identity contract is separate and unchanged.
 
+## Preview testers without a U-M inbox
+
+Use an inbox the tester controls. On the preview, verify it through the existing
+business email-code form, without submitting a business profile. An operator
+then adds that authenticated account's ID to the existing `MLOCAL_DEMO_STUDENTS`
+list, preserving other test IDs, and applies the reviewed preview configuration.
+After refresh, the explicitly listed nonmerchant account acts as a demo student;
+ordinary verified business accounts and existing merchant ownership are unchanged.
+Use a separate account for the merchant side of the two-phone test.
+
+This tests real email delivery and the student experience with a controlled test
+identity. It does not prove delivery to `@umich.edu` or change real-user eligibility.
+Keep the override on the preview and remove it before real alpha acceptance;
+production startup refuses configured demo-student overrides.
+
 ## What still needs hosted acceptance
 
 1. Route all public requests through the restricted gateway; prove no alternate

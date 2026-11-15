@@ -60,14 +60,15 @@ def:pub current_session() -> SessionView {
             merchant_paused=not merchant_operations_enabled(r.slug),
             email_verified=bool(account), business_account=account.get("kind") == "business", catalog_activity=hosted_dataset_enabled());
     }
+    if is_demo_student(actor) {
+        return SessionView(authenticated=True, actor_id=actor, role="student",
+            display_name=account_name(actor, "Demo student"), is_demo=True,
+            email_verified=bool(account));
+    }
     if account {
         return SessionView(authenticated=True, actor_id=actor,
             role="business" if account.get("kind") == "business" else "student",
             display_name=str(account.get("name", "")), email_verified=True, business_account=account.get("kind") == "business");
-    }
-    if is_demo_student(actor) {
-        return SessionView(authenticated=True, actor_id=actor, role="student",
-            display_name=account_name(actor, "Demo student"), is_demo=True);
     }
     return SessionView(authenticated=True, actor_id=actor, role="unverified",
         display_name=account_name(actor, "Email verification required"));

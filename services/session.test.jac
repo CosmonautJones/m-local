@@ -1,5 +1,6 @@
 import from services.qr_auth { configured_owners }
 import from unittest.mock { patch }
+import os;
 
 test "anonymous session never loads the catalog" {
     with patch.dict(current_session.__globals__, {
@@ -37,11 +38,68 @@ test "merchant session distinguishes verified business setup from a configured s
             "_ensure_seed": lambda () {},
             "_merchant_for_actor": lambda (_actor: str) -> Restaurant { return r; },
             "verified_account": lambda (_actor: str) -> dict[str, any] { return {"kind": kind}; },
+            "is_demo_student": lambda (_actor: str) -> bool { return True; },
             "account_name": lambda (_actor: str, _fallback: str) -> str { return "Owner"; }
         }) {
             view = current_session();
             assert view.role == "merchant" and view.email_verified;
             assert view.business_account == (kind == "business");
+        }
+    }
+}
+
+test "verified allowlisted test inbox gets a student demo session" {
+    actor = "0123456789abcdef0123456789abcdef";
+    for kind in ["business", "student"] {
+        account = {"kind": kind, "name": "Original account name"};
+        with patch.dict(os.environ, {"MLOCAL_DEMO_STUDENTS": '["' + actor + '"]'}),
+            patch.dict(current_session.__globals__, {
+                "_actor_id": lambda () -> str { return actor; },
+                "_ensure_seed": lambda () {},
+                "_merchant_for_actor": lambda (_actor: str) {},
+                "verified_account": lambda (_actor: str) -> dict[str, any] { return account; },
+                "account_name": lambda (_actor: str, _fallback: str) -> str { return "Updated test name"; }
+            }) {
+            view = current_session();
+            assert view.authenticated and view.actor_id == actor;
+            assert view.role == "student" and view.is_demo;
+            assert view.email_verified and not view.business_account;
+            assert view.display_name == "Updated test name";
+            assert account.get("kind") == kind;
+        }
+    }
+}
+
+test "unverified allowlisted test actor keeps accurate email verification" {
+    actor = "0123456789abcdef0123456789abcdef";
+    with patch.dict(os.environ, {"MLOCAL_DEMO_STUDENTS": '["' + actor + '"]'}),
+        patch.dict(current_session.__globals__, {
+            "_actor_id": lambda () -> str { return actor; },
+            "_ensure_seed": lambda () {},
+            "_merchant_for_actor": lambda (_actor: str) {},
+            "verified_account": lambda (_actor: str) -> dict[str, any] { return {}; },
+            "account_name": lambda (_actor: str, _fallback: str) -> str { return "Preview student"; }
+        }) {
+        view = current_session();
+        assert view.role == "student" and view.is_demo;
+        assert not view.email_verified and not view.business_account;
+        assert view.display_name == "Preview student";
+    }
+}
+
+test "ordinary verified business and student accounts keep their roles" {
+    for kind in ["business", "student"] {
+        with patch.dict(os.environ, {"MLOCAL_DEMO_STUDENTS": "[]"}),
+            patch.dict(current_session.__globals__, {
+                "_actor_id": lambda () -> str { return "0123456789abcdef0123456789abcdef"; },
+                "_ensure_seed": lambda () {},
+                "_merchant_for_actor": lambda (_actor: str) {},
+                "verified_account": lambda (_actor: str) -> dict[str, any] { return {"kind": kind, "name": "Verified name"}; }
+            }) {
+            view = current_session();
+            assert view.role == kind and not view.is_demo;
+            assert view.email_verified and view.business_account == (kind == "business");
+            assert view.display_name == "Verified name";
         }
     }
 }
