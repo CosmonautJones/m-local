@@ -51,6 +51,15 @@ It contains no host settings or credentials. The existing sealed package
    canonical entry path, configuration and original signing state. Verify data,
    photos, identity/ownership and authenticated behavior, then stop/restart and
    verify again. A same-machine database round trip is only part of recovery.
+7. Name the support and merchant-review operator and prove both approval and
+   reversible suspension/reinstatement on the chosen host. The current preview
+   can email approval links but cannot run the documented host suspension command.
+8. Exercise an account export/deletion and merchant-closure procedure consistent
+   with the published privacy page. The November policy promises a response and
+   deletion/anonymization within 30 days, but no deletion tool exists. Resolve
+   claim/dispute, ownership, photo and audit preservation rules with the owner
+   before implementing destructive changes; published text alone is not proof
+   those operations can be fulfilled. See [privacy decisions](PRIVACY-DECISIONS.md).
 
 The November 15 recovery drill restored a fresh encrypted hosted snapshot into
 an isolated PostgreSQL 18 database: 10 tables, 8,666 rows, 3 private files and 1
@@ -76,6 +85,8 @@ of all of the following before deploying a gateway sidecar:
   retained, with one application replica and no overlapping old/new writers.
 - TLS termination and forwarded-client headers are defined so the gateway's
   secure-ingress and client-rate-limit settings are correct.
+- Authorized operators can quiesce the app and perform the documented recovery
+  and suspension operations against the actual mounted stores.
 
 The CLI's source upload and accepted rollout overlay are not proof of those
 capabilities. If they cannot be supplied, choose a host where the existing
@@ -108,6 +119,8 @@ that much data.
 
 - Supply consenting U-M/business test inboxes and relay their verification codes.
 - Arrange the physical phone pair and name the support/merchant-review operator.
+- Resolve the account-deletion, merchant-closure and retained-claim rules so the
+  promised privacy process can be implemented and tested.
 - Select primary and backup alert recipients and confirm a failure notification.
 - Supply a protected second backup destination/recovery machine, or authorize a
   specific hosting change if the current provider cannot enforce the gateway.
