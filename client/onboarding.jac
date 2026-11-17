@@ -4,6 +4,7 @@ import from "./photo-picker.jsx" { PhotoPicker }
 import from ..services.photos { upload_business_photo, import_business_photo }
 import from .ui { BrandLogo, ThemeControl, uiFont, formStack, formInput, formButton, formSecondary, formHint }
 import from .legal { LegalLinks }
+import from "./build-label.jsx" { BuildLabel }
 import type from ..services.session { SessionView }
 import type from ..services.onboarding { EmailCodeResult }
 import type from ..services.business_onboarding { BusinessDraftView }
@@ -49,7 +50,7 @@ def:pub AudienceWelcome(onChoose: Callable[[str], None]) -> JsxElement {
                     <span style={{**stack, "gap": 8, "color": "inherit"}}><span style={{"fontSize": 21, "fontWeight": 750}}>List my business</span><span style={{"fontSize": 14, "lineHeight": 1.5, "fontWeight": 400}}>Create your business profile.<br/>Connect with the U-M community.</span></span><span aria-hidden="true" style={{"fontSize": 26}}>→</span>
                 </button>
             </div>
-            <p style={{**hint, "textAlign": "center", "fontSize": 13}}><LegalLinks /></p>
+            <p style={{**hint, "textAlign": "center", "fontSize": 13}}><LegalLinks /><br /><BuildLabel /></p>
         </div>
     </main>;
 }
