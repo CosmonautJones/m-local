@@ -261,6 +261,12 @@ class Proof:
                 route.fulfill(content_type="text/html", body=shell)
                 event.update(kind="synthetic-compiled-client-html-shell", sha256=digest(shell.encode()),
                              basis="coordinator-verified Jac 0.37.23 root/viewport/init metadata; contained compiled entry URL")
+            elif request.method == "GET" and path == "/static/assets/mlocal-build.json":
+                # The deploy source stamp is written only into staged deploys
+                # (scripts/jachammer-stage.py); a source build has none, so the
+                # build label must stay hidden on a 404.
+                route.fulfill(status=404, content_type="text/plain", body="not found")
+                event.update(kind="absent-deploy-source-stamp", status=404)
             elif request.method == "GET":
                 if path.startswith("/static/assets/"):
                     group, relative = "assets", path.removeprefix("/static/assets/")
