@@ -2,9 +2,12 @@
 import from services.onboarding_support { request_code, verify_code, account_details, may_claim, demo_student }
 import from services.production_guard { exit_unless_production_ready }
 import from services.release_events { record_outcome }
+import from services.release_channel { announce_ignored_test_settings }
 
 # Opt-in (MLOCAL_ENV=production): exit before serving with unsafe private-state config.
 glob _production_config_checked: bool = exit_unless_production_ready();
+# A production build (jachammer-deploy.sh --prod) ignores test-only settings.
+glob _test_settings_announced: bool = announce_ignored_test_settings();
 
 obj EmailCodeResult {
     has ok: bool = False, message: str = "", challenge: str = "",

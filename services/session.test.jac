@@ -1,6 +1,11 @@
 import from services.qr_auth { configured_owners }
 import from unittest.mock { patch }
 import os;
+import json;
+import tempfile;
+import from pathlib { Path }
+import from services.models { samples_visible }
+import from services.release_channel { forget_channel }
 
 test "anonymous session never loads the catalog" {
     with patch.dict(current_session.__globals__, {
@@ -102,4 +107,31 @@ test "ordinary verified business and student accounts keep their roles" {
             assert view.display_name == "Verified name";
         }
     }
+}
+
+test "a production build ignores the demo-student allowlist and the sample switch" {
+    actor = "0123456789abcdef0123456789abcdef";
+    settings = {"MLOCAL_DEMO_STUDENTS": '["' + actor + '"]', "MLOCAL_SHOW_SAMPLES": "1"};
+    with tempfile.TemporaryDirectory() as directory {
+        for (name, demo) in [("preview", True), ("production", False)] {
+            stamp = Path(directory) / (name + ".json");
+            stamp.write_text(json.dumps({"channel": name}));
+            forget_channel();
+            with patch("services.release_channel.STAMP", stamp),
+                patch.dict(os.environ, settings),
+                patch.dict(current_session.__globals__, {
+                    "_actor_id": lambda () -> str { return actor; },
+                    "_ensure_seed": lambda () {},
+                    "_merchant_for_actor": lambda (_actor: str) {},
+                    "verified_account": lambda (_actor: str) -> dict[str, any] { return {"kind": "business", "name": "Tester"}; },
+                    "account_name": lambda (_actor: str, _fallback: str) -> str { return "Tester"; }
+                }) {
+                view = current_session();
+                assert view.is_demo == demo;
+                assert view.role == ("student" if demo else "business");
+                assert samples_visible() == demo;
+            }
+        }
+    }
+    forget_channel();
 }

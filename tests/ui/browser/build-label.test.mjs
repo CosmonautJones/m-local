@@ -2,14 +2,24 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {app, until} from './harness.mjs';
 
-const stamp = {source_revision: '5865c31aa0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5', runtime_version: '0.37.23', project_version: '0.1.0'};
+const stamp = {source_revision: '5865c31aa0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5', runtime_version: '0.37.23', project_version: '0.2.0', channel: 'production'};
 
 test('the welcome screen shows which build is live', async()=>{
  const ui = await app({role: 'guest', audience: '', item: {title: 'Welcome to M-Local'},
   intercept(name){ if(name === 'mlocal-build.json') return Response.json(stamp); }});
  try{
-  await until(()=>ui.text().includes('M-Local v0.1.0 · 5865c31'));
+  await until(()=>ui.text().includes('M-Local v0.2.0 · 5865c31'));
+  assert.ok(!ui.text().includes('preview'));
   assert.equal(ui.document.querySelector('[data-testid="build-label"]').getAttribute('title'), 'Build ' + stamp.source_revision + ', Jac 0.37.23');
+  assert.deepEqual(ui.errors, []);
+ }finally{ui.close();}
+});
+
+test('a preview build says so in its label', async()=>{
+ const ui = await app({role: 'guest', audience: '', item: {title: 'Welcome to M-Local'},
+  intercept(name){ if(name === 'mlocal-build.json') return Response.json({...stamp, channel: 'preview'}); }});
+ try{
+  await until(()=>ui.text().includes('M-Local v0.2.0 · 5865c31 · preview'));
   assert.deepEqual(ui.errors, []);
  }finally{ui.close();}
 });

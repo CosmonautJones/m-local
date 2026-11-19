@@ -115,7 +115,15 @@ class StageTests(unittest.TestCase):
                 "source_revision": revision,
                 "runtime_version": "0.37.23",
                 "project_version": tomllib.loads((repo / "jac.toml").read_text())["project"]["version"],
+                "channel": "preview",
             })
+            production = Path(tmp) / "prod"
+            stage_module.stage(repo, production, channel="production")
+            self.assertEqual(json.loads((production / "assets" / "mlocal-build.json").read_text())["channel"], "production")
+            with self.assertRaises(stage_module.StageError):
+                stage_module.stage(repo, Path(tmp) / "bad", channel="staging")
+            with self.assertRaises(stage_module.StageError):
+                stage_module.stage(repo, Path(tmp) / "open", open_registration=True, channel="production")
 
     def test_refuses_uncommitted_tracked_changes(self):
         with tempfile.TemporaryDirectory() as tmp:

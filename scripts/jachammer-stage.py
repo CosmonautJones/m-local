@@ -30,6 +30,11 @@ alone pushes the upload past JacHammer's ~10MB cap.
 
 The staged copy contains only files tracked at HEAD, so local stores, keys and
 other ignored private state are never uploaded.
+
+`assets/mlocal-build.json` records the source revision, versions and the
+channel (`preview`, or `production` for `jachammer-deploy.sh --prod`). The app
+shows it as the visible build label, and a production build ignores test-only
+settings such as sample deals and QA overrides (services/release_channel.py).
 """
 import argparse
 import json
@@ -42,6 +47,7 @@ from pathlib import Path
 
 APP = "m-local"
 OMIT_TOP = {"docs", "tests"}
+CHANNELS = ("preview", "production")
 APP_BLOCK = [
     f"[apps.{APP}]",
     'kind = "web-app"',
@@ -142,7 +148,11 @@ def tracked_files(source: Path) -> list[str]:
     return [p for p in result.stdout.decode().split("\0") if p]
 
 
-def stage(source: Path, target: Path, open_registration: bool = False) -> int:
+def stage(source: Path, target: Path, open_registration: bool = False, channel: str = "preview") -> int:
+    if channel not in CHANNELS:
+        raise StageError(f"Unknown channel {channel!r}; use preview or production.")
+    if channel == "production" and open_registration:
+        raise StageError("Open native registration is for previews only.")
     if target.exists() and any(target.iterdir()):
         raise StageError(f"{target} is not empty; choose a fresh directory.")
     dirty = subprocess.run(["git", "-C", str(source), "status", "--porcelain", "--untracked-files=no"],
@@ -172,6 +182,7 @@ def stage(source: Path, target: Path, open_registration: bool = False) -> int:
         "source_revision": revision,
         "runtime_version": project["jac-version"],
         "project_version": project["version"],
+        "channel": channel,
     }, indent=2) + "\n")
     return count
 
@@ -182,13 +193,15 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--source", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--open-native-registration", action="store_true",
                         help="leave Jac's /user/register unthrottled (QA provisioning on a preview only)")
+    parser.add_argument("--channel", choices=CHANNELS, default="preview",
+                        help="production for the public site: test-only settings are ignored there")
     args = parser.parse_args(argv)
     try:
-        count = stage(args.source.resolve(), args.target.resolve(), args.open_native_registration)
+        count = stage(args.source.resolve(), args.target.resolve(), args.open_native_registration, args.channel)
     except (StageError, subprocess.CalledProcessError, OSError) as error:
         print(f"jachammer-stage: {error}", file=sys.stderr)
         return 1
-    print(f"Staged {count} files in {args.target}")
+    print(f"Staged {count} files in {args.target} ({args.channel})")
     return 0
 
 

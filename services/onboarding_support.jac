@@ -8,6 +8,7 @@ import from uuid { UUID }
 import from services.email_codes { delivery_ready, send_code, store, merchant_operations_allowed }
 import from services.photo_reference { image_reference }
 import from services.website_import { clean_url }
+import from services.release_channel { demo_setting }
 
 
 def request_code(value: str, kind: str, name: str) -> dict[str, any] {
@@ -112,7 +113,7 @@ def save_account_name(actor: str, name: str) -> str {
 
 def demo_student(actor: str) -> bool {
     try {
-        configured = json.loads(os.environ.get("MLOCAL_DEMO_STUDENTS", "[]"));
+        configured = json.loads(demo_setting("MLOCAL_DEMO_STUDENTS", "[]"));
         return isinstance(configured, list) and UUID(actor).hex in {UUID(value).hex for value in configured};
     } except (ValueError, TypeError, AttributeError) {
         return False;

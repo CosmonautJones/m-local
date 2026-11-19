@@ -13,11 +13,11 @@ function loadBuild(){
  return cached;
 }
 
-/** "M-Local v0.1.0 · 5865c31" so anyone can tell which build is live. Renders nothing in local development. */
+/** "M-Local v0.2.0 · 5865c31", plus "· preview" on a test host, so anyone can tell which build is live. Renders nothing in local development. */
 export function BuildLabel({style}){
  const [build,setBuild]=useState(null);
  useEffect(()=>{let live=true;loadBuild().then(b=>{if(live)setBuild(b);});return ()=>{live=false;};},[]);
  if(!build)return null;
- const text='M-Local v'+build.project_version+' · '+build.source_revision.slice(0,7);
+ const text='M-Local v'+build.project_version+' · '+build.source_revision.slice(0,7)+(build.channel==='production'?'':' · preview');
  return <span data-testid="build-label" title={'Build '+build.source_revision+', Jac '+(build.runtime_version||'')} style={{fontSize:12,color:'var(--ml-muted)',fontVariantNumeric:'tabular-nums',...(style||{})}}>{text}</span>;
 }

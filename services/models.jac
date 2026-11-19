@@ -10,6 +10,7 @@ Times are epoch seconds (float); display is converted to Ann Arbor local time.
 
 import os;
 import from services.qr_auth { merchant_owner }
+import from services.release_channel { production_build }
 
 
 """Name shown to students and merchants. Stored rows may keep a fixture suffix."""
@@ -19,8 +20,10 @@ def public_name(name: str) -> str {
 
 
 """One server-side sample policy. An explicit switch overrides the demo/test
-fallback; selecting a hosted dataset never grants sample visibility."""
+fallback; selecting a hosted dataset never grants sample visibility. A
+production build never shows samples (services/release_channel.py)."""
 def samples_visible() -> bool {
+    if production_build() { return False; }
     raw = os.environ.get("MLOCAL_SHOW_SAMPLES", os.environ.get("MLOCAL_DEMO_MODE", ""));
     return raw.strip().lower() in ["1", "true", "yes", "on"];
 }
