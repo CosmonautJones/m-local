@@ -12,6 +12,24 @@ deployed or accepted on a live host yet. See the
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-19
+
+Launch preparation for the public JacHammer site (`mlocal.jachammer.app`).
+Not yet deployed.
+
+### Added
+- Production builds: `scripts/jachammer-deploy.sh --prod` stamps the build
+  `"channel": "production"`, and the app then ignores sample deals, QA demo
+  students and test catalogs whatever the host settings say, logging the
+  ignored setting names at startup. Previews keep them.
+- The visible build label adds `· preview` on test hosts, so the public site
+  and the preview are easy to tell apart.
+- [Launching production](docs/JACHAMMER-TESTING.md#launching-production) steps.
+
+### Changed
+- `jachammer-deploy.sh --prod` refuses any checkout that is not exactly
+  `origin/main`.
+
 ## [0.1.0] - 2026-10-21
 
 First versioned release. It contains everything merged to `main` through

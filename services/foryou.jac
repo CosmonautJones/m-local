@@ -18,6 +18,7 @@ import from datetime { datetime }
 import from zoneinfo { ZoneInfo }
 import from services.models { Restaurant, Location, MenuItem, Offer, Redemption, HasLocation, Serves, Publishes, ClaimedAs, samples_visible }
 import from services.qr_catalog { _ensure_seed }
+import from services.release_channel { demo_setting }
 import from services.qr_auth { listing_visible, merchant_operations_enabled, place_access }
 import from services.session { _actor_id }
 import from services.promo { OfferView, _view, _state, _my_claim, _claim_status, _find_offer, _restaurant_of, _location_of, _lock, _unlock, build_view, _place_context }
@@ -346,7 +347,7 @@ def _home(actor: str, price_range: str, window: str, diets: str, now: float, lim
     snap = catalog_snapshot();
     mine = actor_claims(actor) if actor else {};
     show_samples = samples_visible();
-    hosted = os.environ.get("MLOCAL_HOSTED_DATASET", "") == "1";
+    hosted = demo_setting("MLOCAL_HOSTED_DATASET") == "1";
     access = place_access([(p.slug, p.source) for p in snap.places]);
     for place in snap.places {
         visible = access[place.slug][0];
@@ -544,7 +545,7 @@ input, only ever adds demo-flagged places, and does nothing when the setting
 is absent. Kept out of home_feed so reading the feed never writes."""
 def:pub prepare_demo_catalog() -> int {
     _ensure_seed();
-    count = demo_company_count(os.environ.get(DEMO_COMPANIES_ENV, ""));
+    count = demo_company_count(demo_setting(DEMO_COMPANIES_ENV));
     if count == 0 {
         return _demo_companies_present();
     }

@@ -5,6 +5,7 @@ import time;
 import from services.places { Place, import_places, LocatedAt }
 import from services.models { Restaurant, Location, Offer, HasLocation, Publishes }
 import from services.catalog_events { catalog_changed }
+import from services.release_channel { demo_setting }
 
 node HostedDatasetLoaded {
     has count: int, anchor_ts: float = 0.0;
@@ -19,7 +20,7 @@ def promo_title(category: str) -> str {
 }
 
 def hosted_dataset_enabled() -> bool {
-    return os.environ.get("MLOCAL_HOSTED_DATASET", "") == "1";
+    return demo_setting("MLOCAL_HOSTED_DATASET") == "1";
 }
 
 def promo_timeline(index: int, now: float) -> tuple[float, float, float] {

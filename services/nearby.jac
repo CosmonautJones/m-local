@@ -22,6 +22,7 @@ import hashlib;
 import from services.models { Restaurant, Offer, Publishes, HasLocation }
 import from services.places { Place, LocatedAt }
 import from services.qr_catalog { _ensure_seed }
+import from services.release_channel { demo_setting }
 import from services.promo { _state, _remaining, _find_offer, _restaurant_of, _location_of }
 import from services.taste { categories_for }
 import from services.nearby_data { AREA_CENTERS, DEFAULT_AREA, SAMPLE_PLACES }
@@ -345,7 +346,7 @@ def _nearby(offer_id: str, now: float, samples: bool, dataset: bool = False) -> 
 def:pub nearby_after(offer_id: str) -> NearbyView {
     _ensure_seed();
     return _nearby(
-        offer_id, time.time(), samples_on(os.environ.get(DEMO_MODE, "")),
-        os.environ.get(HOSTED_DATASET, "") == "1"
+        offer_id, time.time(), samples_on(demo_setting(DEMO_MODE)),
+        demo_setting(HOSTED_DATASET) == "1"
     );
 }

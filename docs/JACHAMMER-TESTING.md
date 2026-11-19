@@ -82,8 +82,9 @@ python3 scripts/qa-hosted.py run --url https://m-local-preview-prjc0b.jachammer.
 restaurant) with `example.test` addresses and stores their credentials in
 `~/.mlocal-qa/accounts.json` (mode 0600, outside the repository). QA students
 claim through `MLOCAL_DEMO_STUDENTS`; QA merchants own the sample restaurants
-through `MLOCAL_MERCHANT_OWNERS`. Both are demo settings the production guard
-refuses, so remove them before any production deploy.
+through `MLOCAL_MERCHANT_OWNERS`. A production build ignores `MLOCAL_DEMO_STUDENTS`
+(see [Launching production](#launching-production)); the sample restaurants that
+`MLOCAL_MERCHANT_OWNERS` points at are hidden there too.
 
 `run` checks roles, guest browsing and filters, claim/QR/one-time redemption,
 wrong-merchant and forged-QR refusal, the two-hold limit, a six-way race for a
@@ -251,6 +252,58 @@ delivery), #46 (redeemed moment) and #50 (phone QA).
 - **Package format.** JacHammer requires PyPI pins under `[dependencies.pypi]`,
   which pinned 0.37.23 does not read. Pillow still installs with the runtime;
   psycopg does not, which only matters for the opt-in SQL proof modes.
+
+## Launching production
+
+The public site is `https://mlocal.jachammer.app`. The name is claimed and
+starts serving on the first production deploy. Production gets its own
+deployment and database, so it starts empty: no businesses or deals until real
+ones sign up and are approved.
+
+`bash scripts/jachammer-deploy.sh --prod` deploys only a checkout that is exactly
+`origin/main`, and stamps the build `"channel": "production"`
+(`assets/mlocal-build.json`). A production build ignores every test-only
+setting, whatever the host variables say, and logs which ones it ignored at
+startup (`services/release_channel.py`):
+
+| Setting | On a preview | On production |
+| --- | --- | --- |
+| `MLOCAL_SHOW_SAMPLES`, `MLOCAL_DEMO_MODE` | sample deals shown | never shown |
+| `MLOCAL_DEMO_STUDENTS` | listed QA accounts may claim | only verified `@umich.edu` students claim |
+| `MLOCAL_HOSTED_DATASET`, `MLOCAL_DEMO_COMPANIES` | test catalog added | never added |
+
+JacHammer project variables may be shared by the preview and production, so
+the preview can keep its samples and QA accounts. The visible build label reads
+`M-Local v0.2.0 · <commit>` on production and adds `· preview` on test hosts.
+
+The production guard in `services/production_guard.py` (`MLOCAL_ENV=production`)
+is for the self-hosted release package. Do not set `MLOCAL_ENV=production` on
+JacHammer: it requires the restricted gateway and volume layout that JacHammer
+does not provide, and it would refuse to start.
+
+Steps, from WSL on the operator PC:
+
+1. Merge the reviewed launch PR, then `git checkout main && git pull --ff-only`.
+2. Point approval emails at production:
+   `jachammer env add 'MLOCAL_PUBLIC_URL=https://mlocal.jachammer.app' --name M-Local-Main`
+   and check `MLOCAL_OPERATOR_EMAIL` is the private review inbox. If these
+   variables are shared, preview approval links will open production from now on.
+3. Deploy: `bash scripts/jachammer-deploy.sh --prod` (about 20 minutes).
+4. Open `https://mlocal.jachammer.app` on a phone. The label shows
+   `M-Local v0.2.0 · <commit>` with no `· preview`, and the feed has no sample deals.
+5. Sign in with a real `@umich.edu` inbox (time to arrive, spam folder), and
+   sign up one real business, approve it from the emailed link, publish one
+   offer and claim and redeem it with two phones.
+6. Point backups at production. `setup` keeps the existing token and passphrase:
+   `python3 scripts/hosted-backup.py setup --url https://mlocal.jachammer.app --backup-dir "<same folder as before>"`,
+   then `python3 scripts/hosted-backup.py pull` and check `backup.log`. If the pull
+   is refused, production lacks `MLOCAL_BACKUP_TOKEN`: add it and deploy again.
+7. Sign-in emails: preview and production share the Resend free plan's 100 a
+   day. Lower the preview's `MLOCAL_MAIL_DAILY_CAP`, or upgrade Resend, before
+   inviting many students.
+
+Not covered by this launch: full native-route denial (#40), account deletion
+tooling (#42), suspension without a shell (#44) and an off-PC backup copy (#45).
 
 ## Deploying
 
