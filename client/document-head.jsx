@@ -3,7 +3,7 @@ import {useLayoutEffect} from 'react';
 export function DocumentHead() {
  useLayoutEffect(()=>{
   document.title='M-Local';
-  for(const [name,content] of [['description','Browse local restaurant offers in Ann Arbor. Sign in with your U-M email to claim a time-limited deal.'],['theme-color','#02305C'],['application-name','M-Local'],['apple-mobile-web-app-title','M-Local']]){
+  for(const [name,content] of [['description','Time-limited deals from Ann Arbor restaurants for the U-M community. Sign in with your U-M email to claim one.'],['theme-color','#02305C'],['application-name','M-Local'],['apple-mobile-web-app-title','M-Local']]){
    let element=document.head.querySelector(`meta[name="${name}"]`);
    if(!element){element=document.createElement('meta');element.name=name;document.head.append(element);}
    element.content=content;

@@ -12,6 +12,21 @@ deployed or accepted on a live host yet. See the
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-24
+
+Polish for the live site (`mlocal.jachammer.app`).
+
+### Added
+- The page head the server sends now names M-Local, so browser tabs, bookmarks
+  and home-screen shortcuts read "M-Local" instead of "app" before any script runs.
+- Favicons (SVG plus a 32px PNG fallback), the apple-touch-icon, the web
+  manifest, theme color and a meta description in that server head.
+- Link previews: Open Graph and Twitter tags with a 1200x630 share card
+  (`assets/brand/share-card.png`), so a shared link shows the logo and a summary.
+
+### Changed
+- The in-app description matches the server head.
+
 ## [0.2.0] - 2026-11-19
 
 Launch preparation for the public JacHammer site (`mlocal.jachammer.app`).

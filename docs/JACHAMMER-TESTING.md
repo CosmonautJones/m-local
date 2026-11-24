@@ -274,7 +274,7 @@ startup (`services/release_channel.py`):
 
 JacHammer project variables may be shared by the preview and production, so
 the preview can keep its samples and QA accounts. The visible build label reads
-`M-Local v0.2.0 · <commit>` on production and adds `· preview` on test hosts.
+`M-Local v0.2.1 · <commit>` on production and adds `· preview` on test hosts.
 
 The production guard in `services/production_guard.py` (`MLOCAL_ENV=production`)
 is for the self-hosted release package. Do not set `MLOCAL_ENV=production` on
@@ -290,7 +290,7 @@ Steps, from WSL on the operator PC:
    variables are shared, preview approval links will open production from now on.
 3. Deploy: `bash scripts/jachammer-deploy.sh --prod` (about 20 minutes).
 4. Open `https://mlocal.jachammer.app` on a phone. The label shows
-   `M-Local v0.2.0 · <commit>` with no `· preview`, and the feed has no sample deals.
+   `M-Local v0.2.1 · <commit>` with no `· preview`, and the feed has no sample deals.
 5. Sign in with a real `@umich.edu` inbox (time to arrive, spam folder), and
    sign up one real business, approve it from the emailed link, publish one
    offer and claim and redeem it with two phones.
