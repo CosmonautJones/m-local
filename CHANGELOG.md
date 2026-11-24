@@ -26,6 +26,8 @@ Polish for the live site (`mlocal.jachammer.app`).
 
 ### Changed
 - The in-app description matches the server head.
+- Refreshed the recorded certifi CA bundle fingerprint after the upstream
+  certifi 2026.11.20 release, which the release package check otherwise refuses.
 
 ## [0.2.0] - 2026-11-19
 
