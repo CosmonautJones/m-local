@@ -35,8 +35,10 @@ DEPENDENCY_ROOTS = (".jac/venv/lib", ".jac/client/node_modules", ".jac/client/co
 # bytes are required: a filename or PEM label cannot establish public content.
 # Refreshed 2026-10-21 from official PyPI wheels: certifi 2026.10.19,
 # pip 26.2.2 (vendored certifi) and botocore 1.43.117 (byte-identical).
+# certifi refreshed 2026-11-24 from the official certifi 2026.11.20 wheel
+# (wheel sha256 7422df25...488f, matching PyPI's published digest).
 PUBLIC_DEPENDENCY_PEMS = {
-    ".jac/venv/lib/python3.14/site-packages/certifi/cacert.pem": "2ef52ad56b4803e264045c915e55c236cbfa045b84b81efefc218a19eb44bd2b",
+    ".jac/venv/lib/python3.14/site-packages/certifi/cacert.pem": "bb92c6ac31c92f4f553bffd6bf093db02c858c23e111b0b4df9bafa3fdbe00d1",
     ".jac/venv/lib/python3.14/site-packages/pip/_vendor/certifi/cacert.pem": "2ef52ad56b4803e264045c915e55c236cbfa045b84b81efefc218a19eb44bd2b",
     ".jac/venv/lib/python3.14/site-packages/botocore/cacert.pem": "4658f1ddf2d0a9e70c8f760323704c8fb9c0bf2f1f1e7d2dbc5939ca04ea2612",
     ".jac/venv/lib/python3.14/site-packages/litellm/proxy/auth/public_key.pem": "02cd2f76b5167a06c3c2195a22138a18e3c5c5b7fb141dc752d21f240e32c677",

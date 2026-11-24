@@ -1,12 +1,38 @@
 [project]
 name = "m-local"
-version = "0.2.0"
+version = "0.2.1"
 description = "Time-limited Ann Arbor restaurant offers for the U-M community"
 entry-point = "main"
 jac-version = "0.37.23"
 kind = "web-app"
 
 [client]
+
+# Served in the page head before any script runs, so browser tabs, home-screen
+# icons and link previews (which never run JavaScript) show M-Local.
+[client.app_meta_data]
+title = "M-Local"
+description = "Time-limited deals from Ann Arbor restaurants for the U-M community. Sign in with your U-M email to claim one."
+theme_color = "#02305C"
+icon = "/static/assets/brand/app-icon.svg"
+link_icon = "/static/assets/brand/favicon-32.png"
+apple_touch_icon = "/static/assets/brand/app-icon-180.png"
+manifest = "/static/assets/manifest.webmanifest"
+meta_application_name = "M-Local"
+meta_apple_mobile_web_app_title = "M-Local"
+og_type = "website"
+og_site_name = "M-Local"
+og_title = "M-Local: Ann Arbor restaurant deals for U-M"
+og_description = "Time-limited deals from Ann Arbor restaurants. Claim one with your U-M email."
+og_url = "https://mlocal.jachammer.app/"
+og_image = "https://mlocal.jachammer.app/static/assets/brand/share-card.png"
+og_image_width = "1200"
+og_image_height = "630"
+og_image_alt = "M-Local logo: local restaurant deals in Ann Arbor"
+twitter_card = "summary_large_image"
+twitter_title = "M-Local: Ann Arbor restaurant deals for U-M"
+twitter_description = "Time-limited deals from Ann Arbor restaurants. Claim one with your U-M email."
+twitter_image = "https://mlocal.jachammer.app/static/assets/brand/share-card.png"
 
 [serve]
 host = "127.0.0.1"

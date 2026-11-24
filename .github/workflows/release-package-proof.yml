@@ -89,6 +89,9 @@ jobs:
             fp="$(awk -F: '$1=="pub"{wanted=1;next} wanted && $1=="fpr"{print $10;wanted=0}' "$p/key.txt")"
             test "$fp" = B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8
             printf 'deb [arch=amd64 signed-by=%s/pgdg.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main\n' "$p" > "$p/etc/sources.list"
+            # PGDG drops superseded builds from the live suite; the archive suite keeps
+            # them under the same signing key, so the pinned version and hashes below stay valid.
+            printf 'deb [arch=amd64 signed-by=%s/pgdg.asc] https://apt-archive.postgresql.org/pub/repos/apt noble-pgdg-archive main\n' "$p" >> "$p/etc/sources.list"
             cat > "$p/apt.conf" <<EOF
           Dir::Etc "$p/etc";
           Dir::Etc::main "empty.conf";
